@@ -1,0 +1,64 @@
+# Independent configuration for the Conditional MATD3 algorithm.
+# CLI arguments override these values for one run; editing this file changes
+# the algorithm's default training schedule, networks and exploration behavior.
+
+training:
+  episodes: 5000
+  seed: 42
+  device: auto
+  checkpoint_interval: 50
+  keep_periodic_checkpoints: false
+  validation_interval: 20
+  validation_episodes: 10
+  log_interval: 10
+  live_dashboard: true
+  rolling_window: 20
+
+output:
+  root: outputs
+  run_name: conditional_matd3
+
+algorithm:
+  name: conditional_matd3
+  gamma: 0.99
+  tau: 0.005
+  batch_size: 256
+  replay_capacity: 500000
+  warmup_steps: 1000
+  updates_per_step: 1
+  actor_lr: 0.0003
+  critic_lr: 0.0003
+  policy_delay: 2
+  actor_update_mode: synchronous
+  actor_hidden_dims: [256, 256, 128]
+  critic_hidden_dims: [256, 256, 128]
+  commitment:
+    epsilon_start: 0.20
+    epsilon_end: 0.03
+    epsilon_decay_steps: 100000
+    soft_target_temperature: 1.0
+    soft_target_min: 0.10
+    soft_target_max: 0.90
+    q_scale_ema_beta: 0.99
+    q_scale_epsilon: 0.001
+  exploration_noise:
+    start: {battery: 0.20, generator_setpoint: 0.15, p2p_bid: 0.10}
+    end: {battery: 0.05, generator_setpoint: 0.05, p2p_bid: 0.03}
+    decay_steps: 100000
+  target_smoothing:
+    sigma: {battery: 0.15, generator_setpoint: 0.10, p2p_bid: 0.05}
+    clip: {battery: 0.30, generator_setpoint: 0.20, p2p_bid: 0.10}
+  actor_loss_weights:
+    commitment: 1.0
+    common: 1.0
+    generator: 1.0
+
+nash_verification:
+  focal_agents: [mg1, mg2, mg3]
+  br_episodes: 1000
+  br_restarts: 5
+  validation_interval: 50
+  validation_days: 10
+  test_days: 30
+  epsilon_threshold_pct: 1.0
+  restart_init: mixed
