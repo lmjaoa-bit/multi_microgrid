@@ -1,0 +1,24 @@
+algorithm:
+  name: milp_renewable_p2p_only
+  batch_size: 1
+  replay_capacity: 24
+  warmup_steps: 0
+  exploration_noise: 0.0
+
+mpc:
+  forecast_horizon: 4
+
+training:
+  episodes: 1
+  test_episodes: 55
+
+validation:
+  enabled: false
+  interval: 1
+  deterministic_policy: true
+  fixed_scenarios: true
+
+logging:
+  dashboard: false
+  dashboard_refresh_hz: 4
+  rolling_windows: [1, 1, 1]

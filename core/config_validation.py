@@ -37,6 +37,8 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ValueError("ess_sharing.control_mode must be residual_auto, fixed_full_offer, or explicit_offer")
     if sharing.get("observation_mode", "local") not in {"local", "cross_microgrid"}:
         raise ValueError("ess_sharing.observation_mode must be local or cross_microgrid")
+    if not isinstance(sharing.get("ess_p2p_enabled", True), bool):
+        raise ValueError("ess_sharing.ess_p2p_enabled must be boolean")
     terminal = config["terminal_soc"]
     if terminal.get("mode") not in {"penalty", "hard"}:
         raise ValueError("terminal_soc.mode must be penalty or hard")

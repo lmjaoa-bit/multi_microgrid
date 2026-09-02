@@ -1,5 +1,5 @@
 algorithm:
-  name: matd3_ess_local_obs
+  name: matd3_renewable_p2p_only
   hidden_dims: [128, 128]
   actor_lr: 0.0003
   critic_lr: 0.0003

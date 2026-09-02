@@ -197,6 +197,8 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "environment_overrides": dict(spec.environment_overrides),
         "ess_sharing_control_mode": env_config.get("ess_sharing", {}).get("control_mode"),
         "ess_sharing_observation_mode": env_config.get("ess_sharing", {}).get("observation_mode"),
+        "ess_p2p_enabled": env_config.get("ess_sharing", {}).get("ess_p2p_enabled", True),
+        "mpc_forecast_horizon": algorithm_cfg.get("mpc", {}).get("forecast_horizon"),
         "config_hash": config_hash, "device": str(args.device),
         "python_version": platform.python_version(), "train_episodes": training_episodes,
         "test_episodes": test_episodes, "git_commit": _git_commit(),

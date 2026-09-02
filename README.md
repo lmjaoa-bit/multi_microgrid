@@ -35,10 +35,10 @@ python -m scripts.run_scenario_diagnostic
 python -m scripts.run_independent_baseline
 python -m scripts.run_cooperative_milp
 python scripts/run_experiment.py --algorithm matd3
-python scripts/run_experiment.py --algorithm matd3_independent
-python scripts/run_experiment.py --algorithm matd3_ess_full_offer
-python scripts/run_experiment.py --algorithm matd3_ess_local_obs
 python scripts/run_experiment.py --algorithm matd3_ess_sharing
+python scripts/run_experiment.py --algorithm matd3_renewable_p2p_only
+python scripts/run_experiment.py --algorithm milp_ess_sharing_mpc
+python scripts/run_experiment.py --algorithm milp_renewable_p2p_only
 python scripts/plot_results.py --run-dir outputs/matd3/runs/MATD3_YYYY-MM-DD_HH-MM-SS_seed42
 pytest -q
 ```

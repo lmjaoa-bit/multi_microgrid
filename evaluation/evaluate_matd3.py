@@ -377,9 +377,10 @@ def evaluate(
     base_env_config["_project_root"] = str(cfg_path.resolve().parent.parent)
     env_config = spec.build_environment_config(base_env_config)
     env = MultiMicrogridEnv(env_config, split=split)
+    loaded_algorithm_config = yaml.safe_load(alg_path.read_text(encoding="utf-8"))
     algorithm = spec.create(
         env,
-        yaml.safe_load(alg_path.read_text(encoding="utf-8")),
+        loaded_algorithm_config,
         device=device,
         seed=int(test_seed),
     )
@@ -480,6 +481,8 @@ def evaluate(
             "global_state_dim": env.global_state_dim,
             "ess_sharing_control_mode": env.ess_sharing_control_mode,
             "ess_sharing_observation_mode": env.ess_sharing_observation_mode,
+            "ess_p2p_enabled": env.ess_p2p_enabled,
+            "mpc_forecast_horizon": loaded_algorithm_config.get("mpc", {}).get("forecast_horizon"),
             "environment_overrides": dict(spec.environment_overrides),
         },
         "deterministic_policy": True, "deterministic_environment": True,

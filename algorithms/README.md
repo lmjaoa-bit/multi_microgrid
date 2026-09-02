@@ -9,17 +9,17 @@
 | 算法名 | 动作 | P2P/ESS 共享机制 | Actor 信息 |
 |---|---:|---|---|
 | `matd3` | 1D | 既有剩余功率自动协调 | 原本地观测 |
-| `matd3_independent` | 1D | 关闭 P2P | 原本地观测 |
-| `matd3_ess_full_offer` | 1D | 可共享的 ESS 放电全部报价 | 原本地观测 |
-| `matd3_ess_local_obs` | 2D | 学习 ESS 报价比例 | 本地状态与历史市场反馈 |
 | `matd3_ess_sharing` | 2D | 学习 ESS 报价比例 | 跨微网状态、预测与市场反馈 |
+| `matd3_renewable_p2p_only` | 2D | 仅可再生能源 P2P，ESS 报价物理屏蔽 | 与 ESS Sharing 相同的跨微网信息 |
+| `milp_ess_sharing_mpc` | 2D | 4 小时滚动 MILP 决定电池功率和 ESS 报价比例 | 与 ESS Sharing 相同的当前状态和预测窗口 |
+| `milp_renewable_p2p_only` | 2D | 同窗口滚动 MILP，仅允许可再生能源跨微网交易 | 与 ESS Sharing 相同的当前状态和预测窗口 |
 
-五个方法均通过统一入口分别训练，例如：
+五个保留方法均通过统一入口运行，例如：
 
 ```powershell
 python scripts/run_experiment.py --algorithm matd3
-python scripts/run_experiment.py --algorithm matd3_independent
-python scripts/run_experiment.py --algorithm matd3_ess_full_offer
-python scripts/run_experiment.py --algorithm matd3_ess_local_obs
 python scripts/run_experiment.py --algorithm matd3_ess_sharing
+python scripts/run_experiment.py --algorithm matd3_renewable_p2p_only
+python scripts/run_experiment.py --algorithm milp_ess_sharing_mpc
+python scripts/run_experiment.py --algorithm milp_renewable_p2p_only
 ```

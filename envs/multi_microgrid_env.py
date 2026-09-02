@@ -40,6 +40,7 @@ class MultiMicrogridEnv:
         sharing_cfg = self.config.get("ess_sharing", {})
         self.ess_sharing_control_mode = str(sharing_cfg.get("control_mode", "residual_auto"))
         self.ess_sharing_observation_mode = str(sharing_cfg.get("observation_mode", "local"))
+        self.ess_p2p_enabled = bool(sharing_cfg.get("ess_p2p_enabled", True))
         self.agent_ids = [str(mg["id"]) for mg in self.config["microgrids"]]
         self.data = DataManager(self.config, split=split, seed=self.seed)
         normalization = self.data if split == "train" else DataManager(self.config, split="train", seed=self.seed)
@@ -249,7 +250,8 @@ class MultiMicrogridEnv:
             renewable_offer = max(0.0, renewable_surplus - renewable_to_battery)
             charge_demand = max(0.0, requested_charge - renewable_to_battery)
             load_demand = max(0.0, load_after_renewable - local_discharge)
-            offer_ratio = float(decoded[mg].get("sharing_offer_ratio", 1.0))
+            requested_offer_ratio = float(decoded[mg].get("sharing_offer_ratio", 1.0))
+            offer_ratio = requested_offer_ratio if self.ess_p2p_enabled else 0.0
             ess_offer = flexible_discharge * offer_ratio
             plans[mg].update({
                 "renewable_to_local_load_kw": min(load, renewable),
@@ -258,6 +260,7 @@ class MultiMicrogridEnv:
                 "local_load_deficit_before_battery_kw": load_after_renewable,
                 "ess_to_local_requested_kw": local_discharge,
                 "ess_flexible_discharge_kw": flexible_discharge,
+                "requested_sharing_offer_ratio": requested_offer_ratio,
                 "sharing_offer_ratio": offer_ratio,
                 "ess_p2p_offer_kw": ess_offer,
                 "p2p_load_demand_kw": load_demand,
@@ -300,6 +303,7 @@ class MultiMicrogridEnv:
             )
             plans[mg]["sharing_action_masked"] = bool(
                 not self.energy_pool.enabled
+                or not self.ess_p2p_enabled
                 or float(plans[mg]["ess_flexible_discharge_kw"]) <= 1e-9
                 or peer_demand <= 1e-9
             )

@@ -90,10 +90,10 @@ network/update implementation:
 | Slug | Action dimension | Environment control | Observation scope |
 |---|---:|---|---|
 | `matd3` | 1 | `residual_auto` | local baseline |
-| `matd3_independent` | 1 | P2P disabled | local baseline |
-| `matd3_ess_full_offer` | 1 | `fixed_full_offer` | local baseline |
-| `matd3_ess_local_obs` | 2 | `explicit_offer` | local plus market feedback |
 | `matd3_ess_sharing` | 2 | `explicit_offer` | cross-microgrid forecasts and feedback |
+| `matd3_renewable_p2p_only` | 2 | renewable P2P only; ESS exports disabled | Sharing-matched cross-microgrid observations |
+| `milp_ess_sharing_mpc` | 2 | four-hour receding-horizon MILP/MPC | Sharing-matched current state and forecasts |
+| `milp_renewable_p2p_only` | 2 | matching MILP/MPC with ESS exports disabled | Sharing-matched current state and forecasts |
 
 `sharing_offer_ratio` is a feasible offer cap, not an executed-trade ratio. Physical clearing may
 accept less because peer demand or pair capacity is insufficient. This distinction is persisted in

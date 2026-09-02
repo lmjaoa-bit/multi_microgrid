@@ -68,6 +68,70 @@ def test_sharing_action_is_offer_cap_not_executed_trade_ratio() -> None:
     assert result.by_microgrid["mg1"]["ess_p2p_unmatched_kw"] == 8.0
 
 
+def test_renewable_p2p_only_keeps_peer_pool_but_blocks_ess_exports() -> None:
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    config["_project_root"] = str(ROOT)
+    config = get_algorithm_spec("matd3_renewable_p2p_only").build_environment_config(config)
+    env = MultiMicrogridEnv(config, split="test")
+    env.reset(seed=7, deterministic=True)
+
+    assert env.action_dim == 2
+    assert env.energy_pool.enabled
+    assert not env.ess_p2p_enabled
+
+    done = False
+    saw_renewable_offer = False
+    while not done:
+        actions = {mg: np.asarray([1.0, 1.0], dtype=np.float32) for mg in env.agent_ids}
+        _, _, done, info = env.step(actions)
+        for mg in env.agent_ids:
+            plan = info["plans"][mg]
+            peer = info["p2p"]["by_microgrid"][mg]
+            saw_renewable_offer |= float(plan["renewable_p2p_offer_kw"]) > 1e-9
+            assert plan["sharing_offer_ratio"] == 0.0
+            assert plan["ess_p2p_offer_kw"] == 0.0
+            assert peer["ess_p2p_sell_kw"] == 0.0
+    assert saw_renewable_offer
+
+
+def test_milp_mpc_matches_sharing_interface_and_executes_first_step() -> None:
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    config["_project_root"] = str(ROOT)
+    spec = get_algorithm_spec("milp_ess_sharing_mpc")
+    env = MultiMicrogridEnv(spec.build_environment_config(config), split="test")
+    observations, _ = env.reset(seed=11, deterministic=True)
+    algorithm_config = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
+    controller = spec.create(env, algorithm_config, seed=11)
+    assert controller.forecast_horizon == env.obs_builder.future_h == 4
+
+    actions = controller.select_actions(observations)
+    assert all(action.shape == (2,) for action in actions.values())
+    assert all(np.isfinite(action).all() for action in actions.values())
+    assert all(np.max(np.abs(action)) <= 1.0 for action in actions.values())
+    _, _, _, info = env.step(actions)
+    assert all(abs(item["power_balance_residual_kw"]) < 1e-7 for item in info["settlements"].values())
+
+
+def test_renewable_only_milp_blocks_ess_exports_with_matching_mpc_interface() -> None:
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    config["_project_root"] = str(ROOT)
+    spec = get_algorithm_spec("milp_renewable_p2p_only")
+    env = MultiMicrogridEnv(spec.build_environment_config(config), split="test")
+    observations, _ = env.reset(seed=11, deterministic=True)
+    algorithm_config = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
+    controller = spec.create(env, algorithm_config, seed=11)
+
+    actions = controller.select_actions(observations)
+    assert all(action.shape == (2,) for action in actions.values())
+    assert all(np.isclose(action[1], -1.0) for action in actions.values())
+    _, _, _, info = env.step(actions)
+    assert all(
+        np.isclose(info["p2p"]["by_microgrid"][mg]["ess_p2p_sell_kw"], 0.0)
+        for mg in env.agent_ids
+    )
+    assert all(abs(item["power_balance_residual_kw"]) < 1e-7 for item in info["settlements"].values())
+
+
 def test_independent_mode_disables_p2p() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     config["_project_root"] = str(ROOT)

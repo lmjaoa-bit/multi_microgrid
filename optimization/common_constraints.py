@@ -68,14 +68,26 @@ def build_dispatch_data(config: str | Path | Mapping[str, Any], split: str = "te
     return cfg, data
 
 
-def solve_dispatch(config: Mapping[str, Any], data: DispatchData, agent_ids: Sequence[str],
-                   cooperative: bool, solver_output: bool = False) -> DispatchResult:
+def solve_dispatch(
+    config: Mapping[str, Any],
+    data: DispatchData,
+    agent_ids: Sequence[str],
+    cooperative: bool,
+    solver_output: bool = False,
+    *,
+    initial_soc_by_microgrid: Mapping[str, float] | None = None,
+    terminal_target_soc_by_microgrid: Mapping[str, float] | None = None,
+    apply_terminal_condition: bool = True,
+    p2p_export_source: str = "unrestricted",
+) -> DispatchResult:
     try:
         import highspy
     except ImportError as exc:  # pragma: no cover - exercised only on missing optional dependency
         raise ImportError("Install highspy to use the dispatch oracle") from exc
 
     ids = list(agent_ids)
+    if p2p_export_source not in {"unrestricted", "renewable_only"}:
+        raise ValueError(f"Unsupported P2P export source: {p2p_export_source}")
     cfg_by_id = {str(mg["id"]): mg for mg in config["microgrids"]}
     dt = float(config["time"].get("delta_t", 1.0))
     cost_cfg = config["cost"]
@@ -90,7 +102,7 @@ def solve_dispatch(config: Mapping[str, Any], data: DispatchData, agent_ids: Seq
     continuous, integer, inf = highspy.HighsVarType.kContinuous, highspy.HighsVarType.kInteger, highspy.kHighsInf
     variables: dict[str, dict[tuple[Any, ...], Any]] = {name: {} for name in (
         "energy", "charge", "discharge", "battery_mode", "grid_import", "grid_export",
-        "grid_mode", "curtailment", "unmet", "flow",
+        "grid_mode", "curtailment", "unmet", "flow", "renewable_export_mode",
         "terminal_positive", "terminal_negative")}
 
     def add(name: str, key: tuple[Any, ...], **kwargs: Any) -> Any:
@@ -103,7 +115,12 @@ def solve_dispatch(config: Mapping[str, Any], data: DispatchData, agent_ids: Seq
         capacity = float(battery["capacity_kwh"])
         minimum = capacity * float(battery["soc_min"])
         maximum = capacity * float(battery["soc_max"])
-        initial = capacity * float(battery["initial_soc"])
+        initial_soc = (
+            float(initial_soc_by_microgrid[mg])
+            if initial_soc_by_microgrid is not None and mg in initial_soc_by_microgrid
+            else float(battery["initial_soc"])
+        )
+        initial = capacity * initial_soc
         add("energy", (mg, 0), lb=initial, ub=initial, type=continuous)
         for t in range(1, data.horizon + 1):
             add("energy", (mg, t), lb=minimum, ub=maximum, type=continuous)
@@ -120,6 +137,8 @@ def solve_dispatch(config: Mapping[str, Any], data: DispatchData, agent_ids: Seq
                               ub=float(cfg_by_id[mg]["grid"]["export_limit_kw"]),
                               obj=-float(data.sell_price[t]) * dt, type=continuous)
             grid_mode = add("grid_mode", (mg, t), lb=0.0, ub=1.0, type=integer)
+            if cooperative and p2p_export_source == "renewable_only":
+                add("renewable_export_mode", (mg, t), lb=0.0, ub=1.0, type=integer)
             curtailment = add("curtailment", (mg, t), lb=0.0, ub=inf,
                               obj=curtail_price * dt, type=continuous)
             unmet = add("unmet", (mg, t), lb=0.0, ub=inf, obj=unmet_price * dt, type=continuous)
@@ -152,6 +171,28 @@ def solve_dispatch(config: Mapping[str, Any], data: DispatchData, agent_ids: Seq
                     outgoing <= pair_capacity_kw * (len(ids) - 1)
                     * (1.0 - variables["grid_mode"][(mg, t)])
                 )
+            if cooperative and p2p_export_source == "renewable_only":
+                renewable_surplus = max(
+                    0.0,
+                    float(data.renewable_kw[mg][t]) - float(data.load_kw[mg][t]),
+                )
+                local_load_deficit = max(
+                    0.0,
+                    float(data.load_kw[mg][t]) - float(data.renewable_kw[mg][t]),
+                )
+                model.addConstr(variables["discharge"][(mg, t)] <= local_load_deficit)
+                if renewable_surplus <= 1e-12:
+                    model.addConstr(outgoing == 0.0)
+                else:
+                    battery = cfg_by_id[mg]["battery"]
+                    export_mode = variables["renewable_export_mode"][(mg, t)]
+                    maximum_outgoing = pair_capacity_kw * (len(ids) - 1)
+                    model.addConstr(outgoing <= maximum_outgoing * (1.0 - export_mode))
+                    model.addConstr(
+                        outgoing + variables["charge"][(mg, t)]
+                        <= renewable_surplus
+                        + float(battery["max_charge_kw"]) * export_mode
+                    )
             model.addConstr(float(data.renewable_kw[mg][t]) + variables["discharge"][(mg, t)]
                             + variables["grid_import"][(mg, t)] + incoming + variables["unmet"][(mg, t)]
                             == float(data.load_kw[mg][t]) + variables["charge"][(mg, t)]
@@ -159,19 +200,26 @@ def solve_dispatch(config: Mapping[str, Any], data: DispatchData, agent_ids: Seq
                             + variables["curtailment"][(mg, t)])
     tolerance = float(terminal_cfg["tolerance"])
     rate = float(terminal_cfg["penalty_per_kwh"])
-    for mg in ids:
-        battery = cfg_by_id[mg]["battery"]
-        initial = float(battery["capacity_kwh"]) * float(battery["initial_soc"])
-        tolerance_kwh = tolerance * float(battery["capacity_kwh"])
-        terminal_energy = variables["energy"][(mg, data.horizon)]
-        if terminal_cfg["mode"] == "hard":
-            model.addConstr(terminal_energy >= initial - tolerance_kwh)
-            model.addConstr(terminal_energy <= initial + tolerance_kwh)
-        else:
-            positive = add("terminal_positive", (mg,), lb=0.0, ub=inf, obj=rate, type=continuous)
-            negative = add("terminal_negative", (mg,), lb=0.0, ub=inf, obj=rate, type=continuous)
-            model.addConstr(positive >= terminal_energy - initial - tolerance_kwh)
-            model.addConstr(negative >= initial - terminal_energy - tolerance_kwh)
+    if apply_terminal_condition:
+        for mg in ids:
+            battery = cfg_by_id[mg]["battery"]
+            target_soc = (
+                float(terminal_target_soc_by_microgrid[mg])
+                if terminal_target_soc_by_microgrid is not None
+                and mg in terminal_target_soc_by_microgrid
+                else float(battery["initial_soc"])
+            )
+            target = float(battery["capacity_kwh"]) * target_soc
+            tolerance_kwh = tolerance * float(battery["capacity_kwh"])
+            terminal_energy = variables["energy"][(mg, data.horizon)]
+            if terminal_cfg["mode"] == "hard":
+                model.addConstr(terminal_energy >= target - tolerance_kwh)
+                model.addConstr(terminal_energy <= target + tolerance_kwh)
+            else:
+                positive = add("terminal_positive", (mg,), lb=0.0, ub=inf, obj=rate, type=continuous)
+                negative = add("terminal_negative", (mg,), lb=0.0, ub=inf, obj=rate, type=continuous)
+                model.addConstr(positive >= terminal_energy - target - tolerance_kwh)
+                model.addConstr(negative >= target - terminal_energy - tolerance_kwh)
 
     model.minimize()
     status = str(model.getModelStatus()).replace("HighsModelStatus.", "")
@@ -214,7 +262,7 @@ def solve_dispatch(config: Mapping[str, Any], data: DispatchData, agent_ids: Seq
                          "grid_import_kw": grid_import, "grid_export_kw": grid_export,
                          "p2p_import_kw": incoming, "p2p_export_kw": outgoing,
                          "curtailment_kw": curtailment, "unmet_load_kw": unmet})
-    if terminal_cfg["mode"] == "penalty":
+    if apply_terminal_condition and terminal_cfg["mode"] == "penalty":
         for mg in ids:
             penalty = rate * (value("terminal_positive", (mg,)) + value("terminal_negative", (mg,)))
             profit_by[mg] -= penalty

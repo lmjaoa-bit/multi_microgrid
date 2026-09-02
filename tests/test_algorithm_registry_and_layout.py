@@ -30,10 +30,10 @@ def test_matd3_plugin_is_discoverable_and_satisfies_pipeline_contract() -> None:
 def test_ess_study_plugins_have_isolated_configs_and_expected_interfaces() -> None:
     expected = {
         "matd3": (1, "residual_auto", "local"),
-        "matd3_independent": (1, "residual_auto", "local"),
-        "matd3_ess_full_offer": (1, "fixed_full_offer", "local"),
-        "matd3_ess_local_obs": (2, "explicit_offer", "local"),
         "matd3_ess_sharing": (2, "explicit_offer", "cross_microgrid"),
+        "matd3_renewable_p2p_only": (2, "explicit_offer", "cross_microgrid"),
+        "milp_ess_sharing_mpc": (2, "explicit_offer", "cross_microgrid"),
+        "milp_renewable_p2p_only": (2, "explicit_offer", "cross_microgrid"),
     }
     names = set(available_algorithm_names())
     base = yaml.safe_load(ENV_CONFIG.read_text(encoding="utf-8"))
@@ -48,9 +48,14 @@ def test_ess_study_plugins_have_isolated_configs_and_expected_interfaces() -> No
         assert env.action_dim == action_dim
         assert env.ess_sharing_control_mode == control_mode
         assert env.ess_sharing_observation_mode == observation_mode
+        assert env.ess_p2p_enabled is (
+            slug not in {"matd3_renewable_p2p_only", "milp_renewable_p2p_only"}
+        )
         observation_dims[slug] = env.observation_dims["mg1"]
-    assert observation_dims["matd3_ess_local_obs"] > observation_dims["matd3"]
-    assert observation_dims["matd3_ess_sharing"] > observation_dims["matd3_ess_local_obs"]
+    assert observation_dims["matd3_ess_sharing"] > observation_dims["matd3"]
+    assert observation_dims["matd3_renewable_p2p_only"] == observation_dims["matd3_ess_sharing"]
+    assert observation_dims["milp_ess_sharing_mpc"] == observation_dims["matd3_ess_sharing"]
+    assert observation_dims["milp_renewable_p2p_only"] == observation_dims["matd3_ess_sharing"]
 
 
 def test_experiment_layout_isolates_algorithms_and_runs(tmp_path: Path) -> None:

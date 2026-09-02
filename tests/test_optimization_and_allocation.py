@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 from allocation.nash_bargaining import solve_nash_bargaining
 from envs.multi_microgrid_env import MultiMicrogridEnv
@@ -11,6 +12,7 @@ from evaluation.compare_independent_cooperative import compare_dispatches
 from evaluation.settlement import settle_test_day
 from evaluation.shapley_allocator import calculate_shapley
 from optimization.cooperative_dispatch import solve_cooperative_dispatch
+from optimization.common_constraints import DispatchData, solve_dispatch
 from optimization.independent_dispatch import solve_independent_dispatch
 
 
@@ -39,6 +41,43 @@ def test_cooperative_oracle_power_balance() -> None:
     assert residual.abs().max() < 1e-6
     assert not ((frame["grid_import_kw"] > 1e-8) & (frame["p2p_export_kw"] > 1e-8)).any()
     assert max(result.pair_flows_kwh.values(), default=0.0) <= 24 * 60.0 + 1e-6
+
+
+def test_renewable_only_dispatch_rejects_battery_sourced_p2p_exports() -> None:
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    ids = ["mg1", "mg2"]
+    data = DispatchData(
+        timestamps=["test-hour"],
+        agent_ids=ids,
+        load_kw={"mg1": np.asarray([0.0]), "mg2": np.asarray([20.0])},
+        renewable_kw={"mg1": np.asarray([0.0]), "mg2": np.asarray([0.0])},
+        buy_price=np.asarray([1.0]),
+        sell_price=np.asarray([0.5]),
+    )
+    initial_soc = {"mg1": 0.9, "mg2": 0.1}
+    unrestricted = solve_dispatch(
+        config,
+        data,
+        ids,
+        cooperative=True,
+        initial_soc_by_microgrid=initial_soc,
+        apply_terminal_condition=False,
+    )
+    renewable_only = solve_dispatch(
+        config,
+        data,
+        ids,
+        cooperative=True,
+        initial_soc_by_microgrid=initial_soc,
+        apply_terminal_condition=False,
+        p2p_export_source="renewable_only",
+    )
+
+    unrestricted_seller = unrestricted.trajectories.query("microgrid == 'mg1'").iloc[0]
+    renewable_only_seller = renewable_only.trajectories.query("microgrid == 'mg1'").iloc[0]
+    assert unrestricted_seller["p2p_export_kw"] > 0.0
+    assert np.isclose(renewable_only_seller["p2p_export_kw"], 0.0)
+    assert np.isclose(renewable_only_seller["battery_discharge_kw"], 0.0)
 
 
 def test_comparison_exports_coordination_redispatch() -> None:
