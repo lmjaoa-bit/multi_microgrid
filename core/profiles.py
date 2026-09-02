@@ -53,6 +53,10 @@ class HeterogeneousProfileModel:
         )
         self.ghi_max = max(self.ghi_reference, float(self.train_frame["ghi_w_per_m2"].max()), 1.0)
         self.wind_speed_max = max(self.wind_cut_out, float(self.train_frame["wind_speed_mps"].max()), 1.0)
+        self._exogenous_cache: Dict[str, Dict[int, tuple[float, float, float, float]]] = {
+            mg: {} for mg in self.agent_ids
+        }
+        self.cache_frame(self.train_frame)
 
     def _target_mean(self, mg_id: str) -> float:
         return float(self.mg_cfg[mg_id]["load_profile"]["target_mean_kw"])
@@ -65,7 +69,7 @@ class HeterogeneousProfileModel:
 
     def _base_variation(self, frame: pd.DataFrame, mg_id: str) -> np.ndarray:
         hours = frame[self.timestamp_col].dt.hour.to_numpy()
-        base_hour_mean = np.asarray([float(self._hourly_base_load.loc[int(h)]) for h in hours])
+        base_hour_mean = self._hourly_base_load.reindex(hours).to_numpy(dtype=np.float64)
         base_load = frame["load_kw"].to_numpy(dtype=np.float64)
         ratio = base_load / np.maximum(base_hour_mean, 1e-9)
         clip_cfg = self.mg_cfg[mg_id]["load_profile"].get("variability_clip", [0.65, 1.45])
@@ -81,17 +85,27 @@ class HeterogeneousProfileModel:
         return calendar * self._base_variation(frame, mg_id)
 
     def load_series(self, mg_id: str, frame: pd.DataFrame) -> np.ndarray:
-        work = frame.copy()
+        work = frame
         if not pd.api.types.is_datetime64_any_dtype(work[self.timestamp_col]):
+            work = frame.copy()
             work[self.timestamp_col] = pd.to_datetime(work[self.timestamp_col])
         raw = self._load_raw_series(mg_id, work)
         return self._target_mean(mg_id) * raw / self._load_normalizers[mg_id]
 
     def load_kw(self, mg_id: str, row: pd.Series) -> float:
-        frame = pd.DataFrame([row])
-        if not pd.api.types.is_datetime64_any_dtype(frame[self.timestamp_col]):
-            frame[self.timestamp_col] = pd.to_datetime(frame[self.timestamp_col])
-        raw = float(self._load_raw_series(mg_id, frame)[0])
+        timestamp = pd.Timestamp(row[self.timestamp_col])
+        cached = self._exogenous_cache.get(mg_id, {}).get(timestamp.value)
+        if cached is not None:
+            return cached[0]
+        hour = int(timestamp.hour)
+        dayofweek = int(timestamp.dayofweek)
+        shape = self._hourly_shape(mg_id)
+        weekend = float(self.mg_cfg[mg_id]["load_profile"].get("weekend_multiplier", 1.0))
+        calendar = float(shape[hour]) * (weekend if dayofweek >= 5 else 1.0)
+        base_hour_mean = float(self._hourly_base_load.loc[hour])
+        variation = float(row["load_kw"]) / max(base_hour_mean, 1e-9)
+        low, high = self.mg_cfg[mg_id]["load_profile"].get("variability_clip", [0.65, 1.45])
+        raw = calendar * float(np.clip(variation, float(low), float(high)))
         return max(0.0, self._target_mean(mg_id) * raw / self._load_normalizers[mg_id])
 
     def pv_capacity_factor(self, ghi_w_per_m2: float) -> float:
@@ -107,6 +121,53 @@ class HeterogeneousProfileModel:
         denominator = self.wind_rated**3 - self.wind_cut_in**3
         return float(np.clip(numerator / max(denominator, 1e-9), 0.0, 1.0))
 
+    def pv_capacity_factor_series(self, ghi_w_per_m2: np.ndarray) -> np.ndarray:
+        return np.clip(
+            np.asarray(ghi_w_per_m2, dtype=np.float64) / max(self.ghi_reference, 1e-9),
+            0.0,
+            1.0,
+        )
+
+    def wind_capacity_factor_series(self, wind_speed_mps: np.ndarray) -> np.ndarray:
+        speed = np.maximum(0.0, np.asarray(wind_speed_mps, dtype=np.float64))
+        factor = np.zeros_like(speed)
+        ramp = (speed >= self.wind_cut_in) & (speed < self.wind_rated)
+        rated = (speed >= self.wind_rated) & (speed < self.wind_cut_out)
+        denominator = max(self.wind_rated**3 - self.wind_cut_in**3, 1e-9)
+        factor[ramp] = (speed[ramp] ** 3 - self.wind_cut_in**3) / denominator
+        factor[rated] = 1.0
+        return np.clip(factor, 0.0, 1.0)
+
+    def generation_series(self, mg_id: str, frame: pd.DataFrame) -> Dict[str, np.ndarray]:
+        renewable = self.mg_cfg[mg_id]["renewables"]
+        ghi = frame["ghi_w_per_m2"].to_numpy(dtype=np.float64)
+        wind_speed = frame["wind_speed_mps"].to_numpy(dtype=np.float64)
+        pv = float(renewable["pv_capacity_kw"]) * self.pv_capacity_factor_series(ghi)
+        wind = float(renewable["wind_capacity_kw"]) * self.wind_capacity_factor_series(wind_speed)
+        return {"pv_kw": pv, "wind_kw": wind, "renewable_kw": pv + wind}
+
+    def exogenous_series(self, mg_id: str, frame: pd.DataFrame) -> Dict[str, np.ndarray]:
+        generation = self.generation_series(mg_id, frame)
+        return {"load_kw": self.load_series(mg_id, frame), **generation}
+
+    def cache_frame(self, frame: pd.DataFrame) -> None:
+        """Precompute all MG load and RES values for timestamp-based lookup."""
+        timestamps = pd.to_datetime(frame[self.timestamp_col]).array.asi8
+        for mg_id in self.agent_ids:
+            series = self.exogenous_series(mg_id, frame)
+            cache = self._exogenous_cache[mg_id]
+            cache.update(
+                {
+                    int(timestamp): (
+                        float(series["load_kw"][index]),
+                        float(series["pv_kw"][index]),
+                        float(series["wind_kw"][index]),
+                        float(series["renewable_kw"][index]),
+                    )
+                    for index, timestamp in enumerate(timestamps)
+                }
+            )
+
     def generation_from_weather(self, mg_id: str, ghi_w_per_m2: float, wind_speed_mps: float) -> Dict[str, float]:
         ren = self.mg_cfg[mg_id]["renewables"]
         pv = float(ren["pv_capacity_kw"]) * self.pv_capacity_factor(ghi_w_per_m2)
@@ -114,6 +175,16 @@ class HeterogeneousProfileModel:
         return {"pv_kw": pv, "wind_kw": wind, "renewable_kw": pv + wind}
 
     def exogenous(self, mg_id: str, row: pd.Series) -> Dict[str, float]:
+        cached = self._exogenous_cache.get(mg_id, {}).get(
+            pd.Timestamp(row[self.timestamp_col]).value
+        )
+        if cached is not None:
+            return {
+                "load_kw": cached[0],
+                "pv_kw": cached[1],
+                "wind_kw": cached[2],
+                "renewable_kw": cached[3],
+            }
         generation = self.generation_from_weather(
             mg_id,
             float(row["ghi_w_per_m2"]),
@@ -128,14 +199,18 @@ class HeterogeneousProfileModel:
         cfg = self.mg_cfg[mg_id]
         pv_capacity = max(1.0, float(cfg["renewables"]["pv_capacity_kw"]))
         wind_capacity = max(1.0, float(cfg["renewables"]["wind_capacity_kw"]))
-        generator = max(1.0, float(cfg["generator"]["max_power_kw"]))
-        trade = max(self._load_max[mg_id], pv_capacity + wind_capacity, generator) * float(delta_t)
+        battery_power = max(
+            1.0,
+            float(cfg["battery"]["max_charge_kw"]),
+            float(cfg["battery"]["max_discharge_kw"]),
+        )
+        trade = max(self._load_max[mg_id], pv_capacity + wind_capacity, battery_power) * float(delta_t)
         return {
             "load": self._load_max[mg_id],
             "pv": pv_capacity,
             "wind": wind_capacity,
-            "generator": generator,
             "trade": max(1.0, trade),
+            "power": max(1.0, trade / max(float(delta_t), 1e-9)),
             "price": self.price_max,
             "carbon": self.carbon_max,
             "ghi": self.ghi_max,

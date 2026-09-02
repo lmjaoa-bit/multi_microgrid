@@ -1,169 +1,94 @@
 from __future__ import annotations
 
-from typing import Any, List, Mapping
+from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
 
-from core.forecast import SharedForecastProvider
-from core.profiles import HeterogeneousProfileModel
-
 
 class GlobalStateBuilder:
-    """Build the centralized critic state from legal current information.
+    """Centralized critic state containing all current physical states."""
 
-    The critic sees current truth for every MG plus the same forecasts that are
-    available at the current decision time. It never receives future realized
-    load/weather values directly.
-    """
-
-    def __init__(
-        self,
-        config: Mapping[str, Any],
-        profiles: HeterogeneousProfileModel,
-        forecasts: SharedForecastProvider,
-        delta_t: float,
-    ) -> None:
-        self.agent_ids = [str(mg["id"]) for mg in config["microgrids"]]
-        self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
+    def __init__(self, config: Mapping[str, Any], profiles: Any, forecasts: Any, delta_t: float) -> None:
+        self.agent_ids = [str(m["id"]) for m in config["microgrids"]]
         self.profiles = profiles
-        self.forecasts = forecasts
-        self.delta_t = float(delta_t)
-        self.norms = {mg: profiles.normalizers(mg, delta_t=self.delta_t) for mg in self.agent_ids}
+        self.norm = {mg: profiles.normalizers(mg, delta_t) for mg in self.agent_ids}
         self.price_norm = profiles.price_max
-        self.carbon_norm = profiles.carbon_max
-        self.market_energy_norm = max(1.0, sum(self.norms[mg]["trade"] for mg in self.agent_ids))
-        self._schema = self._build_schema()
+        self.forecasts = forecasts
+        self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
+        self.control_mode = str(config.get("ess_sharing", {}).get("control_mode", "residual_auto"))
 
-    def _build_schema(self) -> List[str]:
-        names: List[str] = []
-        for mg_id in self.agent_ids:
-            names.extend(
-                [
-                    f"{mg_id}_load",
-                    f"{mg_id}_pv",
-                    f"{mg_id}_wind",
-                    f"{mg_id}_soc",
-                    f"{mg_id}_generator_on",
-                    f"{mg_id}_generator_power",
-                ]
-            )
-        names.extend(
-            [
-                "hour_sin",
-                "hour_cos",
-                "grid_buy_price",
-                "grid_sell_price",
-                "grid_carbon",
-                "market_prev_avg_price",
-                "market_prev_total_trade",
-                "market_prev_submitted_buy",
-                "market_prev_submitted_sell",
-            ]
-        )
-        for mg_id in self.agent_ids:
-            names.extend(
-                [
-                    f"{mg_id}_prev_bid",
-                    f"{mg_id}_prev_trade",
-                    f"{mg_id}_prev_role",
-                ]
-            )
-        for k in range(1, self.future_h + 1):
-            names.extend(
-                [
-                    f"grid_price_t+{k}",
-                    f"ghi_t+{k}",
-                    f"wind_speed_t+{k}",
-                ]
-            )
-            for mg_id in self.agent_ids:
-                names.extend(
-                    [
-                        f"{mg_id}_load_t+{k}",
-                        f"{mg_id}_pv_t+{k}",
-                        f"{mg_id}_wind_t+{k}",
-                    ]
-                )
+    def schema(self) -> list[str]:
+        names: list[str] = []
+        for mg in self.agent_ids:
+            names.extend([f"{mg}_load", f"{mg}_pv", f"{mg}_wind", f"{mg}_soc",
+                          f"{mg}_previous_p2p_net"])
+        names.extend(["hour_sin", "hour_cos", "grid_buy_price", "grid_sell_price",
+                      "previous_system_p2p"])
+        if self.control_mode == "explicit_offer":
+            for mg in self.agent_ids:
+                names.extend([f"{mg}_available_charge", f"{mg}_available_discharge"])
+            for mg in self.agent_ids:
+                names.extend([
+                    f"{mg}_previous_ess_p2p_offer",
+                    f"{mg}_previous_ess_p2p_accepted",
+                    f"{mg}_previous_ess_p2p_unmatched",
+                ])
+            for k in range(1, self.future_h + 1):
+                for mg in self.agent_ids:
+                    names.append(f"{mg}_net_load_t+{k}")
+            names.extend([
+                "previous_system_buy_demand", "previous_system_sell_offer",
+                "previous_clearing_ratio",
+            ])
         return names
 
     @property
     def dim(self) -> int:
-        return len(self._schema)
+        return len(self.schema())
 
-    def schema(self) -> List[str]:
-        return list(self._schema)
-
-    def build(
-        self,
-        row: pd.Series,
-        t: int,
-        cores: Mapping[str, Any],
-        market_history: Mapping[str, Any],
-    ) -> np.ndarray:
-        values: List[float] = []
-        for mg_id in self.agent_ids:
-            core = cores[mg_id]
-            exogenous = core.exogenous(row)
-            norm = self.norms[mg_id]
-            generator_power = float(core.generator.last_power_kw)
-            values.extend(
-                [
-                    float(exogenous["load_kw"]) / norm["load"],
-                    float(exogenous["pv_kw"]) / norm["pv"],
-                    float(exogenous["wind_kw"]) / norm["wind"],
-                    float(core.battery.soc),
-                    1.0 if generator_power > 1e-9 else 0.0,
-                    generator_power / norm["generator"],
-                ]
-            )
-
+    def build(self, row: pd.Series, t: int, cores: Mapping[str, Any], history: Mapping[str, Any],
+              exogenous_by_microgrid: Mapping[str, Mapping[str, float]] | None = None) -> np.ndarray:
+        values: list[float] = []
+        system_norm = max(1.0, sum(self.norm[x]["trade"] for x in self.agent_ids))
+        for mg in self.agent_ids:
+            ex = (dict(exogenous_by_microgrid[mg]) if exogenous_by_microgrid is not None
+                  else cores[mg].exogenous(row))
+            n = self.norm[mg]
+            previous = history["by_microgrid"][mg]
+            values.extend([ex["load_kw"] / n["load"], ex["pv_kw"] / n["pv"],
+                           ex["wind_kw"] / n["wind"], float(cores[mg].battery.soc),
+                           previous["p2p_net_kwh"] / n["trade"]])
         hour = int(pd.Timestamp(row["timestamp"]).hour)
-        values.extend(
-            [
-                float(np.sin(2.0 * np.pi * hour / 24.0)),
-                float(np.cos(2.0 * np.pi * hour / 24.0)),
-                float(row["buy_price_per_kwh"]) / self.price_norm,
-                float(row["sell_price_per_kwh"]) / self.price_norm,
-                float(row.get("grid_carbon_factor_kg_per_kwh", 0.0)) / self.carbon_norm,
-                float(market_history["weighted_average_price"]) / self.price_norm,
-                float(market_history["total_trade_kwh"]) / self.market_energy_norm,
-                float(market_history["submitted_buy_kwh"]) / self.market_energy_norm,
-                float(market_history["submitted_sell_kwh"]) / self.market_energy_norm,
-            ]
-        )
-        by_microgrid = market_history["by_microgrid"]
-        for mg_id in self.agent_ids:
-            previous = by_microgrid[mg_id]
-            values.extend(
-                [
-                    float(previous["bid_price"]) / self.price_norm,
-                    float(previous["trade_kwh"]) / self.norms[mg_id]["trade"],
-                    float(previous["role"]),
-                ]
-            )
-
-        for k in range(1, self.future_h + 1):
-            public = self.forecasts.public(t, k)
-            values.extend(
-                [
-                    public["grid_price_per_kwh"] / self.price_norm,
-                    public["ghi_w_per_m2"] / self.profiles.ghi_max,
-                    public["wind_speed_mps"] / self.profiles.wind_speed_max,
-                ]
-            )
-            for mg_id in self.agent_ids:
-                local = self.forecasts.local(mg_id, t, k)
-                norm = self.norms[mg_id]
-                values.extend(
-                    [
-                        local["load_kw"] / norm["load"],
-                        local["pv_kw"] / norm["pv"],
-                        local["wind_kw"] / norm["wind"],
-                    ]
-                )
-
-        state = np.asarray(values, dtype=np.float32)
-        if state.shape != (self.dim,) or not np.isfinite(state).all():
-            raise RuntimeError("Global state construction produced an invalid vector.")
-        return state
+        values.extend([np.sin(2 * np.pi * hour / 24), np.cos(2 * np.pi * hour / 24),
+                       float(row["buy_price_per_kwh"]) / self.price_norm,
+                       float(row["sell_price_per_kwh"]) / self.price_norm,
+                       history["total_p2p_kwh"] / system_norm])
+        if self.control_mode == "explicit_offer":
+            for mg in self.agent_ids:
+                battery = cores[mg].battery
+                values.extend([
+                    battery.available_charge_kw() / max(1.0, battery.max_charge_kw),
+                    battery.available_discharge_kw() / max(1.0, battery.max_discharge_kw),
+                ])
+            for mg in self.agent_ids:
+                previous = history["by_microgrid"][mg]
+                values.extend([
+                    previous["ess_p2p_offer_kwh"] / self.norm[mg]["trade"],
+                    previous["ess_p2p_accepted_kwh"] / self.norm[mg]["trade"],
+                    previous["ess_p2p_unmatched_kwh"] / self.norm[mg]["trade"],
+                ])
+            for k in range(1, self.future_h + 1):
+                for mg in self.agent_ids:
+                    forecast = self.forecasts.combined(mg, t, k)
+                    net_load = forecast["load_kw"] - forecast["pv_kw"] - forecast["wind_kw"]
+                    values.append(net_load / self.norm[mg]["power"])
+            values.extend([
+                history["total_buy_demand_kwh"] / system_norm,
+                history["total_sell_offer_kwh"] / system_norm,
+                float(history["clearing_ratio"]),
+            ])
+        result = np.asarray(values, dtype=np.float32)
+        if result.shape != (self.dim,) or not np.isfinite(result).all():
+            raise RuntimeError("Invalid centralized state")
+        return result

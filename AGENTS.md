@@ -1,0 +1,183 @@
+# Repository instructions for algorithm development
+
+These instructions apply to the entire repository. Read this file before changing an algorithm,
+training workflow, evaluation, settlement, plotting, configuration, or output layout.
+
+## 1. Preserve the canonical MATD3 baseline
+
+`algorithms/matd3/` is the permanent reference implementation.
+
+- Do not modify its actor, critic, replay buffer, MATD3 update logic, checkpoint format, or public
+  behavior when implementing an experimental algorithm.
+- A change to canonical MATD3 is allowed only when the user explicitly requests a baseline fix or
+  baseline change.
+- Never implement a new idea by editing MATD3 in place. Create a separate algorithm package.
+- `algorithms/matd3/plugin.py` is registration metadata, not an experimental implementation file.
+
+## 2. Required structure for every new algorithm
+
+Use a lowercase snake_case slug, for example `matd3_attention`.
+
+```text
+algorithms/<algorithm_slug>/
+├── __init__.py
+├── plugin.py
+├── algorithm.py
+└── actor.py / critic.py / replay_buffer.py   # only when the variant needs local replacements
+
+configs/algorithms/<algorithm_slug>.yaml
+outputs/<algorithm_slug>/runs/<run_id>/
+```
+
+Create the initial isolated scaffold with:
+
+```powershell
+python scripts/create_algorithm_variant.py --name <algorithm_slug>
+```
+
+The scaffold may inherit canonical MATD3 initially. Put every override and new network module in the
+new algorithm package. Do not place experimental conditionals inside `algorithms/matd3/`.
+
+Each `plugin.py` must expose exactly one `ALGORITHM_SPEC: AlgorithmSpec` with:
+
+- `slug`
+- `display_name`
+- `algorithm_class`
+- `default_config_path`
+- a concise description
+
+Plugins are loaded by requested name. Do not add a central import for every algorithm; a broken or
+deleted experimental package must not prevent MATD3 or another algorithm from running.
+
+## 3. Shared algorithm interface
+
+Every algorithm used by the shared pipeline must provide:
+
+```text
+classmethod from_env(env, config, device, seed)
+select_actions(observations, noise_std)
+update(batch_size)
+save(path)
+load(path)
+replay.add(...)
+len(replay)
+```
+
+The authoritative protocol and runtime validation live in:
+
+- `algorithms/base.py`
+- `algorithms/registry.py`
+
+Do not make the shared pipeline inspect private actor/critic internals. Algorithm-specific training
+behavior belongs behind this interface.
+
+## 4. One shared experiment workflow
+
+All algorithms must use:
+
+```powershell
+python scripts/run_experiment.py --algorithm <algorithm_slug>
+```
+
+Canonical MATD3 therefore runs with:
+
+```powershell
+python scripts/run_experiment.py --algorithm matd3
+```
+
+Do not copy the trainer, evaluator, settlement code, or plotter into an algorithm package. The single
+shared implementation is:
+
+- `experiments/training_pipeline.py` — training, validation, best-checkpoint selection, formal test
+- `experiments/layout.py` — result directory layout
+- `evaluation/evaluate_algorithm.py` — algorithm-neutral evaluation entry
+- `evaluation/coalition_evaluator.py` — seven daily coalition MILP values
+- `evaluation/settlement.py` and `evaluation/shapley_allocator.py` — Equal/Shapley settlement
+- `evaluation/plotting.py` — saved-result-only PNG/PDF figures
+
+The required sequence is:
+
+```text
+training
+→ validation
+→ select best_model.pt
+→ deterministic formal test
+→ daily 24-hour coalition MILP evaluation
+→ Equal and Shapley settlement
+→ test summary generation
+→ plotting from saved JSON/CSV files
+```
+
+Settlement and plotting are post-processing. They must not change reward, actions, replay data,
+physical dispatch, actor/critic updates, or environment constraints.
+
+## 5. Configuration isolation
+
+- Environment and physical-system configuration: `configs/cooperative_v1.yaml`.
+- Per-algorithm hyperparameters: `configs/algorithms/<algorithm_slug>.yaml`.
+- The YAML `algorithm.name` must equal the selected plugin slug.
+- Tune an experimental algorithm only in its own YAML file.
+- `configs/matd3.yaml` is a legacy compatibility copy. New MATD3 runs use
+  `configs/algorithms/matd3.yaml`.
+
+If an experiment requires an environment or reward change, treat it as a separate cross-algorithm
+study. Do not silently change shared physics or rewards while presenting the result as only an
+algorithm improvement.
+
+## 6. Standard result layout
+
+Every run must use:
+
+```text
+outputs/<algorithm_slug>/
+├── latest_run.json
+├── legacy/                         # migrated historical loose artifacts only
+└── runs/
+    └── <ALGORITHM>_<timestamp>_seed<seed>/
+        ├── checkpoints/
+        │   ├── best_model.pt
+        │   └── final_model.pt
+        ├── figures/
+        ├── test_hourly_trajectories/
+        ├── config_snapshot.yaml
+        ├── run_metadata.json
+        ├── training_history.json
+        ├── validation_history.json
+        ├── training_summary.json
+        ├── test_daily_metrics.csv
+        ├── test_summary.json
+        └── summary.json
+```
+
+Do not write new checkpoints, histories, summaries, or figures directly into
+`outputs/<algorithm_slug>/`. Do not mix runs from different algorithms.
+
+Figures must read saved result files. Plotting must never rerun the environment, policy test, or MILP.
+
+## 7. Removing a failed algorithm
+
+A failed experiment must remain removable without editing another algorithm:
+
+```text
+algorithms/<failed_algorithm>/
+configs/algorithms/<failed_algorithm>.yaml
+outputs/<failed_algorithm>/          # optional; delete only if its results are no longer needed
+```
+
+Never delete canonical MATD3 or shared pipeline files while removing an experiment. Result deletion
+is separate from code deletion and must respect the user's retention request.
+
+## 8. Required verification for algorithm or pipeline changes
+
+Before reporting completion:
+
+1. Run `pytest -q`.
+2. Run a short pipeline smoke test with 1–3 training/test days as appropriate.
+3. Confirm the selected plugin and its own YAML were used.
+4. Confirm `best_model.pt` is the formal-test checkpoint.
+5. Confirm test, Equal/Shapley settlement, summary, and plotting completed.
+6. Confirm figures include 15 PNG files and 15 PDF files unless the user requested PNG-only.
+7. Confirm results were written under the selected algorithm's own `outputs/<slug>/runs/` directory.
+8. Confirm no canonical MATD3 file changed for an experimental algorithm.
+
+For detailed human-oriented guidance, see `docs/ALGORITHM_DEVELOPMENT.md`.

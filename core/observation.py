@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping
+from typing import Any, Mapping
 
 import numpy as np
 import pandas as pd
@@ -10,127 +10,114 @@ from core.profiles import HeterogeneousProfileModel
 
 
 class ObservationBuilder:
-    """Build decentralized observations with shared public forecasts."""
+    """Local observation with public forecasts and previous energy-sharing outcomes."""
 
-    def __init__(
-        self,
-        config: Dict[str, Any],
-        profiles: HeterogeneousProfileModel,
-        forecasts: SharedForecastProvider,
-        delta_t: float,
-    ) -> None:
+    def __init__(self, config: Mapping[str, Any], profiles: HeterogeneousProfileModel,
+                 forecasts: SharedForecastProvider, delta_t: float) -> None:
         self.config = config
         self.agent_ids = [str(m["id"]) for m in config["microgrids"]]
-        self.mg_cfg = {str(m["id"]): m for m in config["microgrids"]}
         self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
+        sharing_cfg = config.get("ess_sharing", {})
+        self.control_mode = str(sharing_cfg.get("control_mode", "residual_auto"))
+        self.observation_mode = str(sharing_cfg.get("observation_mode", "local"))
         self.profiles = profiles
         self.forecasts = forecasts
-        self.delta_t = float(delta_t)
-        self._norm = {mg: profiles.normalizers(mg, delta_t=self.delta_t) for mg in self.agent_ids}
-        self._schemas = {mg: self._schema_for(mg) for mg in self.agent_ids}
+        self.norm = {mg: profiles.normalizers(mg, delta_t) for mg in self.agent_ids}
+        self.initial_soc = {
+            str(mg["id"]): float(mg["battery"]["initial_soc"])
+            for mg in config["microgrids"]
+        }
 
-    def _schema_for(self, mg_id: str) -> List[str]:
-        names = [
-            "hour_sin", "hour_cos", "load", "pv", "wind", "grid_buy_price",
-            "grid_sell_price", "soc", "generator_on", "generator_power", "grid_carbon",
-        ]
+    def schema(self, mg_id: str) -> list[str]:
+        names = ["hour_sin", "hour_cos", "load", "pv", "wind", "grid_buy_price",
+                 "grid_sell_price", "soc"]
         for k in range(1, self.future_h + 1):
-            names.extend(
-                [
-                    f"load_t+{k}",
-                    f"pv_t+{k}",
-                    f"wind_t+{k}",
-                    f"grid_price_t+{k}",
-                    f"ghi_t+{k}",
-                    f"wind_speed_t+{k}",
-                ]
-            )
-        names.extend(
-            [
-                "market_prev_avg_price",
-                "market_prev_total_trade",
-                "market_prev_submitted_buy",
-                "market_prev_submitted_sell",
-                "self_prev_bid",
-                "self_prev_trade",
-                "self_prev_role",
-            ]
-        )
-        for other in self.agent_ids:
-            if other != mg_id:
-                names.extend([f"{other}_prev_bid", f"{other}_prev_trade", f"{other}_prev_role"])
+            names.extend([f"load_t+{k}", f"pv_t+{k}", f"wind_t+{k}", f"price_t+{k}"])
+        names.extend(["previous_p2p_net", "previous_grid_net", "previous_system_p2p"])
+        if self.control_mode == "explicit_offer":
+            names.extend([
+                "available_charge_ratio", "available_discharge_ratio", "terminal_soc_gap",
+                "previous_ess_p2p_offer", "previous_ess_p2p_accepted",
+                "previous_ess_p2p_unmatched", "previous_system_buy_demand",
+                "previous_system_sell_offer", "previous_clearing_ratio",
+            ])
+            if self.observation_mode == "cross_microgrid":
+                for peer in self.agent_ids:
+                    if peer != mg_id:
+                        names.extend([f"{peer}_net_load", f"{peer}_soc"])
+                for k in range(1, self.future_h + 1):
+                    for peer in self.agent_ids:
+                        if peer != mg_id:
+                            names.append(f"{peer}_net_load_t+{k}")
         return names
 
-    def schema(self, mg_id: str) -> List[str]:
-        return list(self._schemas[mg_id])
-
     def obs_dim(self, mg_id: str) -> int:
-        return len(self._schemas[mg_id])
+        return len(self.schema(mg_id))
 
-    def build(
-        self,
-        mg_id: str,
-        row: pd.Series,
-        t: int,
-        battery_soc: float,
-        generator_power_kw: float,
-        market_history: Mapping[str, Any],
-    ) -> np.ndarray:
-        n = self._norm[mg_id]
-        ex = self.profiles.exogenous(mg_id, row)
+    def build(self, mg_id: str, row: pd.Series, t: int, battery_soc: float,
+              history: Mapping[str, Any],
+              exogenous: Mapping[str, float] | None = None,
+              soc_by_microgrid: Mapping[str, float] | None = None,
+              battery_flex_by_microgrid: Mapping[str, Mapping[str, float]] | None = None) -> np.ndarray:
+        n = self.norm[mg_id]
+        ex = dict(exogenous) if exogenous is not None else self.profiles.exogenous(mg_id, row)
         hour = int(pd.Timestamp(row["timestamp"]).hour)
-        values: List[float] = [
-            float(np.sin(2.0 * np.pi * hour / 24.0)),
-            float(np.cos(2.0 * np.pi * hour / 24.0)),
+        system_norm = max(1.0, sum(self.norm[x]["trade"] for x in self.agent_ids))
+        values = [
+            np.sin(2 * np.pi * hour / 24),
+            np.cos(2 * np.pi * hour / 24),
             ex["load_kw"] / n["load"],
             ex["pv_kw"] / n["pv"],
             ex["wind_kw"] / n["wind"],
             float(row["buy_price_per_kwh"]) / n["price"],
             float(row["sell_price_per_kwh"]) / n["price"],
             float(battery_soc),
-            1.0 if generator_power_kw > 1e-9 else 0.0,
-            float(generator_power_kw) / n["generator"],
-            float(row.get("grid_carbon_factor_kg_per_kwh", 0.0)) / n["carbon"],
         ]
         for k in range(1, self.future_h + 1):
             f = self.forecasts.combined(mg_id, t, k)
-            values.extend(
-                [
-                    f["load_kw"] / n["load"],
-                    f["pv_kw"] / n["pv"],
-                    f["wind_kw"] / n["wind"],
-                    f["grid_price_per_kwh"] / n["price"],
-                    f["ghi_w_per_m2"] / n["ghi"],
-                    f["wind_speed_mps"] / n["wind_speed"],
-                ]
-            )
-
-        prev = market_history
-        by_mg = prev["by_microgrid"]
-        self_prev = by_mg[mg_id]
-        values.extend(
-            [
-                float(prev["weighted_average_price"]) / n["price"],
-                float(prev["total_trade_kwh"]) / n["trade"],
-                float(prev["submitted_buy_kwh"]) / n["trade"],
-                float(prev["submitted_sell_kwh"]) / n["trade"],
-                float(self_prev["bid_price"]) / n["price"],
-                float(self_prev["trade_kwh"]) / n["trade"],
-                float(self_prev["role"]),
-            ]
-        )
-        for other in self.agent_ids:
-            if other == mg_id:
-                continue
-            o = by_mg[other]
-            values.extend(
-                [
-                    float(o["bid_price"]) / n["price"],
-                    float(o["trade_kwh"]) / n["trade"],
-                    float(o["role"]),
-                ]
-            )
-        observation = np.asarray(values, dtype=np.float32)
-        if observation.shape != (self.obs_dim(mg_id),) or not np.isfinite(observation).all():
-            raise RuntimeError(f"{mg_id}: observation construction produced an invalid vector.")
-        return observation
+            values.extend([
+                f["load_kw"] / n["load"],
+                f["pv_kw"] / n["pv"],
+                f["wind_kw"] / n["wind"],
+                f["grid_price_per_kwh"] / n["price"],
+            ])
+        previous = history["by_microgrid"][mg_id]
+        values.extend([
+            previous["p2p_net_kwh"] / n["trade"],
+            previous["grid_net_kwh"] / n["trade"],
+            history["total_p2p_kwh"] / system_norm,
+        ])
+        if self.control_mode == "explicit_offer":
+            flex = (battery_flex_by_microgrid or {}).get(mg_id, {})
+            values.extend([
+                float(flex.get("available_charge_ratio", 0.0)),
+                float(flex.get("available_discharge_ratio", 0.0)),
+                float(battery_soc) - self.initial_soc[mg_id],
+                previous["ess_p2p_offer_kwh"] / n["trade"],
+                previous["ess_p2p_accepted_kwh"] / n["trade"],
+                previous["ess_p2p_unmatched_kwh"] / n["trade"],
+                history["total_buy_demand_kwh"] / system_norm,
+                history["total_sell_offer_kwh"] / system_norm,
+                float(history["clearing_ratio"]),
+            ])
+            if self.observation_mode == "cross_microgrid":
+                peer_soc = soc_by_microgrid or {}
+                for peer in self.agent_ids:
+                    if peer == mg_id:
+                        continue
+                    peer_ex = self.profiles.exogenous(peer, row)
+                    values.extend([
+                        (peer_ex["load_kw"] - peer_ex["renewable_kw"]) / self.norm[peer]["power"],
+                        float(peer_soc.get(peer, self.initial_soc[peer])),
+                    ])
+                for k in range(1, self.future_h + 1):
+                    for peer in self.agent_ids:
+                        if peer == mg_id:
+                            continue
+                        forecast = self.forecasts.combined(peer, t, k)
+                        peer_net = forecast["load_kw"] - forecast["pv_kw"] - forecast["wind_kw"]
+                        values.append(peer_net / self.norm[peer]["power"])
+        result = np.asarray(values, dtype=np.float32)
+        if result.shape != (self.obs_dim(mg_id),) or not np.isfinite(result).all():
+            raise RuntimeError(f"{mg_id}: invalid observation")
+        return result
