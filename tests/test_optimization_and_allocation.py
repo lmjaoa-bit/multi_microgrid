@@ -17,7 +17,7 @@ from optimization.independent_dispatch import solve_independent_dispatch
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs" / "cooperative_v1.yaml"
+CONFIG = ROOT / "configs" / "cooperative.yaml"
 
 
 def test_independent_baseline_does_not_mutate_cooperative_environment() -> None:

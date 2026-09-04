@@ -9,7 +9,7 @@ from optimization.cooperative_dispatch import solve_cooperative_dispatch
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Run cooperative social-planner oracle")
-    parser.add_argument("--config", type=Path, default=Path("configs/cooperative_v1.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("configs/cooperative.yaml"))
     parser.add_argument("--split", default="test", choices=("train", "val", "test"))
     parser.add_argument("--day")
     parser.add_argument("--output", type=Path, default=Path("outputs/cooperative_milp"))

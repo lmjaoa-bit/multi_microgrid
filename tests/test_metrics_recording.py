@@ -10,7 +10,7 @@ from utils.metrics_collector import EpisodeMetricsCollector, distribution_statis
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs" / "cooperative_v1.yaml"
+CONFIG = ROOT / "configs" / "cooperative.yaml"
 
 
 def test_episode_collector_has_unified_schema_and_24_hour_rows() -> None:
@@ -35,7 +35,13 @@ def test_episode_collector_has_unified_schema_and_24_hour_rows() -> None:
     assert "p2p_mg1_to_mg2_kw" in collector.hourly_rows[0]
     assert "mg1_ess_p2p_offer_kw" in collector.hourly_rows[0]
     assert "mg1_ess_p2p_unmatched_kw" in collector.hourly_rows[0]
+    assert "mg1_ess_p2p_offer_uncapped_kw" in collector.hourly_rows[0]
+    assert "mg1_ess_p2p_offer_projection_reduction_kw" in collector.hourly_rows[0]
     assert "ess_offer_acceptance_rate_by_microgrid" in metrics["p2p_statistics"]
+    assert "ess_offer_any_fill_rate_by_microgrid" in metrics["p2p_statistics"]
+    assert "ess_offer_full_fill_rate_by_microgrid" in metrics["p2p_statistics"]
+    assert "sharing_action_mask_rate_by_microgrid" in metrics["p2p_statistics"]
+    assert "ess_offer_projection_retention_rate_by_microgrid" in metrics["p2p_statistics"]
 
 
 def test_json_writer_converts_numpy_and_rejects_nonfinite_json(tmp_path: Path) -> None:

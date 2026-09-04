@@ -11,7 +11,7 @@ from scripts.create_algorithm_variant import create_variant
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ENV_CONFIG = ROOT / "configs" / "cooperative_v1.yaml"
+ENV_CONFIG = ROOT / "configs" / "cooperative.yaml"
 
 
 def test_matd3_plugin_is_discoverable_and_satisfies_pipeline_contract() -> None:

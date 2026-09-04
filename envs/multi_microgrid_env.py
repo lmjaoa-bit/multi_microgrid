@@ -17,6 +17,7 @@ from core.microgrid_core import MicrogridCore
 from core.observation import ObservationBuilder
 from core.profiles import HeterogeneousProfileModel
 from core.types import CoordinationHistory
+from core.tariffs import prices_from_row
 from envs.cooperative_energy_sharing import CooperativeEnergySharing
 
 
@@ -41,6 +42,7 @@ class MultiMicrogridEnv:
         self.ess_sharing_control_mode = str(sharing_cfg.get("control_mode", "residual_auto"))
         self.ess_sharing_observation_mode = str(sharing_cfg.get("observation_mode", "local"))
         self.ess_p2p_enabled = bool(sharing_cfg.get("ess_p2p_enabled", True))
+        self.ess_offer_projection = str(sharing_cfg.get("offer_projection", "none"))
         self.agent_ids = [str(mg["id"]) for mg in self.config["microgrids"]]
         self.data = DataManager(self.config, split=split, seed=self.seed)
         normalization = self.data if split == "train" else DataManager(self.config, split="train", seed=self.seed)
@@ -206,6 +208,33 @@ class MultiMicrogridEnv:
             potential -= progress * diff * battery.capacity_kwh * rate
         return potential
 
+    def _peer_demand_offer_cap(
+        self,
+        seller: str,
+        load_demands: Mapping[str, float],
+        charge_demands: Mapping[str, float],
+        prices: Mapping[str, tuple[float, float]],
+    ) -> float:
+        """Upper-bound one seller's feasible ESS offer using current peer demand.
+
+        The cap respects price eligibility and every directed pair's capacity.
+        Renewable-first clearing and competition between ESS sellers can still
+        reduce the final accepted amount, so this is deliberately an upper
+        bound rather than a promise of full execution.
+        """
+        if not self.energy_pool.enabled or not self.ess_p2p_enabled:
+            return 0.0
+        seller_price = float(prices[seller][1])
+        cap = 0.0
+        for buyer in self.agent_ids:
+            if buyer == seller or float(prices[buyer][0]) + 1e-10 < seller_price:
+                continue
+            peer_demand = max(
+                0.0, float(load_demands[buyer]) + float(charge_demands[buyer]),
+            )
+            cap += min(peer_demand, float(self.energy_pool.pair_capacity_kw))
+        return float(cap)
+
     def step(self, actions: Mapping[str, Sequence[float]]) -> tuple[dict[str, np.ndarray], dict[str, float], bool, dict[str, Any]]:
         if self.episode_df is None or self._terminated:
             raise RuntimeError("Reset the environment before stepping")
@@ -214,6 +243,7 @@ class MultiMicrogridEnv:
             raise KeyError(f"Missing actions for {sorted(missing)}")
         row = self.episode_df.iloc[self.t]
         current = self._exogenous_at(self.t)
+        prices = {mg: prices_from_row(row, mg) for mg in self.agent_ids}
         decoded = {mg: self.action_codec.decode(actions[mg]) for mg in self.agent_ids}
         tolerance = float(self.config["terminal_soc"]["tolerance"])
 
@@ -233,6 +263,7 @@ class MultiMicrogridEnv:
         # energy serves local load first; a requested battery charge may retain
         # local renewable surplus before the remainder is offered to P2P.
         renewable_offers: dict[str, float] = {}
+        uncapped_ess_offers: dict[str, float] = {}
         ess_offers: dict[str, float] = {}
         load_demands: dict[str, float] = {}
         charge_demands: dict[str, float] = {}
@@ -252,7 +283,7 @@ class MultiMicrogridEnv:
             load_demand = max(0.0, load_after_renewable - local_discharge)
             requested_offer_ratio = float(decoded[mg].get("sharing_offer_ratio", 1.0))
             offer_ratio = requested_offer_ratio if self.ess_p2p_enabled else 0.0
-            ess_offer = flexible_discharge * offer_ratio
+            uncapped_ess_offer = flexible_discharge * offer_ratio
             plans[mg].update({
                 "renewable_to_local_load_kw": min(load, renewable),
                 "renewable_to_battery_kw": renewable_to_battery,
@@ -262,18 +293,50 @@ class MultiMicrogridEnv:
                 "ess_flexible_discharge_kw": flexible_discharge,
                 "requested_sharing_offer_ratio": requested_offer_ratio,
                 "sharing_offer_ratio": offer_ratio,
-                "ess_p2p_offer_kw": ess_offer,
+                "ess_p2p_offer_uncapped_kw": uncapped_ess_offer,
                 "p2p_load_demand_kw": load_demand,
                 "p2p_charge_demand_kw": charge_demand,
             })
             renewable_offers[mg] = renewable_offer
-            ess_offers[mg] = ess_offer
+            uncapped_ess_offers[mg] = uncapped_ess_offer
             load_demands[mg] = load_demand
             charge_demands[mg] = charge_demand
 
+        projection_active = self.ess_offer_projection == "peer_demand_cap"
+        for mg in self.agent_ids:
+            flexible = float(plans[mg]["ess_flexible_discharge_kw"])
+            peer_demand = sum(
+                load_demands[other] + charge_demands[other]
+                for other in self.agent_ids if other != mg
+            )
+            eligible_cap = self._peer_demand_offer_cap(
+                mg, load_demands, charge_demands, prices,
+            )
+            blocked = bool(
+                not self.energy_pool.enabled
+                or not self.ess_p2p_enabled
+                or flexible <= 1e-9
+                or (eligible_cap <= 1e-9 if projection_active else peer_demand <= 1e-9)
+            )
+            uncapped = float(uncapped_ess_offers[mg])
+            projected = min(uncapped, eligible_cap) if projection_active else uncapped
+            if projection_active and blocked:
+                projected = 0.0
+            effective_ratio = projected / flexible if flexible > 1e-9 else 0.0
+            plans[mg].update({
+                "sharing_offer_ratio": float(effective_ratio),
+                "ess_p2p_offer_kw": float(projected),
+                "ess_p2p_offer_cap_kw": float(eligible_cap),
+                "ess_p2p_offer_projection_reduction_kw": float(max(0.0, uncapped - projected)),
+                "ess_offer_projection_active": bool(projection_active),
+                "sharing_action_masked": blocked,
+            })
+            ess_offers[mg] = float(projected)
+
         sharing = self.energy_pool.allocate_structured(
             renewable_offers, ess_offers, load_demands, charge_demands,
-            float(row["sell_price_per_kwh"]), float(row["buy_price_per_kwh"]),
+            {mg: prices[mg][1] for mg in self.agent_ids},
+            {mg: prices[mg][0] for mg in self.agent_ids},
         )
 
         # Residual-auto is the permanent one-dimensional baseline: unmatched
@@ -297,17 +360,6 @@ class MultiMicrogridEnv:
             plans[mg]["ess_p2p_unmatched_kw"] = max(
                 0.0, float(plans[mg]["ess_p2p_offer_kw"]) - accepted
             )
-            peer_demand = sum(
-                load_demands[other] + charge_demands[other]
-                for other in self.agent_ids if other != mg
-            )
-            plans[mg]["sharing_action_masked"] = bool(
-                not self.energy_pool.enabled
-                or not self.ess_p2p_enabled
-                or float(plans[mg]["ess_flexible_discharge_kw"]) <= 1e-9
-                or peer_demand <= 1e-9
-            )
-
         # 3. External grid settlement
         settlements = {}
         for mg in self.agent_ids:
@@ -333,7 +385,7 @@ class MultiMicrogridEnv:
         costs = {}
         for mg in self.agent_ids:
             costs[mg] = self.accounting.calculate(
-                float(row["buy_price_per_kwh"]), float(row["sell_price_per_kwh"]), settlements[mg],
+                prices[mg][0], prices[mg][1], settlements[mg],
                 devices[mg]["degradation_cost"], self.delta_t,
             )
             transfer = float(sharing.by_microgrid[mg]["p2p_transfer_payment"])

@@ -5,6 +5,8 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from core.tariffs import has_heterogeneous_tariffs, prices_from_row
+
 
 class GlobalStateBuilder:
     """Centralized critic state containing all current physical states."""
@@ -17,14 +19,19 @@ class GlobalStateBuilder:
         self.forecasts = forecasts
         self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
         self.control_mode = str(config.get("ess_sharing", {}).get("control_mode", "residual_auto"))
+        self.heterogeneous_tariffs = has_heterogeneous_tariffs(config)
 
     def schema(self) -> list[str]:
         names: list[str] = []
         for mg in self.agent_ids:
             names.extend([f"{mg}_load", f"{mg}_pv", f"{mg}_wind", f"{mg}_soc",
                           f"{mg}_previous_p2p_net"])
-        names.extend(["hour_sin", "hour_cos", "grid_buy_price", "grid_sell_price",
-                      "previous_system_p2p"])
+            if self.heterogeneous_tariffs:
+                names.extend([f"{mg}_grid_buy_price", f"{mg}_grid_sell_price"])
+        names.extend(["hour_sin", "hour_cos"])
+        if not self.heterogeneous_tariffs:
+            names.extend(["grid_buy_price", "grid_sell_price"])
+        names.append("previous_system_p2p")
         if self.control_mode == "explicit_offer":
             for mg in self.agent_ids:
                 names.extend([f"{mg}_available_charge", f"{mg}_available_discharge"])
@@ -59,11 +66,17 @@ class GlobalStateBuilder:
             values.extend([ex["load_kw"] / n["load"], ex["pv_kw"] / n["pv"],
                            ex["wind_kw"] / n["wind"], float(cores[mg].battery.soc),
                            previous["p2p_net_kwh"] / n["trade"]])
+            if self.heterogeneous_tariffs:
+                buy_price, sell_price = prices_from_row(row, mg)
+                values.extend([buy_price / n["price"], sell_price / n["price"]])
         hour = int(pd.Timestamp(row["timestamp"]).hour)
-        values.extend([np.sin(2 * np.pi * hour / 24), np.cos(2 * np.pi * hour / 24),
-                       float(row["buy_price_per_kwh"]) / self.price_norm,
-                       float(row["sell_price_per_kwh"]) / self.price_norm,
-                       history["total_p2p_kwh"] / system_norm])
+        values.extend([np.sin(2 * np.pi * hour / 24), np.cos(2 * np.pi * hour / 24)])
+        if not self.heterogeneous_tariffs:
+            values.extend([
+                float(row["buy_price_per_kwh"]) / self.price_norm,
+                float(row["sell_price_per_kwh"]) / self.price_norm,
+            ])
+        values.append(history["total_p2p_kwh"] / system_norm)
         if self.control_mode == "explicit_offer":
             for mg in self.agent_ids:
                 battery = cores[mg].battery

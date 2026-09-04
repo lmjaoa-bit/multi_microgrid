@@ -8,12 +8,13 @@ import yaml
 from components.battery import BatteryModel
 from core.action_codec import ActionCodec
 from algorithms.registry import get_algorithm_spec
+from algorithms.milp_ess_sharing_mpc.algorithm import _invert_battery_action
 from envs.cooperative_energy_sharing import CooperativeEnergySharing
 from envs.multi_microgrid_env import MultiMicrogridEnv
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs" / "cooperative_v1.yaml"
+CONFIG = ROOT / "configs" / "cooperative.yaml"
 
 
 def test_p2p_energy_and_transfer_conservation() -> None:
@@ -177,6 +178,72 @@ def test_unmatched_full_offer_remains_in_battery() -> None:
     assert np.isclose(plan["battery_discharge_kw"], plan["ess_to_local_kw"])
     assert plan["battery_discharge_kw"] < plan["battery_discharge_requested_kw"]
     assert np.isclose(info["devices"]["mg1"]["discharge_kw"], plan["battery_discharge_kw"])
+
+
+def test_partial_offer_is_reproducible_by_full_offer_with_scaled_discharge() -> None:
+    base = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    base["_project_root"] = str(ROOT)
+    explicit_config = get_algorithm_spec("matd3_ess_sharing").build_environment_config(base)
+    full_config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    full_config["_project_root"] = str(ROOT)
+    full_config["ess_sharing"] = {
+        "control_mode": "fixed_full_offer",
+        "observation_mode": "cross_microgrid",
+    }
+    explicit = MultiMicrogridEnv(explicit_config, split="test")
+    full = MultiMicrogridEnv(full_config, split="test")
+    day = str(explicit.data.valid_days[0].date())
+    explicit.reset(day=day, seed=7, deterministic=True)
+    full.reset(day=day, seed=7, deterministic=True)
+
+    explicit_actions = {
+        "mg1": np.asarray([0.85, -0.50]),
+        "mg2": np.asarray([1.00, -0.20]),
+        "mg3": np.asarray([0.70, 0.20]),
+    }
+    current = explicit._exogenous_at(explicit.t)
+    tolerance = float(explicit.config["terminal_soc"]["tolerance"])
+    full_actions = {}
+    for mg, action in explicit_actions.items():
+        battery = explicit.cores[mg].battery
+        floor, ceiling = battery.reachable_soc_envelope(
+            t=explicit.t,
+            episode_length=explicit.episode_length,
+            target_soc=battery.initial_soc,
+            tolerance=tolerance,
+        )
+        mapped = battery.map_action(float(action[0]), floor, ceiling)
+        requested = float(mapped["discharge_requested_kw"])
+        local_deficit = max(
+            0.0, float(current[mg]["load_kw"]) - float(current[mg]["renewable_kw"])
+        )
+        local = min(requested, local_deficit)
+        flexible = max(0.0, requested - local)
+        offer_ratio = float((action[1] + 1.0) / 2.0)
+        equivalent_discharge = local + flexible * offer_ratio
+        equivalent_action = _invert_battery_action(
+            full.cores[mg].battery,
+            0.0,
+            equivalent_discharge,
+            floor,
+            ceiling,
+        )
+        full_actions[mg] = np.asarray([equivalent_action])
+
+    _, _, _, explicit_info = explicit.step(explicit_actions)
+    _, _, _, full_info = full.step(full_actions)
+    assert sum(
+        values["ess_p2p_sell_kw"]
+        for values in explicit_info["p2p"]["by_microgrid"].values()
+    ) > 0.0
+    assert explicit_info["p2p"]["pair_flows_kwh"].keys() == full_info["p2p"]["pair_flows_kwh"].keys()
+    for pair, energy in explicit_info["p2p"]["pair_flows_kwh"].items():
+        assert np.isclose(energy, full_info["p2p"]["pair_flows_kwh"][pair])
+    assert np.isclose(explicit_info["team_profit"], full_info["team_profit"])
+    for mg in explicit.agent_ids:
+        assert np.isclose(
+            explicit_info["devices"][mg]["soc"], full_info["devices"][mg]["soc"]
+        )
 
 
 def test_ess_p2p_sale_never_coincides_with_external_grid_import() -> None:

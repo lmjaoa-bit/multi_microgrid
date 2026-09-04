@@ -9,7 +9,7 @@ from diagnostics.scenario_diagnostic import diagnose_scenario
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Diagnose microgrid complementarity")
-    parser.add_argument("--config", type=Path, default=Path("configs/cooperative_v1.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("configs/cooperative.yaml"))
     parser.add_argument("--split", default="train", choices=("train", "val", "test"))
     parser.add_argument("--output", type=Path, default=Path("outputs/scenario_diagnostic.json"))
     args = parser.parse_args(argv)

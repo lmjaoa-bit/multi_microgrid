@@ -5,6 +5,8 @@ from typing import Any, Dict, Mapping
 import numpy as np
 import pandas as pd
 
+from core.tariffs import buy_price_column
+
 
 class HeterogeneousProfileModel:
     """Generate heterogeneous load and renewable power from shared regional data.
@@ -46,7 +48,20 @@ class HeterogeneousProfileModel:
             transformed = self._target_mean(mg_id) * raw / mean_raw
             self._load_max[mg_id] = max(1.0, float(transformed.max()))
 
-        self.price_max = max(1e-6, float(self.train_frame["buy_price_per_kwh"].max()))
+        self._price_max = {
+            mg_id: max(
+                1e-6,
+                float(
+                    self.train_frame[
+                        buy_price_column(mg_id)
+                        if buy_price_column(mg_id) in self.train_frame
+                        else "buy_price_per_kwh"
+                    ].max()
+                ),
+            )
+            for mg_id in self.agent_ids
+        }
+        self.price_max = max(self._price_max.values())
         self.carbon_max = max(
             1e-6,
             float(self.train_frame.get("grid_carbon_factor_kg_per_kwh", pd.Series([1.0])).max()),
@@ -140,13 +155,38 @@ class HeterogeneousProfileModel:
 
     def generation_series(self, mg_id: str, frame: pd.DataFrame) -> Dict[str, np.ndarray]:
         renewable = self.mg_cfg[mg_id]["renewables"]
-        ghi = frame["ghi_w_per_m2"].to_numpy(dtype=np.float64)
-        wind_speed = frame["wind_speed_mps"].to_numpy(dtype=np.float64)
+        ghi_column = str(renewable.get("ghi_column", "ghi_w_per_m2"))
+        wind_column = str(renewable.get("wind_speed_column", "wind_speed_mps"))
+        ghi = frame[ghi_column].to_numpy(dtype=np.float64)
+        wind_speed = frame[wind_column].to_numpy(dtype=np.float64)
+        shift_hours = float(renewable.get("weather_time_shift_hours", 0.0))
+        delta_t = float(self.config.get("time", {}).get("delta_t", 1.0))
+        shift_steps = int(round(shift_hours / max(delta_t, 1e-9)))
+        if not np.isclose(shift_steps * delta_t, shift_hours, atol=1e-9):
+            raise ValueError(
+                f"{mg_id}: weather_time_shift_hours must align with time.delta_t"
+            )
+        if shift_steps:
+            # A circular shift preserves the marginal weather distribution and
+            # hour-of-day pattern when the shift is a whole number of days. It
+            # is an explicit synthetic scenario tool, disabled by default.
+            ghi = np.roll(ghi, shift_steps)
+            wind_speed = np.roll(wind_speed, shift_steps)
         pv = float(renewable["pv_capacity_kw"]) * self.pv_capacity_factor_series(ghi)
         wind = float(renewable["wind_capacity_kw"]) * self.wind_capacity_factor_series(wind_speed)
         return {"pv_kw": pv, "wind_kw": wind, "renewable_kw": pv + wind}
 
     def exogenous_series(self, mg_id: str, frame: pd.DataFrame) -> Dict[str, np.ndarray]:
+        timestamps = pd.to_datetime(frame[self.timestamp_col]).array.asi8
+        cache = self._exogenous_cache.get(mg_id, {})
+        if len(timestamps) and all(int(timestamp) in cache for timestamp in timestamps):
+            cached = [cache[int(timestamp)] for timestamp in timestamps]
+            return {
+                "load_kw": np.asarray([item[0] for item in cached], dtype=np.float64),
+                "pv_kw": np.asarray([item[1] for item in cached], dtype=np.float64),
+                "wind_kw": np.asarray([item[2] for item in cached], dtype=np.float64),
+                "renewable_kw": np.asarray([item[3] for item in cached], dtype=np.float64),
+            }
         generation = self.generation_series(mg_id, frame)
         return {"load_kw": self.load_series(mg_id, frame), **generation}
 
@@ -187,8 +227,8 @@ class HeterogeneousProfileModel:
             }
         generation = self.generation_from_weather(
             mg_id,
-            float(row["ghi_w_per_m2"]),
-            float(row["wind_speed_mps"]),
+            float(row[str(self.mg_cfg[mg_id]["renewables"].get("ghi_column", "ghi_w_per_m2"))]),
+            float(row[str(self.mg_cfg[mg_id]["renewables"].get("wind_speed_column", "wind_speed_mps"))]),
         )
         return {
             "load_kw": self.load_kw(mg_id, row),
@@ -211,7 +251,7 @@ class HeterogeneousProfileModel:
             "wind": wind_capacity,
             "trade": max(1.0, trade),
             "power": max(1.0, trade / max(float(delta_t), 1e-9)),
-            "price": self.price_max,
+            "price": self._price_max[mg_id],
             "carbon": self.carbon_max,
             "ghi": self.ghi_max,
             "wind_speed": self.wind_speed_max,

@@ -65,8 +65,8 @@ class CooperativeEnergySharing:
         ess_offers_kw: Mapping[str, float],
         load_demands_kw: Mapping[str, float],
         charge_demands_kw: Mapping[str, float],
-        grid_sell_price: float,
-        grid_buy_price: float,
+        grid_sell_price: float | Mapping[str, float],
+        grid_buy_price: float | Mapping[str, float],
     ) -> CooperativeSharingResult:
         """Clear source- and use-aware offers without microgrid-id priority.
 
@@ -98,6 +98,16 @@ class CooperativeEnergySharing:
         }
         flows_kw: dict[str, float] = {}
         tolerance = 1e-10
+        sell_prices = {
+            mg: float(grid_sell_price[mg]) if isinstance(grid_sell_price, Mapping)
+            else float(grid_sell_price)
+            for mg in ids
+        }
+        buy_prices = {
+            mg: float(grid_buy_price[mg]) if isinstance(grid_buy_price, Mapping)
+            else float(grid_buy_price)
+            for mg in ids
+        }
 
         def clear_stage(
             supplies_input: Mapping[str, float],
@@ -118,6 +128,7 @@ class CooperativeEnergySharing:
                         buyer for buyer in ids
                         if buyer != seller and demands[buyer] > tolerance
                         and pair_remaining[(seller, buyer)] > tolerance
+                        and buy_prices[buyer] + tolerance >= sell_prices[seller]
                     ]
                     demand_total = sum(demands[buyer] for buyer in buyers)
                     if demand_total <= tolerance:
@@ -172,17 +183,24 @@ class CooperativeEnergySharing:
         stage(remaining_res, remaining_charge, "renewable_p2p_sell_kw", "p2p_to_battery_kw")
         stage(remaining_ess, remaining_charge, "ess_p2p_sell_kw", "p2p_to_battery_kw")
 
-        price = 0.5 * (float(grid_sell_price) + float(grid_buy_price))
         pair_flows = {key: power * self.delta_t for key, power in flows_kw.items()}
         for mg in ids:
             by[mg]["p2p_net_kw"] = by[mg]["p2p_buy_kw"] - by[mg]["p2p_sell_kw"]
-            by[mg]["p2p_transfer_payment"] = (
-                by[mg]["p2p_sell_kw"] - by[mg]["p2p_buy_kw"]
-            ) * self.delta_t * price
             by[mg]["ess_p2p_unmatched_kw"] = max(
                 0.0, by[mg]["ess_p2p_offer_kw"] - by[mg]["ess_p2p_sell_kw"]
             )
         total = float(sum(pair_flows.values()))
+        total_payment = 0.0
+        for key, power in flows_kw.items():
+            seller, buyer = key.split("->", 1)
+            pair_price = 0.5 * (sell_prices[seller] + buy_prices[buyer])
+            payment = power * self.delta_t * pair_price
+            by[seller]["p2p_transfer_payment"] += payment
+            by[buyer]["p2p_transfer_payment"] -= payment
+            total_payment += payment
+        price = total_payment / total if total > tolerance else 0.5 * (
+            sum(sell_prices.values()) / len(ids) + sum(buy_prices.values()) / len(ids)
+        )
         if abs(sum(item["p2p_net_kw"] for item in by.values())) > 1e-8:
             raise RuntimeError("Structured P2P energy is not conserved.")
         if abs(sum(item["p2p_transfer_payment"] for item in by.values())) > 1e-8:

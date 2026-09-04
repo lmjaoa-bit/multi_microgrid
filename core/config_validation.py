@@ -39,6 +39,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ValueError("ess_sharing.observation_mode must be local or cross_microgrid")
     if not isinstance(sharing.get("ess_p2p_enabled", True), bool):
         raise ValueError("ess_sharing.ess_p2p_enabled must be boolean")
+    offer_projection = sharing.get("offer_projection", "none")
+    if offer_projection not in {"none", "peer_demand_cap"}:
+        raise ValueError("ess_sharing.offer_projection must be none or peer_demand_cap")
+    if offer_projection != "none" and sharing.get("control_mode") != "explicit_offer":
+        raise ValueError("ess_sharing.offer_projection requires explicit_offer control mode")
     terminal = config["terminal_soc"]
     if terminal.get("mode") not in {"penalty", "hard"}:
         raise ValueError("terminal_soc.mode must be penalty or hard")
@@ -52,6 +57,16 @@ def validate_config(config: Mapping[str, Any]) -> None:
         shape = mg.get("load_profile", {}).get("hourly_shape", [])
         if len(shape) != 24:
             raise ValueError(f"{mg_id}: hourly_shape must contain 24 values")
+        shift_hours = _number(
+            mg.get("renewables", {}).get("weather_time_shift_hours", 0.0),
+            f"{mg_id}.renewables.weather_time_shift_hours",
+            0.0,
+        )
+        delta_t = _number(config["time"].get("delta_t", 1.0), "time.delta_t", 1e-9)
+        if not np.isclose(round(shift_hours / delta_t) * delta_t, shift_hours, atol=1e-9):
+            raise ValueError(
+                f"{mg_id}: weather_time_shift_hours must align with time.delta_t"
+            )
         battery = mg.get("battery", {})
         for key in ("capacity_kwh", "max_charge_kw", "max_discharge_kw", "eta_charge", "eta_discharge"):
             _number(battery.get(key), f"{mg_id}.battery.{key}", 1e-9)

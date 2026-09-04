@@ -61,7 +61,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the shared train-test-settlement-plot pipeline")
     parser.add_argument("--algorithm", default="matd3",
                         help="Registered algorithm plugin name, for example matd3")
-    parser.add_argument("--config", type=Path, default=Path("configs/cooperative_v1.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("configs/cooperative.yaml"))
     parser.add_argument("--algorithm-config", type=Path,
                         help="Override the algorithm plugin's default YAML config")
     parser.add_argument("--episodes", type=int)
@@ -105,6 +105,11 @@ def _diagnostic_means(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "critic_loss", "critic1_loss", "critic2_loss", "actor_loss",
         "q1_mean", "q2_mean", "q1_q2_gap", "target_q_mean",
         "td_error_mean", "td_error_std", "actor_grad_norm", "critic_grad_norm",
+        "actor_parameter_count",
+        "crossgate_local_gate_mean", "crossgate_local_gate_std",
+        "crossgate_local_gate_low_rate", "crossgate_local_gate_high_rate",
+        "crossgate_peer_gate_mean", "crossgate_peer_gate_std",
+        "crossgate_peer_gate_low_rate", "crossgate_peer_gate_high_rate",
     )
     result = {name: _mean([item.get(name) for item in items]) for name in scalar_names}
     for source, target in (("critic_losses", "critic_losses"), ("actor_losses", "actor_losses")):
@@ -114,6 +119,29 @@ def _diagnostic_means(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         }
     q_items = [item["q_stats"] for item in items if "q_stats" in item]
     result["q_statistics"] = q_items[-1] if q_items else {}
+    gate_items = [item["crossgate_gate_diagnostics"] for item in items
+                  if item.get("crossgate_gate_diagnostics")]
+    gate_agents = sorted({mg for item in gate_items for mg in item})
+    result["crossgate_gate_diagnostics"] = {
+        mg: {
+            field: _mean([
+                item.get(mg, {}).get(field) for item in gate_items
+            ])
+            for field in (
+                "local_gate_mean", "local_gate_std",
+                "local_gate_low_rate", "local_gate_high_rate",
+                "peer_gate_mean", "peer_gate_std",
+                "peer_gate_low_rate", "peer_gate_high_rate",
+            )
+        }
+        for mg in gate_agents
+    }
+    count_items = [item["actor_parameter_counts"] for item in items
+                   if item.get("actor_parameter_counts")]
+    count_agents = sorted({mg for item in count_items for mg in item})
+    result["actor_parameter_counts"] = {
+        mg: int(count_items[-1][mg]) for mg in count_agents
+    } if count_items else {}
     return result
 
 
@@ -198,6 +226,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "ess_sharing_control_mode": env_config.get("ess_sharing", {}).get("control_mode"),
         "ess_sharing_observation_mode": env_config.get("ess_sharing", {}).get("observation_mode"),
         "ess_p2p_enabled": env_config.get("ess_sharing", {}).get("ess_p2p_enabled", True),
+        "ess_offer_projection": env_config.get("ess_sharing", {}).get("offer_projection", "none"),
         "mpc_forecast_horizon": algorithm_cfg.get("mpc", {}).get("forecast_horizon"),
         "config_hash": config_hash, "device": str(args.device),
         "python_version": platform.python_version(), "train_episodes": training_episodes,

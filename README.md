@@ -43,7 +43,7 @@ python scripts/plot_results.py --run-dir outputs/matd3/runs/MATD3_YYYY-MM-DD_HH-
 pytest -q
 ```
 
-`scripts/train_matd3.py` 继续作为原 MATD3 命令的兼容入口。环境配置位于 `configs/cooperative_v1.yaml`，标准 MATD3 参数位于 `configs/algorithms/matd3.yaml`；根目录下的 `configs/matd3.yaml` 仅为旧命令兼容文件。
+`scripts/train_matd3.py` 继续作为原 MATD3 命令的兼容入口。全局环境配置位于 `configs/cooperative.yaml`，标准 MATD3 参数位于 `configs/algorithms/matd3.yaml`；根目录下的 `configs/matd3.yaml` 仅为旧命令兼容文件。
 
 新增隔离算法：
 

@@ -24,31 +24,26 @@ def solve_receding_horizon(env: object, *, forecast_horizon: int = 4) -> MpcFirs
     current = env._exogenous_at(env.t)
     load = {mg: np.zeros(steps, dtype=np.float64) for mg in ids}
     renewable = {mg: np.zeros(steps, dtype=np.float64) for mg in ids}
-    buy_price = np.zeros(steps, dtype=np.float64)
-    sell_price = np.zeros(steps, dtype=np.float64)
+    buy_price = {mg: np.zeros(steps, dtype=np.float64) for mg in ids}
+    sell_price = {mg: np.zeros(steps, dtype=np.float64) for mg in ids}
     timestamps: list[str] = []
-    sell_ratio = float(env.config.get("price", {}).get("sell_ratio", 0.5))
 
     for offset in range(steps):
         row_index = min(int(env.t) + offset, len(env.episode_context_df) - 1)
         timestamps.append(str(env.episode_context_df.iloc[row_index]["timestamp"]))
         if offset == 0:
             row = env.episode_df.iloc[int(env.t)]
-            buy_price[offset] = float(row["buy_price_per_kwh"])
-            sell_price[offset] = float(row["sell_price_per_kwh"])
             for mg in ids:
+                buy_price[mg][offset], sell_price[mg][offset] = env.data.prices_at(row, mg)
                 load[mg][offset] = float(current[mg]["load_kw"])
                 renewable[mg][offset] = float(current[mg]["renewable_kw"])
         else:
-            public_price: float | None = None
             for mg in ids:
                 forecast = env.forecasts.combined(mg, int(env.t), offset)
                 load[mg][offset] = float(forecast["load_kw"])
                 renewable[mg][offset] = float(forecast["pv_kw"] + forecast["wind_kw"])
-                public_price = float(forecast["grid_price_per_kwh"])
-            assert public_price is not None
-            buy_price[offset] = public_price
-            sell_price[offset] = public_price * sell_ratio
+                buy_price[mg][offset] = float(forecast["grid_price_per_kwh"])
+                sell_price[mg][offset] = float(forecast["grid_sell_price_per_kwh"])
 
     data = DispatchData(
         timestamps=timestamps,

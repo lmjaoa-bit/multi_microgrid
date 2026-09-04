@@ -113,7 +113,7 @@ physical dispatch, actor/critic updates, or environment constraints.
 
 ## 5. Configuration isolation
 
-- Environment and physical-system configuration: `configs/cooperative_v1.yaml`.
+- Environment and physical-system configuration: `configs/cooperative.yaml`.
 - Per-algorithm hyperparameters: `configs/algorithms/<algorithm_slug>.yaml`.
 - The YAML `algorithm.name` must equal the selected plugin slug.
 - Tune an experimental algorithm only in its own YAML file.

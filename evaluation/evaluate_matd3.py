@@ -39,6 +39,24 @@ def _legacy_summary(episodes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         }
 
     pair_keys = list(episodes[0]["p2p_statistics"]["pair_energy_kwh"]) if episodes else []
+    def p2p_sum(field: str, mg: str) -> float:
+        return float(sum(day["p2p_statistics"].get(field, {}).get(mg, 0.0) for day in episodes))
+
+    offer_sum = {
+        mg: p2p_sum("ess_offer_energy_by_microgrid_kwh", mg) for mg in ids
+    }
+    accepted_sum = {
+        mg: p2p_sum("ess_sell_energy_by_microgrid_kwh", mg) for mg in ids
+    }
+    offer_step_sum = {
+        mg: p2p_sum("ess_offer_step_count_by_microgrid", mg) for mg in ids
+    }
+    any_fill_step_sum = {
+        mg: p2p_sum("ess_offer_any_fill_step_count_by_microgrid", mg) for mg in ids
+    }
+    full_fill_step_sum = {
+        mg: p2p_sum("ess_offer_full_fill_step_count_by_microgrid", mg) for mg in ids
+    }
     return {
         **aggregate,
         "physical_profit_mean_by_microgrid": aggregate["profit_by_microgrid_mean"],
@@ -50,6 +68,39 @@ def _legacy_summary(episodes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
                 for pair in pair_keys
             },
             "utilization": None,
+            "ess_offer": {
+                "offer_mean_kwh": {
+                    mg: offer_sum[mg] / scale for mg in ids
+                },
+                "accepted_mean_kwh": {
+                    mg: accepted_sum[mg] / scale for mg in ids
+                },
+                "unmatched_mean_kwh": {
+                    mg: p2p_sum("ess_unmatched_energy_by_microgrid_kwh", mg) / scale
+                    for mg in ids
+                },
+                "uncapped_offer_mean_kwh": {
+                    mg: p2p_sum("ess_uncapped_offer_energy_by_microgrid_kwh", mg) / scale
+                    for mg in ids
+                },
+                "projection_reduction_mean_kwh": {
+                    mg: p2p_sum(
+                        "ess_offer_projection_reduction_by_microgrid_kwh", mg,
+                    ) / scale for mg in ids
+                },
+                "energy_acceptance_rate_by_microgrid": {
+                    mg: safe_ratio(accepted_sum[mg], offer_sum[mg]) for mg in ids
+                },
+                "any_fill_rate_by_microgrid": {
+                    mg: safe_ratio(any_fill_step_sum[mg], offer_step_sum[mg]) for mg in ids
+                },
+                "full_fill_rate_by_microgrid": {
+                    mg: safe_ratio(full_fill_step_sum[mg], offer_step_sum[mg]) for mg in ids
+                },
+                "energy_acceptance_rate": safe_ratio(
+                    sum(accepted_sum.values()), sum(offer_sum.values()),
+                ),
+            },
         },
         "ess": {
             "throughput_mean_kwh": mean_mg("energy_statistics_by_microgrid", "battery_throughput_kwh"),
@@ -183,6 +234,16 @@ def _daily_row(
         "grid_import_kwh": sum(x["grid_import_kwh"] for x in energies.values()),
         "grid_export_kwh": sum(x["grid_export_kwh"] for x in energies.values()),
         "p2p_total_energy_kwh": day["p2p_statistics"]["total_energy_kwh"],
+        "ess_offer_energy_kwh": sum(
+            day["p2p_statistics"]["ess_offer_energy_by_microgrid_kwh"].values()
+        ),
+        "ess_accepted_energy_kwh": sum(
+            day["p2p_statistics"]["ess_sell_energy_by_microgrid_kwh"].values()
+        ),
+        "ess_unmatched_energy_kwh": sum(
+            day["p2p_statistics"]["ess_unmatched_energy_by_microgrid_kwh"].values()
+        ),
+        "ess_offer_acceptance_rate": day["p2p_statistics"]["ess_offer_acceptance_rate"],
         "battery_charge_kwh": sum(x["battery_charge_kwh"] for x in energies.values()),
         "battery_discharge_kwh": sum(x["battery_discharge_kwh"] for x in energies.values()),
         "feasible_day": bool(constraints["feasible_episode"]),
@@ -198,6 +259,21 @@ def _daily_row(
         row[f"battery_discharge_{mg}_kwh"] = energy["battery_discharge_kwh"]
         row[f"battery_throughput_{mg}_kwh"] = energy["battery_throughput_kwh"]
         row[f"terminal_soc_{mg}"] = day["soc_statistics_by_microgrid"][mg]["terminal_soc"]
+        row[f"ess_offer_{mg}_kwh"] = day["p2p_statistics"][
+            "ess_offer_energy_by_microgrid_kwh"
+        ][mg]
+        row[f"ess_accepted_{mg}_kwh"] = day["p2p_statistics"][
+            "ess_sell_energy_by_microgrid_kwh"
+        ][mg]
+        row[f"ess_offer_acceptance_rate_{mg}"] = day["p2p_statistics"][
+            "ess_offer_acceptance_rate_by_microgrid"
+        ][mg]
+        row[f"ess_offer_any_fill_rate_{mg}"] = day["p2p_statistics"][
+            "ess_offer_any_fill_rate_by_microgrid"
+        ][mg]
+        row[f"ess_offer_full_fill_rate_{mg}"] = day["p2p_statistics"][
+            "ess_offer_full_fill_rate_by_microgrid"
+        ][mg]
     for pair, value in day["p2p_statistics"]["pair_energy_kwh"].items():
         row[f"p2p_energy_{pair}_kwh"] = value
 
@@ -482,6 +558,7 @@ def evaluate(
             "ess_sharing_control_mode": env.ess_sharing_control_mode,
             "ess_sharing_observation_mode": env.ess_sharing_observation_mode,
             "ess_p2p_enabled": env.ess_p2p_enabled,
+            "ess_offer_projection": env.ess_offer_projection,
             "mpc_forecast_horizon": loaded_algorithm_config.get("mpc", {}).get("forecast_horizon"),
             "environment_overrides": dict(spec.environment_overrides),
         },
@@ -523,7 +600,7 @@ def evaluate(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Evaluate a registered cooperative algorithm")
     parser.add_argument("--algorithm", default="matd3")
-    parser.add_argument("--config", type=Path, default=Path("configs/cooperative_v1.yaml"))
+    parser.add_argument("--config", type=Path, default=Path("configs/cooperative.yaml"))
     parser.add_argument("--algorithm-config", type=Path)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--split", default="test")

@@ -1,0 +1,12 @@
+study:
+  name: ess_cross_grid
+  base_config: configs/cooperative.yaml
+  split: test
+  seed: 42
+  algorithms:
+    ess_enabled: milp_ess_sharing_mpc
+    ess_disabled: milp_renewable_p2p_only
+
+scenarios:
+  - id: global_default
+    description: Global heterogeneous benchmark with larger storage, diverse industrial tariffs, and no P2P fee or loss.

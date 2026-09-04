@@ -7,6 +7,7 @@ import pandas as pd
 
 from core.forecast import SharedForecastProvider
 from core.profiles import HeterogeneousProfileModel
+from core.tariffs import prices_from_row
 
 
 class ObservationBuilder:
@@ -62,6 +63,7 @@ class ObservationBuilder:
         n = self.norm[mg_id]
         ex = dict(exogenous) if exogenous is not None else self.profiles.exogenous(mg_id, row)
         hour = int(pd.Timestamp(row["timestamp"]).hour)
+        buy_price, sell_price = prices_from_row(row, mg_id)
         system_norm = max(1.0, sum(self.norm[x]["trade"] for x in self.agent_ids))
         values = [
             np.sin(2 * np.pi * hour / 24),
@@ -69,8 +71,8 @@ class ObservationBuilder:
             ex["load_kw"] / n["load"],
             ex["pv_kw"] / n["pv"],
             ex["wind_kw"] / n["wind"],
-            float(row["buy_price_per_kwh"]) / n["price"],
-            float(row["sell_price_per_kwh"]) / n["price"],
+            buy_price / n["price"],
+            sell_price / n["price"],
             float(battery_soc),
         ]
         for k in range(1, self.future_h + 1):

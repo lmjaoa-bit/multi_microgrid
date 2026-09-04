@@ -10,6 +10,7 @@ import yaml
 
 from core.data_manager import DataManager
 from core.profiles import HeterogeneousProfileModel
+from core.tariffs import buy_price_column, sell_price_column
 
 
 @dataclass(frozen=True)
@@ -18,8 +19,8 @@ class DispatchData:
     agent_ids: list[str]
     load_kw: dict[str, np.ndarray]
     renewable_kw: dict[str, np.ndarray]
-    buy_price: np.ndarray
-    sell_price: np.ndarray
+    buy_price: np.ndarray | dict[str, np.ndarray]
+    sell_price: np.ndarray | dict[str, np.ndarray]
 
     @property
     def horizon(self) -> int:
@@ -62,9 +63,21 @@ def build_dispatch_data(config: str | Path | Mapping[str, Any], split: str = "te
     exogenous = {mg: profiles.exogenous_series(mg, frame) for mg in ids}
     load = {mg: exogenous[mg]["load_kw"] for mg in ids}
     renewable = {mg: exogenous[mg]["renewable_kw"] for mg in ids}
-    data = DispatchData([str(x) for x in frame["timestamp"]], ids, load, renewable,
-                        frame["buy_price_per_kwh"].to_numpy(float),
-                        frame["sell_price_per_kwh"].to_numpy(float))
+    buy_price = {
+        mg: frame[
+            buy_price_column(mg) if buy_price_column(mg) in frame else "buy_price_per_kwh"
+        ].to_numpy(float)
+        for mg in ids
+    }
+    sell_price = {
+        mg: frame[
+            sell_price_column(mg) if sell_price_column(mg) in frame else "sell_price_per_kwh"
+        ].to_numpy(float)
+        for mg in ids
+    }
+    data = DispatchData(
+        [str(x) for x in frame["timestamp"]], ids, load, renewable, buy_price, sell_price
+    )
     return cfg, data
 
 
@@ -105,6 +118,10 @@ def solve_dispatch(
         "grid_mode", "curtailment", "unmet", "flow", "renewable_export_mode",
         "terminal_positive", "terminal_negative")}
 
+    def price_at(values: np.ndarray | Mapping[str, np.ndarray], mg: str, t: int) -> float:
+        series = values[mg] if isinstance(values, Mapping) else values
+        return float(series[t])
+
     def add(name: str, key: tuple[Any, ...], **kwargs: Any) -> Any:
         variable = model.addVariable(name=f"{name}[{','.join(map(str, key))}]", **kwargs)
         variables[name][key] = variable
@@ -132,10 +149,10 @@ def solve_dispatch(
             battery_mode = add("battery_mode", (mg, t), lb=0.0, ub=1.0, type=integer)
             grid_import = add("grid_import", (mg, t), lb=0.0,
                               ub=float(cfg_by_id[mg]["grid"]["import_limit_kw"]),
-                              obj=float(data.buy_price[t]) * dt, type=continuous)
+                              obj=price_at(data.buy_price, mg, t) * dt, type=continuous)
             grid_export = add("grid_export", (mg, t), lb=0.0,
                               ub=float(cfg_by_id[mg]["grid"]["export_limit_kw"]),
-                              obj=-float(data.sell_price[t]) * dt, type=continuous)
+                              obj=-price_at(data.sell_price, mg, t) * dt, type=continuous)
             grid_mode = add("grid_mode", (mg, t), lb=0.0, ub=1.0, type=integer)
             if cooperative and p2p_export_source == "renewable_only":
                 add("renewable_export_mode", (mg, t), lb=0.0, ub=1.0, type=integer)
@@ -251,7 +268,10 @@ def solve_dispatch(
             charge, discharge = value("charge", (mg, t)), value("discharge", (mg, t))
             grid_import, grid_export = value("grid_import", (mg, t)), value("grid_export", (mg, t))
             curtailment, unmet = value("curtailment", (mg, t)), value("unmet", (mg, t))
-            operating_profit = (grid_export * data.sell_price[t] - grid_import * data.buy_price[t]) * dt
+            operating_profit = (
+                grid_export * price_at(data.sell_price, mg, t)
+                - grid_import * price_at(data.buy_price, mg, t)
+            ) * dt
             operating_profit -= (charge + discharge) * dt * float(battery["degradation_cost_per_kwh"])
             operating_profit -= curtailment * dt * curtail_price + unmet * dt * unmet_price
             profit_by[mg] += float(operating_profit)

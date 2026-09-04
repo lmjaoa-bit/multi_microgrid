@@ -7,6 +7,14 @@ from typing import Any, Dict, List
 import numpy as np
 import pandas as pd
 
+from core.tariffs import (
+    build_buy_price,
+    build_sell_price,
+    buy_price_column,
+    sell_price_column,
+    prices_from_row,
+)
+
 
 @dataclass
 class DataManager:
@@ -23,6 +31,10 @@ class DataManager:
         self.df = pd.read_csv(path)
         ts_col = data_cfg.get("timestamp_col", "timestamp")
         required = {ts_col, "load_kw", "buy_price_per_kwh", "ghi_w_per_m2", "wind_speed_mps"}
+        for microgrid in self.config["microgrids"]:
+            renewable = microgrid.get("renewables", {})
+            required.add(str(renewable.get("ghi_column", "ghi_w_per_m2")))
+            required.add(str(renewable.get("wind_speed_column", "wind_speed_mps")))
         missing = required - set(self.df.columns)
         if missing:
             raise ValueError(f"Data split {self.split!r} is missing columns: {sorted(missing)}")
@@ -40,6 +52,10 @@ class DataManager:
     def reseed(self, seed: int) -> None:
         self.rng = np.random.default_rng(int(seed))
 
+    @staticmethod
+    def prices_at(row: pd.Series, microgrid_id: str) -> tuple[float, float]:
+        return prices_from_row(row, microgrid_id)
+
     def _apply_prices(self) -> None:
         price_cfg = self.config.get("price", {})
         sell_ratio = float(price_cfg.get("sell_ratio", 0.5))
@@ -54,9 +70,26 @@ class DataManager:
                 valley if h in valley_h else peak if h in peak_h else flat for h in hours
             ]
         self.df["sell_price_per_kwh"] = self.df["buy_price_per_kwh"] * sell_ratio
+        for microgrid in self.config["microgrids"]:
+            microgrid_id = str(microgrid["id"])
+            tariff = microgrid.get("tariff", {"mode": "inherited", "sell_ratio": sell_ratio})
+            buy = build_buy_price(self.df, tariff)
+            sell = build_sell_price(buy, tariff)
+            self.df[buy_price_column(microgrid_id)] = buy
+            self.df[sell_price_column(microgrid_id)] = sell
 
     def _validate_frame(self) -> None:
         numeric = ["load_kw", "buy_price_per_kwh", "sell_price_per_kwh", "ghi_w_per_m2", "wind_speed_mps"]
+        for microgrid in self.config["microgrids"]:
+            microgrid_id = str(microgrid["id"])
+            renewable = microgrid.get("renewables", {})
+            numeric.extend([
+                str(renewable.get("ghi_column", "ghi_w_per_m2")),
+                str(renewable.get("wind_speed_column", "wind_speed_mps")),
+                buy_price_column(microgrid_id),
+                sell_price_column(microgrid_id),
+            ])
+        numeric = list(dict.fromkeys(numeric))
         if "grid_carbon_factor_kg_per_kwh" in self.df:
             numeric.append("grid_carbon_factor_kg_per_kwh")
         values = self.df[numeric].apply(pd.to_numeric, errors="coerce")
@@ -67,6 +100,14 @@ class DataManager:
                 raise ValueError(f"Data split {self.split!r} contains negative values in {column}.")
         if (values["sell_price_per_kwh"] > values["buy_price_per_kwh"] + 1e-12).any():
             raise ValueError("Grid sell price cannot exceed grid buy price.")
+        for microgrid in self.config["microgrids"]:
+            microgrid_id = str(microgrid["id"])
+            buy = values[buy_price_column(microgrid_id)]
+            sell = values[sell_price_column(microgrid_id)]
+            if (sell > buy + 1e-12).any():
+                raise ValueError(
+                    f"{microgrid_id}: grid sell price cannot exceed grid buy price"
+                )
         if self.df[self.ts_col].isna().any() or self.df[self.ts_col].duplicated().any():
             raise ValueError(f"Data split {self.split!r} has missing or duplicate timestamps.")
 

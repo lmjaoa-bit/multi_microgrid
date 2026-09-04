@@ -1,0 +1,46 @@
+{
+  "description": "Spatially heterogeneous, same-calendar NASA POWER weather joined to the existing load/market-index splits.",
+  "year": 2018,
+  "time_standard": "LST",
+  "solar_parameter": "ALLSKY_SFC_SW_DWN",
+  "wind_parameter": "WS50M",
+  "locations": {
+    "mg1": {
+      "name": "Nanjing",
+      "latitude": 32.0603,
+      "longitude": 118.7969
+    },
+    "mg2": {
+      "name": "Yancheng",
+      "latitude": 33.3474,
+      "longitude": 120.1636
+    },
+    "mg3": {
+      "name": "Suzhou",
+      "latitude": 31.2989,
+      "longitude": 120.5853
+    }
+  },
+  "sources": {
+    "mg1": {
+      "url": "https://power.larc.nasa.gov/api/temporal/hourly/point?parameters=ALLSKY_SFC_SW_DWN%2CWS50M&community=RE&longitude=118.7969&latitude=32.0603&start=20180101&end=20181231&format=JSON&time-standard=LST",
+      "ghi_w_per_m2": "Wh/m^2",
+      "wind_speed_mps": "m/s"
+    },
+    "mg2": {
+      "url": "https://power.larc.nasa.gov/api/temporal/hourly/point?parameters=ALLSKY_SFC_SW_DWN%2CWS50M&community=RE&longitude=120.1636&latitude=33.3474&start=20180101&end=20181231&format=JSON&time-standard=LST",
+      "ghi_w_per_m2": "Wh/m^2",
+      "wind_speed_mps": "m/s"
+    },
+    "mg3": {
+      "url": "https://power.larc.nasa.gov/api/temporal/hourly/point?parameters=ALLSKY_SFC_SW_DWN%2CWS50M&community=RE&longitude=120.5853&latitude=31.2989&start=20180101&end=20181231&format=JSON&time-standard=LST",
+      "ghi_w_per_m2": "Wh/m^2",
+      "wind_speed_mps": "m/s"
+    }
+  },
+  "outputs": {
+    "train": "data\\spatial_market_2018_train.csv",
+    "val": "data\\spatial_market_2018_val.csv",
+    "test": "data\\spatial_market_2018_test.csv"
+  }
+}

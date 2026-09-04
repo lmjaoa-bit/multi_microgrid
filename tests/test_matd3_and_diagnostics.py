@@ -10,7 +10,7 @@ from envs.multi_microgrid_env import MultiMicrogridEnv
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs" / "cooperative_v1.yaml"
+CONFIG = ROOT / "configs" / "cooperative.yaml"
 
 
 def test_vectorized_profiles_and_forecasts_match_episode_data() -> None:
@@ -64,7 +64,7 @@ def test_scenario_diagnostic_smoke_and_dynamic_complementarity() -> None:
     assert result["system"]["spatiotemporal_opportunity_windows"] > 0
     assert result["system"]["spatiotemporal_opportunity_day_ratio"] > 0.5
     assert result["system"]["pair_net_load_correlation"]["mg1-mg3"] < 0.8
-    assert result["system"]["p2p_pair_capacity_kw"] == 60.0
+    assert result["system"]["p2p_pair_capacity_kw"] == 50.0
     assert not result["system"]["allow_grid_resale"]
     for metrics in result["microgrids"].values():
         assert 0.0 <= metrics["surplus_hour_ratio"] <= 1.0

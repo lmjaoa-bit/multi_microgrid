@@ -164,6 +164,10 @@ class EpisodeMetricsCollector:
         self.p2p_prices: list[float] = []
         self.p2p_total = 0.0
         self.p2p_payment = {mg: 0.0 for mg in ids}
+        self.sharing_action_masked_steps = {mg: 0 for mg in ids}
+        self.ess_offer_steps = {mg: 0 for mg in ids}
+        self.ess_offer_any_fill_steps = {mg: 0 for mg in ids}
+        self.ess_offer_full_fill_steps = {mg: 0 for mg in ids}
         self.violations: dict[str, list[float]] = {
             "soc": [], "power_balance": [], "p2p_balance": [],
             "grid_power": [], "battery_power": [],
@@ -216,6 +220,12 @@ class EpisodeMetricsCollector:
             "renewable_p2p_offer_kwh": float(p2p.get("renewable_p2p_offer_kw", 0.0)) * dt,
             "ess_p2p_offer_kwh": float(p2p.get("ess_p2p_offer_kw", 0.0)) * dt,
             "ess_p2p_unmatched_kwh": float(p2p.get("ess_p2p_unmatched_kw", 0.0)) * dt,
+            "ess_p2p_offer_uncapped_kwh": float(
+                plan.get("ess_p2p_offer_uncapped_kw", p2p.get("ess_p2p_offer_kw", 0.0))
+            ) * dt,
+            "ess_p2p_offer_projection_reduction_kwh": float(
+                plan.get("ess_p2p_offer_projection_reduction_kw", 0.0)
+            ) * dt,
             "ess_to_local_load_kwh": float(plan.get("ess_to_local_kw", 0.0)) * dt,
             "battery_charge_kwh": float(device.get("charge_kw", 0.0)) * dt,
             "battery_discharge_kwh": float(device.get("discharge_kw", 0.0)) * dt,
@@ -309,6 +319,18 @@ class EpisodeMetricsCollector:
         for mg in self.agent_ids:
             payment = float(p2p["by_microgrid"][mg].get("p2p_transfer_payment", 0.0))
             self.p2p_payment[mg] += payment
+            plan = info["plans"][mg]
+            offer = float(p2p["by_microgrid"][mg].get("ess_p2p_offer_kw", 0.0))
+            accepted = float(p2p["by_microgrid"][mg].get("ess_p2p_sell_kw", 0.0))
+            self.sharing_action_masked_steps[mg] += int(
+                bool(plan.get("sharing_action_masked", False))
+            )
+            if offer > self.tolerance:
+                self.ess_offer_steps[mg] += 1
+                self.ess_offer_any_fill_steps[mg] += int(accepted > self.tolerance)
+                self.ess_offer_full_fill_steps[mg] += int(
+                    accepted >= offer - self.tolerance
+                )
 
         constraints = self._constraint_step(info)
         if self.capture_hourly:
@@ -348,9 +370,24 @@ class EpisodeMetricsCollector:
                 f"{mg}_p2p_to_battery_kw": float(p2p.get("p2p_to_battery_kw", 0.0)),
                 f"{mg}_ess_p2p_offer_kw": float(p2p.get("ess_p2p_offer_kw", 0.0)),
                 f"{mg}_ess_p2p_unmatched_kw": float(p2p.get("ess_p2p_unmatched_kw", 0.0)),
+                f"{mg}_ess_p2p_offer_uncapped_kw": float(
+                    plan.get("ess_p2p_offer_uncapped_kw", p2p.get("ess_p2p_offer_kw", 0.0))
+                ),
+                f"{mg}_ess_p2p_offer_cap_kw": float(
+                    plan.get("ess_p2p_offer_cap_kw", plan.get("ess_flexible_discharge_kw", 0.0))
+                ),
+                f"{mg}_ess_p2p_offer_projection_reduction_kw": float(
+                    plan.get("ess_p2p_offer_projection_reduction_kw", 0.0)
+                ),
                 f"{mg}_ess_to_local_load_kw": float(plan.get("ess_to_local_kw", 0.0)),
+                f"{mg}_requested_sharing_offer_ratio": float(
+                    plan.get("requested_sharing_offer_ratio", plan.get("sharing_offer_ratio", 1.0))
+                ),
                 f"{mg}_sharing_offer_ratio": float(plan.get("sharing_offer_ratio", 1.0)),
                 f"{mg}_sharing_action_masked": int(bool(plan.get("sharing_action_masked", False))),
+                f"{mg}_ess_offer_projection_active": int(
+                    bool(plan.get("ess_offer_projection_active", False))
+                ),
                 f"{mg}_grid_import_cost": economics[mg]["grid_import_cost"],
                 f"{mg}_grid_export_revenue": economics[mg]["grid_export_revenue"],
                 f"{mg}_p2p_purchase_cost": economics[mg]["p2p_purchase_cost"],
@@ -419,7 +456,9 @@ class EpisodeMetricsCollector:
                 "p2p_buy_kwh", "p2p_sell_kwh", "renewable_p2p_sell_kwh",
                 "ess_p2p_sell_kwh", "p2p_to_load_kwh", "p2p_to_battery_kwh",
                 "renewable_p2p_offer_kwh", "ess_p2p_offer_kwh",
-                "ess_p2p_unmatched_kwh", "ess_to_local_load_kwh", "battery_charge_kwh",
+                "ess_p2p_unmatched_kwh", "ess_p2p_offer_uncapped_kwh",
+                "ess_p2p_offer_projection_reduction_kwh",
+                "ess_to_local_load_kwh", "battery_charge_kwh",
                 "battery_discharge_kwh", "battery_throughput_kwh", "unmet_load_kwh",
             ):
                 energy[mg].setdefault(key, 0.0)
@@ -462,7 +501,44 @@ class EpisodeMetricsCollector:
                     energy[mg]["ess_p2p_sell_kwh"], energy[mg]["ess_p2p_offer_kwh"]
                 ) for mg in self.agent_ids
             },
+            "ess_offer_any_fill_rate_by_microgrid": {
+                mg: safe_ratio(self.ess_offer_any_fill_steps[mg], self.ess_offer_steps[mg])
+                for mg in self.agent_ids
+            },
+            "ess_offer_full_fill_rate_by_microgrid": {
+                mg: safe_ratio(self.ess_offer_full_fill_steps[mg], self.ess_offer_steps[mg])
+                for mg in self.agent_ids
+            },
+            "ess_offer_step_count_by_microgrid": dict(self.ess_offer_steps),
+            "ess_offer_any_fill_step_count_by_microgrid": dict(
+                self.ess_offer_any_fill_steps
+            ),
+            "ess_offer_full_fill_step_count_by_microgrid": dict(
+                self.ess_offer_full_fill_steps
+            ),
+            "sharing_action_mask_rate_by_microgrid": {
+                mg: safe_ratio(self.sharing_action_masked_steps[mg], self.steps)
+                for mg in self.agent_ids
+            },
+            "ess_uncapped_offer_energy_by_microgrid_kwh": {
+                mg: energy[mg]["ess_p2p_offer_uncapped_kwh"] for mg in self.agent_ids
+            },
+            "ess_offer_projection_reduction_by_microgrid_kwh": {
+                mg: energy[mg]["ess_p2p_offer_projection_reduction_kwh"]
+                for mg in self.agent_ids
+            },
+            "ess_offer_projection_retention_rate_by_microgrid": {
+                mg: safe_ratio(
+                    energy[mg]["ess_p2p_offer_kwh"],
+                    energy[mg]["ess_p2p_offer_uncapped_kwh"],
+                ) for mg in self.agent_ids
+            },
         }
+        total_ess_offer = sum(energy[mg]["ess_p2p_offer_kwh"] for mg in self.agent_ids)
+        total_ess_accepted = sum(energy[mg]["ess_p2p_sell_kwh"] for mg in self.agent_ids)
+        p2p_stats["ess_offer_acceptance_rate"] = safe_ratio(
+            total_ess_accepted, total_ess_offer,
+        )
         soc_stats = {}
         for mg in self.agent_ids:
             battery = self.env.cores[mg].battery
