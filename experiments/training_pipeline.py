@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import math
 import platform
@@ -23,7 +24,10 @@ from envs.multi_microgrid_env import MultiMicrogridEnv
 from evaluation.evaluate_matd3 import evaluate, evaluate_policy_on_days
 from evaluation.plotting import generate_figures
 from experiments.layout import ExperimentLayout
+from experiments.profiles import resolve_training_args, experiment_contract
 from utils.metrics_collector import EpisodeMetricsCollector, write_json
+from utils.training_history import TrainingHistoryJournal
+from utils.torch_runtime import configure_torch_runtime
 try:
     from utils.training_dashboard import AlgorithmTrainingDashboard
 except ModuleNotFoundError as exc:
@@ -59,9 +63,12 @@ except ModuleNotFoundError as exc:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the shared train-test-settlement-plot pipeline")
-    parser.add_argument("--algorithm", default="matd3",
-                        help="Registered algorithm plugin name, for example matd3")
-    parser.add_argument("--config", type=Path, default=Path("configs/cooperative.yaml"))
+    parser.add_argument("--algorithm", default=None,
+                        help="Registered algorithm plugin name, matd3 (ordinary MLP) or crossgate")
+    parser.add_argument("--config", type=Path, default=None)
+    parser.add_argument("--experiment", help="Named bundle from configs/experiment_profiles.yaml")
+    parser.add_argument("--policy", choices=("mlp", "crossgate"), help="Network under the selected/default action design")
+    parser.add_argument("--action-design", help="Select an action design, paired with --policy or the default policy")
     parser.add_argument("--algorithm-config", type=Path,
                         help="Override the algorithm plugin's default YAML config")
     parser.add_argument("--episodes", type=int)
@@ -142,7 +149,52 @@ def _diagnostic_means(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     result["actor_parameter_counts"] = {
         mg: int(count_items[-1][mg]) for mg in count_agents
     } if count_items else {}
+    # Preserve algorithm-supplied nested diagnostics without looking inside its
+    # networks. Missing delayed Actor updates must not become zero gradients.
+    def nested_mean(values):
+        values = [value for value in values if value is not None]
+        if not values:
+            return None
+        if isinstance(values[0], Mapping):
+            keys = sorted({key for value in values for key in value})
+            return {key: nested_mean([value.get(key) for value in values]) for key in keys}
+        return _mean(values)
+
+    for name in ("actor_grad_norms", "critic_grad_norms", "actor_branch_grad_norms",
+                 "actor_layer_grad_norms", "actor_diagnostics"):
+        result[name] = nested_mean([item.get(name) for item in items]) or {}
+    details = [item["actor_diagnostics"] for item in items if item.get("actor_diagnostics")]
+    result["actor_diagnostic_statistics"] = {}
+    for mg in sorted({mg for item in details for mg in item}):
+        statistics = {}
+        for field in sorted({field for item in details for field in item.get(mg, {})}):
+            values = [item[mg][field] for item in details if field in item.get(mg, {})]
+            finite = np.asarray([float(value) for value in values if np.isfinite(float(value))])
+            statistics[field] = {
+                "count": len(values), "nonfinite_count": len(values) - len(finite),
+                "mean": float(finite.mean()) if len(finite) else None,
+                "p95": float(np.quantile(finite, .95)) if len(finite) else None,
+                "max": float(finite.max()) if len(finite) else None,
+            }
+        result["actor_diagnostic_statistics"][mg] = statistics
     return result
+
+
+def _append_actor_diagnostics(path: Path, episode: int, record: Mapping[str, Any]) -> None:
+    """Human-readable per-agent CSV, flushed once per episode for live inspection."""
+    rows = []
+    for mg, fields in record.get("actor_diagnostic_statistics", {}).items():
+        row = {"episode": episode, "microgrid": mg}
+        for field, stats in fields.items():
+            row.update({f"{field}_{stat}": value for stat, value in stats.items()})
+        rows.append(row)
+    if rows:
+        exists = path.exists()
+        with path.open("a", encoding="utf-8", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+            if not exists:
+                writer.writeheader()
+            writer.writerows(rows)
 
 
 def _validation_record(summary: Mapping[str, Any], episode: int, is_best: bool) -> dict[str, Any]:
@@ -161,7 +213,8 @@ def _validation_record(summary: Mapping[str, Any], episode: int, is_best: bool) 
 
 
 def train(args: argparse.Namespace) -> dict[str, object]:
-    spec = get_algorithm_spec(getattr(args, "algorithm", "matd3"))
+    args = resolve_training_args(args)
+    spec = get_algorithm_spec(args.algorithm)
     config_path = Path(args.config).resolve()
     algorithm_path = Path(args.algorithm_config or spec.default_config_path).resolve()
     base_env_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
@@ -173,9 +226,22 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         raise ValueError(
             f"Algorithm config declares {declared_name!r}, but selected plugin is {spec.slug!r}"
         )
+    contract = experiment_contract(spec, env_config, config_path,
+                                   selected_experiment=args.selected_experiment)
+    print(f"Experiment: {contract['experiment_profile'] or 'explicit algorithm'} | "
+          f"Policy: {contract['policy']} | Action: {contract['action_design']['id']} "
+          f"({contract['action_design']['control_mode']}) | "
+          f"Environment: {contract['environment_profile']} [{contract['physical_config_hash'][:12]}]")
     training_cfg = algorithm_cfg.get("training", {})
     validation_cfg = algorithm_cfg.get("validation", {})
     logging_cfg = algorithm_cfg.get("logging", {})
+    runtime_settings = configure_torch_runtime(algorithm_cfg, args.device)
+    incremental_history = bool(logging_cfg.get("incremental_history", False))
+    snapshot_interval = logging_cfg.get("history_snapshot_interval", 500)
+    if incremental_history and (isinstance(snapshot_interval, bool)
+                                or not isinstance(snapshot_interval, int)
+                                or snapshot_interval < 1):
+        raise ValueError("logging.history_snapshot_interval must be a positive integer")
 
     training_episodes = int(args.episodes if args.episodes is not None
                             else training_cfg.get("episodes", 5000))
@@ -209,13 +275,14 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     best_checkpoint = checkpoints_dir / "best_model.pt"
     final_checkpoint = checkpoints_dir / "final_model.pt"
 
-    snapshot = {"environment": env_config, "algorithm": algorithm_cfg}
+    snapshot = {"environment": env_config, "algorithm": algorithm_cfg, "experiment_contract": contract}
     snapshot_text = yaml.safe_dump(snapshot, allow_unicode=True, sort_keys=False)
     (run_dir / "config_snapshot.yaml").write_text(snapshot_text, encoding="utf-8")
     config_hash = hashlib.sha256(snapshot_text.encode("utf-8")).hexdigest()
     start_time = datetime.now().astimezone()
     metadata: dict[str, Any] = {
         "run_id": run_id,
+        "experiment_contract": contract,
         "algorithm": spec.display_name,
         "algorithm_slug": spec.slug,
         "algorithm_display_name": spec.display_name,
@@ -231,6 +298,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "config_hash": config_hash, "device": str(args.device),
         "python_version": platform.python_version(), "train_episodes": training_episodes,
         "test_episodes": test_episodes, "git_commit": _git_commit(),
+        "runtime": runtime_settings,
     }
     write_json(run_dir / "run_metadata.json", metadata)
 
@@ -252,6 +320,8 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         validation_days = validation_days[:max(1, int(validation_days_limit))]
 
     history: list[dict[str, Any]] = []
+    history_journal = (TrainingHistoryJournal(run_dir / "training_history.jsonl")
+                       if incremental_history else None)
     validation_history: list[dict[str, Any]] = []
     total_steps = 0
     best_validation_score = -float("inf")
@@ -315,6 +385,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                 "episode_seconds": time.perf_counter() - episode_started,
             })
             ep_record.update(_diagnostic_means(diagnostics))
+            _append_actor_diagnostics(run_dir / "actor_diagnostics.csv", episode_index + 1, ep_record)
             economics = ep_record["economic_breakdown_by_microgrid"]
             ep_record["reward_decomposition"] = {
                 "grid_import_cost": sum(x["grid_import_cost"] for x in economics.values()),
@@ -360,7 +431,12 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                 write_json(run_dir / "validation_history.json", validation_history)
                 ep_record["best_validation_profit"] = best_validation_score
 
-            if should_validate or (episode_index + 1) % 10 == 0 or episode_index + 1 == training_episodes:
+            if history_journal is not None:
+                history_journal.append(ep_record)
+                save_history = (episode_index + 1) % snapshot_interval == 0
+            else:
+                save_history = should_validate or (episode_index + 1) % 10 == 0
+            if save_history or episode_index + 1 == training_episodes:
                 write_json(run_dir / "training_history.json", history)
             dashboard.update(ep_record)
             if not dashboard.enabled and ((episode_index + 1) % 25 == 0 or episode_index == 0
@@ -373,6 +449,10 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                 )
     finally:
         dashboard.stop()
+        # A catchable interruption still leaves a compatible snapshot. A hard
+        # process kill can be recovered from complete lines in the journal.
+        if history_journal is not None and history and sys.exc_info()[0] is not None:
+            write_json(run_dir / "training_history.json", history)
 
     algorithm.save(final_checkpoint)
     if not best_checkpoint.exists():
@@ -392,6 +472,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     final_100 = profits[-100:]
     final_500 = profits[-500:]
     training_summary = {
+        "experiment_contract": contract,
         "episodes": training_episodes, "total_steps": total_steps, "steps": total_steps,
         "best_episode": best_episode,
         "final_100_profit_mean": float(np.mean(final_100)),
@@ -412,6 +493,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         run_milp=not args.no_milp, output_dir=run_dir,
         checkpoint_metadata=checkpoint_selection, test_seed=args.seed,
         max_days=test_episodes, device=args.device, algorithm_name=spec.slug,
+        experiment_identity=contract,
     )
     summary = {
         **training_summary,

@@ -32,8 +32,9 @@ p2p:
   allow_grid_resale: false
 
 ess_sharing:
-  control_mode: residual_auto
-  observation_mode: local
+  control_mode: single_dispatch
+  observation_mode: cross_microgrid
+  offer_projection: peer_demand_cap
 
 terminal_soc:
   mode: penalty

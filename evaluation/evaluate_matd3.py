@@ -445,6 +445,7 @@ def evaluate(
     max_days: int | None = None,
     device: str = "cpu",
     algorithm_name: str = "matd3",
+    experiment_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     spec = get_algorithm_spec(algorithm_name)
     cfg_path, alg_path, chk_path = Path(config), Path(algorithm_config), Path(checkpoint).resolve()
@@ -452,8 +453,15 @@ def evaluate(
     base_env_config = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     base_env_config["_project_root"] = str(cfg_path.resolve().parent.parent)
     env_config = spec.build_environment_config(base_env_config)
+    from experiments.profiles import experiment_contract
+    contract = experiment_contract(spec, env_config, cfg_path,
+        selected_experiment=(experiment_identity or {}).get("experiment_profile"))
+    if experiment_identity is not None and dict(experiment_identity) != contract:
+        raise ValueError("Formal-test environment/action contract differs from training")
     env = MultiMicrogridEnv(env_config, split=split)
     loaded_algorithm_config = yaml.safe_load(alg_path.read_text(encoding="utf-8"))
+    from utils.torch_runtime import configure_torch_runtime
+    configure_torch_runtime(loaded_algorithm_config, device)
     algorithm = spec.create(
         env,
         loaded_algorithm_config,
@@ -549,6 +557,7 @@ def evaluate(
     joint_summary = _build_joint_summary(daily_rows)
     result = {
         "split": split, "test_days_count": len(days), "test_seed": int(test_seed),
+        "experiment_contract": contract,
         "algorithm_slug": spec.slug,
         "algorithm_display_name": spec.display_name,
         "method_interface": {

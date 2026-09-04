@@ -9,42 +9,11 @@ import yaml
 from core.data_manager import DataManager
 from core.profiles import HeterogeneousProfileModel
 from envs.multi_microgrid_env import MultiMicrogridEnv
-from scripts.run_ess_scenario_study import resolve_scenario
 
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs" / "cooperative.yaml"
 
-
-def test_scenario_resolution_preserves_base_and_applies_global_overrides() -> None:
-    base = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    original = deepcopy(base)
-    scenario = {
-        "id": "test",
-        "global": {
-            "grid_import_limit_kw": 200.0,
-            "grid_export_limit_kw": 200.0,
-            "renewable_capacity_scale": 1.5,
-            "battery_capacity_scale": 0.5,
-        },
-    }
-    resolved = resolve_scenario(base, scenario, ROOT)
-    assert base == original
-    for before, after in zip(base["microgrids"], resolved["microgrids"]):
-        assert after["grid"]["import_limit_kw"] == 200.0
-        assert after["grid"]["export_limit_kw"] == 200.0
-        assert np.isclose(
-            after["renewables"]["pv_capacity_kw"],
-            before["renewables"]["pv_capacity_kw"] * 1.5,
-        )
-        assert np.isclose(
-            after["renewables"]["wind_capacity_kw"],
-            before["renewables"]["wind_capacity_kw"] * 1.5,
-        )
-        assert np.isclose(
-            after["battery"]["capacity_kwh"],
-            before["battery"]["capacity_kwh"] * 0.5,
-        )
 
 
 def test_shifted_weather_series_is_cached_and_matches_deterministic_forecast() -> None:
@@ -92,7 +61,8 @@ def test_global_config_uses_local_weather_generation_and_tariffs() -> None:
     expected_buy, expected_sell = env.data.prices_at(env.episode_context_df.iloc[1], "mg3")
     assert np.isclose(forecast["grid_price_per_kwh"], expected_buy)
     assert np.isclose(forecast["grid_sell_price_per_kwh"], expected_sell)
-    assert env.global_state_dim == 24
+    assert env.global_state_dim == 66
+    assert "mg1_feasible_charge_max" in env.global_state_builder.schema()
 
 
 def test_global_config_is_the_selected_lossless_crossgrid_setting() -> None:

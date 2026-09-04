@@ -1,0 +1,4 @@
+# Physical inputs, constraints, prices and rewards live in this YAML.
+cooperative_standard:
+  config: configs/cooperative.yaml
+  description: Existing three-microgrid cooperative physical system; unchanged.

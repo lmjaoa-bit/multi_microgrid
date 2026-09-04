@@ -14,11 +14,12 @@ class GlobalStateBuilder:
     def __init__(self, config: Mapping[str, Any], profiles: Any, forecasts: Any, delta_t: float) -> None:
         self.agent_ids = [str(m["id"]) for m in config["microgrids"]]
         self.profiles = profiles
+        self.config = config
         self.norm = {mg: profiles.normalizers(mg, delta_t) for mg in self.agent_ids}
         self.price_norm = profiles.price_max
         self.forecasts = forecasts
         self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
-        self.control_mode = str(config.get("ess_sharing", {}).get("control_mode", "residual_auto"))
+        self.control_mode = str(config.get("ess_sharing", {}).get("control_mode", "single_dispatch"))
         self.heterogeneous_tariffs = has_heterogeneous_tariffs(config)
 
     def schema(self) -> list[str]:
@@ -32,7 +33,7 @@ class GlobalStateBuilder:
         if not self.heterogeneous_tariffs:
             names.extend(["grid_buy_price", "grid_sell_price"])
         names.append("previous_system_p2p")
-        if self.control_mode == "explicit_offer":
+        if self.control_mode == "single_dispatch":
             for mg in self.agent_ids:
                 names.extend([f"{mg}_available_charge", f"{mg}_available_discharge"])
             for mg in self.agent_ids:
@@ -48,6 +49,10 @@ class GlobalStateBuilder:
                 "previous_system_buy_demand", "previous_system_sell_offer",
                 "previous_clearing_ratio",
             ])
+        if self.control_mode == "single_dispatch":
+            for mg in self.agent_ids:
+                names.extend(f"{mg}_feasible_{name}" for name in (
+                    "charge_min", "charge_max", "discharge_min", "discharge_max"))
         return names
 
     @property
@@ -55,7 +60,8 @@ class GlobalStateBuilder:
         return len(self.schema())
 
     def build(self, row: pd.Series, t: int, cores: Mapping[str, Any], history: Mapping[str, Any],
-              exogenous_by_microgrid: Mapping[str, Mapping[str, float]] | None = None) -> np.ndarray:
+              exogenous_by_microgrid: Mapping[str, Mapping[str, float]] | None = None,
+              dtype: Any = np.float32) -> np.ndarray:
         values: list[float] = []
         system_norm = max(1.0, sum(self.norm[x]["trade"] for x in self.agent_ids))
         for mg in self.agent_ids:
@@ -77,7 +83,7 @@ class GlobalStateBuilder:
                 float(row["sell_price_per_kwh"]) / self.price_norm,
             ])
         values.append(history["total_p2p_kwh"] / system_norm)
-        if self.control_mode == "explicit_offer":
+        if self.control_mode == "single_dispatch":
             for mg in self.agent_ids:
                 battery = cores[mg].battery
                 values.extend([
@@ -101,7 +107,20 @@ class GlobalStateBuilder:
                 history["total_sell_offer_kwh"] / system_norm,
                 float(history["clearing_ratio"]),
             ])
-        result = np.asarray(values, dtype=np.float32)
+        if self.control_mode == "single_dispatch":
+            for mg in self.agent_ids:
+                battery = cores[mg].battery
+                floor, ceiling = battery.reachable_soc_envelope(
+                    t, int(self.config["time"].get("episode_length", 24)),
+                    tolerance=float(self.config["terminal_soc"]["tolerance"]))
+                neutral = battery.map_action(0.0, floor, ceiling)
+                values.extend([
+                    neutral["charge_requested_kw"] / battery.max_charge_kw,
+                    -neutral["feasible_min_kw"] / battery.max_charge_kw,
+                    neutral["discharge_requested_kw"] / battery.max_discharge_kw,
+                    neutral["feasible_max_kw"] / battery.max_discharge_kw,
+                ])
+        result = np.asarray(values, dtype=dtype)
         if result.shape != (self.dim,) or not np.isfinite(result).all():
             raise RuntimeError("Invalid centralized state")
         return result

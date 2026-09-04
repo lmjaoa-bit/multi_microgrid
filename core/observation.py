@@ -19,8 +19,8 @@ class ObservationBuilder:
         self.agent_ids = [str(m["id"]) for m in config["microgrids"]]
         self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
         sharing_cfg = config.get("ess_sharing", {})
-        self.control_mode = str(sharing_cfg.get("control_mode", "residual_auto"))
-        self.observation_mode = str(sharing_cfg.get("observation_mode", "local"))
+        self.control_mode = str(sharing_cfg.get("control_mode", "single_dispatch"))
+        self.observation_mode = str(sharing_cfg.get("observation_mode", "cross_microgrid"))
         self.profiles = profiles
         self.forecasts = forecasts
         self.norm = {mg: profiles.normalizers(mg, delta_t) for mg in self.agent_ids}
@@ -35,7 +35,7 @@ class ObservationBuilder:
         for k in range(1, self.future_h + 1):
             names.extend([f"load_t+{k}", f"pv_t+{k}", f"wind_t+{k}", f"price_t+{k}"])
         names.extend(["previous_p2p_net", "previous_grid_net", "previous_system_p2p"])
-        if self.control_mode == "explicit_offer":
+        if self.control_mode == "single_dispatch":
             names.extend([
                 "available_charge_ratio", "available_discharge_ratio", "terminal_soc_gap",
                 "previous_ess_p2p_offer", "previous_ess_p2p_accepted",
@@ -50,6 +50,9 @@ class ObservationBuilder:
                     for peer in self.agent_ids:
                         if peer != mg_id:
                             names.append(f"{peer}_net_load_t+{k}")
+        if self.control_mode == "single_dispatch":
+            names.extend(f"feasible_{name}_ratio" for name in (
+                "charge_min", "charge_max", "discharge_min", "discharge_max"))
         return names
 
     def obs_dim(self, mg_id: str) -> int:
@@ -89,7 +92,7 @@ class ObservationBuilder:
             previous["grid_net_kwh"] / n["trade"],
             history["total_p2p_kwh"] / system_norm,
         ])
-        if self.control_mode == "explicit_offer":
+        if self.control_mode == "single_dispatch":
             flex = (battery_flex_by_microgrid or {}).get(mg_id, {})
             values.extend([
                 float(flex.get("available_charge_ratio", 0.0)),
@@ -119,6 +122,10 @@ class ObservationBuilder:
                         forecast = self.forecasts.combined(peer, t, k)
                         peer_net = forecast["load_kw"] - forecast["pv_kw"] - forecast["wind_kw"]
                         values.append(peer_net / self.norm[peer]["power"])
+        if self.control_mode == "single_dispatch":
+            flex = (battery_flex_by_microgrid or {}).get(mg_id, {})
+            values.extend(float(flex[f"feasible_{name}_ratio"]) for name in (
+                "charge_min", "charge_max", "discharge_min", "discharge_max"))
         result = np.asarray(values, dtype=np.float32)
         if result.shape != (self.obs_dim(mg_id),) or not np.isfinite(result).all():
             raise RuntimeError(f"{mg_id}: invalid observation")

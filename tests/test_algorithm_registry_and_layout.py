@@ -15,47 +15,33 @@ ENV_CONFIG = ROOT / "configs" / "cooperative.yaml"
 
 
 def test_matd3_plugin_is_discoverable_and_satisfies_pipeline_contract() -> None:
-    assert "matd3" in available_algorithm_names()
+    assert "matd3_dispatch" in available_algorithm_names()
     spec = get_algorithm_spec("matd3")
     env = MultiMicrogridEnv(ENV_CONFIG, split="train")
     import yaml
 
     config = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
     algorithm = spec.create(env, config, seed=9)
-    assert spec.slug == "matd3"
+    assert spec.slug == "matd3_dispatch"
     assert callable(algorithm.select_actions)
     assert callable(algorithm.replay.add)
 
 
-def test_ess_study_plugins_have_isolated_configs_and_expected_interfaces() -> None:
-    expected = {
-        "matd3": (1, "residual_auto", "local"),
-        "matd3_ess_sharing": (2, "explicit_offer", "cross_microgrid"),
-        "matd3_renewable_p2p_only": (2, "explicit_offer", "cross_microgrid"),
-        "milp_ess_sharing_mpc": (2, "explicit_offer", "cross_microgrid"),
-        "milp_renewable_p2p_only": (2, "explicit_offer", "cross_microgrid"),
-    }
-    names = set(available_algorithm_names())
+def test_retained_plugins_have_isolated_configs_and_matching_interfaces():
+    names = available_algorithm_names()
+    assert names == ["crossgate", "matd3_dispatch"]
     base = yaml.safe_load(ENV_CONFIG.read_text(encoding="utf-8"))
-    base["_project_root"] = str(ROOT)
-    observation_dims: dict[str, int] = {}
-    for slug, (action_dim, control_mode, observation_mode) in expected.items():
-        assert slug in names
+    dims = []
+    for slug in names:
         spec = get_algorithm_spec(slug)
-        algorithm_config = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
-        assert algorithm_config["algorithm"]["name"] == slug
-        env = MultiMicrogridEnv(spec.build_environment_config(base), split="train")
-        assert env.action_dim == action_dim
-        assert env.ess_sharing_control_mode == control_mode
-        assert env.ess_sharing_observation_mode == observation_mode
-        assert env.ess_p2p_enabled is (
-            slug not in {"matd3_renewable_p2p_only", "milp_renewable_p2p_only"}
-        )
-        observation_dims[slug] = env.observation_dims["mg1"]
-    assert observation_dims["matd3_ess_sharing"] > observation_dims["matd3"]
-    assert observation_dims["matd3_renewable_p2p_only"] == observation_dims["matd3_ess_sharing"]
-    assert observation_dims["milp_ess_sharing_mpc"] == observation_dims["matd3_ess_sharing"]
-    assert observation_dims["milp_renewable_p2p_only"] == observation_dims["matd3_ess_sharing"]
+        settings = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
+        assert settings["algorithm"]["name"] == slug
+        env = MultiMicrogridEnv(spec.build_environment_config(base))
+        assert env.action_dim == 1
+        assert env.ess_sharing_control_mode == "single_dispatch"
+        assert env.ess_sharing_observation_mode == "cross_microgrid"
+        dims.append(env.observation_dims)
+    assert dims[0] == dims[1]
 
 
 def test_experiment_layout_isolates_algorithms_and_runs(tmp_path: Path) -> None:

@@ -287,6 +287,43 @@ class AlgorithmTrainingDashboard:
         ess_table.add_row(*row_tp)
         ess_table.add_row(*row_status)
 
+        # Algorithm-neutral, per-agent Actor diagnostics (not just a team mean).
+        single_dispatch = any("dispatch_saturation_rate" in d for d in
+                              self.last_metrics.get("actor_diagnostics", {}).values())
+        grad_table = Table(expand=True, title=("Single dispatch: feature gradients" if single_dispatch
+                                             else "Actor branches (episode batch means)"))
+        grad_table.add_column("Agent")
+        columns = (("Grad max", "Local features", "Gate grad", "Dispatch grad", "Clipped", "Dispatch sat.", "Local override")
+                   if single_dispatch else
+                   ("Grad max", "Local grad", "Offer grad", "Offer share", "Clipped", "Local sat.", "Masked grad max"))
+        for name in columns:
+            grad_table.add_column(name, justify="right")
+        for mg in self.agent_ids:
+            diag = self.last_metrics.get("actor_diagnostics", {}).get(mg, {})
+            branch = self.last_metrics.get("actor_branch_grad_norms", {}).get(mg, {})
+            def fmt(value, percent=False):
+                if value is None:
+                    return "N/A"
+                return f"{100 * value:.1f}%" if percent else f"{value:.4g}"
+            masked = self.last_metrics.get("actor_diagnostic_statistics", {}).get(mg, {}).get(
+                "masked_offer_action_grad_max", {}).get("max")
+            maximum = self.last_metrics.get("actor_diagnostic_statistics", {}).get(mg, {}).get(
+                "total_grad_norm", {}).get("max")
+            if single_dispatch:
+                override = self.last_metrics.get("actor_diagnostic_statistics", {}).get(mg, {}).get(
+                    "local_override_kw_max", {}).get("max")
+                grad_table.add_row(mg.upper(), fmt(maximum), fmt(branch.get("local_features")),
+                    fmt(branch.get("gates")), fmt(branch.get("dispatch")),
+                    fmt(diag.get("clip_applied"), True), fmt(diag.get("dispatch_saturation_rate"), True), fmt(override))
+                continue
+            share = diag.get("offer_squared_grad_share")
+            share_text = fmt(share, True)
+            if share is not None and share > .85:
+                share_text = f"[yellow]{share_text}[/]"
+            grad_table.add_row(mg.upper(), fmt(maximum), fmt(branch.get("battery")), fmt(branch.get("offer")),
+                share_text, fmt(diag.get("clip_applied"), True),
+                fmt(diag.get("battery_saturation_rate"), True), fmt(masked))
+
         # Progress Bar visual
         bar_len = 36
         filled_len = int(round(bar_len * (progress_pct / 100.0)))
@@ -305,6 +342,7 @@ class AlgorithmTrainingDashboard:
             Text("-" * 60, style="dim"),
             Text(f"{self.algorithm_name} Learning", style="bold underline blue"),
             matd3_table,
+            grad_table,
             Text("-" * 60, style="dim"),
             Text("Energy & Coordination", style="bold underline cyan"),
             energy_table,

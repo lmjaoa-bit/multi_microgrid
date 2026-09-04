@@ -31,19 +31,14 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if not isinstance(p2p.get("allow_grid_resale"), bool):
         raise ValueError("p2p.allow_grid_resale must be boolean")
     sharing = config.get("ess_sharing", {})
-    if sharing.get("control_mode", "residual_auto") not in {
-        "residual_auto", "fixed_full_offer", "explicit_offer",
-    }:
-        raise ValueError("ess_sharing.control_mode must be residual_auto, fixed_full_offer, or explicit_offer")
-    if sharing.get("observation_mode", "local") not in {"local", "cross_microgrid"}:
+    if sharing.get("control_mode", "single_dispatch") != "single_dispatch":
+        raise ValueError("Only single_dispatch control is supported")
+    if sharing.get("observation_mode", "cross_microgrid") not in {"local", "cross_microgrid"}:
         raise ValueError("ess_sharing.observation_mode must be local or cross_microgrid")
     if not isinstance(sharing.get("ess_p2p_enabled", True), bool):
         raise ValueError("ess_sharing.ess_p2p_enabled must be boolean")
-    offer_projection = sharing.get("offer_projection", "none")
-    if offer_projection not in {"none", "peer_demand_cap"}:
-        raise ValueError("ess_sharing.offer_projection must be none or peer_demand_cap")
-    if offer_projection != "none" and sharing.get("control_mode") != "explicit_offer":
-        raise ValueError("ess_sharing.offer_projection requires explicit_offer control mode")
+    if sharing.get("offer_projection", "peer_demand_cap") != "peer_demand_cap":
+        raise ValueError("single_dispatch requires peer_demand_cap projection")
     terminal = config["terminal_soc"]
     if terminal.get("mode") not in {"penalty", "hard"}:
         raise ValueError("terminal_soc.mode must be penalty or hard")

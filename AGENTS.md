@@ -79,7 +79,7 @@ All algorithms must use:
 python scripts/run_experiment.py --algorithm <algorithm_slug>
 ```
 
-Canonical MATD3 therefore runs with:
+The current ordinary MATD3 dispatch controller runs with:
 
 ```powershell
 python scripts/run_experiment.py --algorithm matd3
@@ -117,8 +117,11 @@ physical dispatch, actor/critic updates, or environment constraints.
 - Per-algorithm hyperparameters: `configs/algorithms/<algorithm_slug>.yaml`.
 - The YAML `algorithm.name` must equal the selected plugin slug.
 - Tune an experimental algorithm only in its own YAML file.
-- `configs/matd3.yaml` is a legacy compatibility copy. New MATD3 runs use
-  `configs/algorithms/matd3.yaml`.
+- Current runs use `configs/algorithms/matd3_dispatch.yaml` or `configs/algorithms/crossgate.yaml`.
+- `algorithms/matd3/` and `configs/algorithms/matd3.yaml` are permanent source references only.
+- CLI `--algorithm matd3` selects `matd3_dispatch`; do not restore the retired action modes.
+- The only current action design is `single_dispatch`; the global default experiment is `matd3`.
+- User-facing names are MATD3 and CrossGate, without action version numbers.
 
 If an experiment requires an environment or reward change, treat it as a separate cross-algorithm
 study. Do not silently change shared physics or rewards while presenting the result as only an

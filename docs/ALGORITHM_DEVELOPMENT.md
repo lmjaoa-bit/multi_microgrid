@@ -82,19 +82,9 @@ outputs/<algorithm>/
 Every registered algorithm follows the same training, best-checkpoint validation, formal test,
 MILP coalition evaluation, Equal/Shapley settlement, summary generation, and plotting sequence.
 
-## ESS spatiotemporal sharing study
+## Current methods
 
-The current comparison methods are independent plugins, even when they reuse the canonical MATD3
-network/update implementation:
-
-| Slug | Action dimension | Environment control | Observation scope |
-|---|---:|---|---|
-| `matd3` | 1 | `residual_auto` | local baseline |
-| `matd3_ess_sharing` | 2 | `explicit_offer` | cross-microgrid forecasts and feedback |
-| `matd3_renewable_p2p_only` | 2 | renewable P2P only; ESS exports disabled | Sharing-matched cross-microgrid observations |
-| `milp_ess_sharing_mpc` | 2 | four-hour receding-horizon MILP/MPC | Sharing-matched current state and forecasts |
-| `milp_renewable_p2p_only` | 2 | matching MILP/MPC with ESS exports disabled | Sharing-matched current state and forecasts |
-
-`sharing_offer_ratio` is a feasible offer cap, not an executed-trade ratio. Physical clearing may
-accept less because peer demand or pair capacity is insufficient. This distinction is persisted in
-hourly and daily result files through offer, accepted, and unmatched ESS energy fields.
+Only MATD3 (`matd3_dispatch`, command alias `matd3`) and CrossGate (`crossgate`) are active.
+Both use `single_dispatch`; ordinary MATD3 is the global default.
+The canonical `algorithms/matd3/` source and its reference YAML remain unchanged and are not a third selectable method.
+Historical outputs retain their original labels. See [EXPERIMENT_PROFILES.md](EXPERIMENT_PROFILES.md).

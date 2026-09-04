@@ -398,6 +398,12 @@ class EpisodeMetricsCollector:
                 f"{mg}_battery_power_violation": constraints["battery_by_microgrid"][mg],
             })
             raw = np.asarray(raw_actions[mg], dtype=np.float64).reshape(-1)
+            for field in ("direct_local_discharge_kw", "direct_local_priority_reserve_kw", "direct_remaining_discharge_kw",
+                          "direct_trade_capacity_kw", "effective_local_action",
+                          "effective_trade_action", "mandatory_export_kw", "battery_discharge_requested_kw",
+                          "dispatch_requested_power_kw", "dispatch_forced"):
+                if field in plan:
+                    row[f"{mg}_{field}"] = float(plan[field])
             for index, value in enumerate(raw):
                 row[f"{mg}_raw_action_{index}"] = float(value)
             # Executed action fields are physical execution, after scaling/projection/clipping.

@@ -81,7 +81,12 @@ def get_algorithm_spec(slug: str) -> AlgorithmSpec:
     normalized = str(slug).strip().lower().replace("-", "_")
     if not _SLUG_PATTERN.fullmatch(normalized):
         raise KeyError(f"Invalid algorithm name: {slug!r}")
-    module_name = f"algorithms.{normalized}.plugin"
+    if normalized == "matd3":
+        normalized = "matd3_dispatch"
+    package_name = f"algorithms.{normalized}"
+    if importlib.util.find_spec(package_name) is None:
+        raise KeyError(f"Unknown algorithm {normalized!r}. Available: {available_algorithm_names()}")
+    module_name = f"{package_name}.plugin"
     if importlib.util.find_spec(module_name) is None:
         available = ", ".join(available_algorithm_names()) or "none"
         raise KeyError(f"Unknown algorithm {normalized!r}. Available: {available}")
@@ -99,7 +104,7 @@ def get_algorithm_spec(slug: str) -> AlgorithmSpec:
 def available_algorithm_names() -> list[str]:
     names: list[str] = []
     for item in pkgutil.iter_modules(algorithms.__path__):
-        if not item.ispkg or item.name.startswith("_"):
+        if not item.ispkg or item.name.startswith("_") or item.name == "matd3":
             continue
         if importlib.util.find_spec(f"algorithms.{item.name}.plugin") is not None:
             names.append(item.name)

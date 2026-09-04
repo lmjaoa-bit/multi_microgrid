@@ -1,0 +1,656 @@
+{
+  "queries": {
+    "microgrids": "SELECT microgrid,\n SUM(CASE WHEN algorithm='CrossGate' THEN 1 ELSE -1 END *\n (hourly_profit-p2p_sale_revenue+p2p_purchase_cost))/55.0 AS external_gain,\n SUM(CASE WHEN algorithm='CrossGate' THEN 1 ELSE -1 END * hourly_profit)/55.0 AS physical_gain,\n SUM(CASE WHEN algorithm='CrossGate' THEN 1 ELSE -1 END *\n (p2p_sale_revenue-p2p_purchase_cost))/55.0 AS internal_transfer,\n COUNT(DISTINCT date) AS test_days\n FROM hourly_saved GROUP BY microgrid ORDER BY microgrid",
+    "economics": "WITH totals AS (\n SELECT algorithm, SUM(grid_import_cost)/55.0 AS imports,\n SUM(grid_export_revenue)/55.0 AS exports,\n SUM(battery_degradation_cost)/55.0 AS degradation,\n SUM(grid_export_revenue-grid_import_cost+p2p_sale_revenue-p2p_purchase_cost\n     -battery_degradation_cost-hourly_profit)/55.0 AS other\n FROM hourly_saved GROUP BY algorithm\n ), pair AS (SELECT p.*,c.imports AS ci,c.exports AS ce,c.degradation AS cd,c.other AS co\n FROM totals p CROSS JOIN totals c WHERE p.algorithm='普通 MATD3' AND c.algorithm='CrossGate')\n SELECT '购电成本减少' AS component, imports-ci AS gain, imports AS plain, ci AS crossgate,55 AS test_days FROM pair\n UNION ALL SELECT '外送收入减少',ce-exports,exports,ce,55 FROM pair\n UNION ALL SELECT '电池损耗成本减少',degradation-cd,degradation,cd,55 FROM pair\n UNION ALL SELECT '其他成本减少',other-co,other,co,55 FROM pair",
+    "terminal": "SELECT algorithm,AVG(CASE WHEN hour=22 THEN soc END) AS soc22,\n AVG(CASE WHEN hour=23 THEN battery_charge_kw END) AS charge23,\n AVG(CASE WHEN hour=23 THEN grid_import_cost END) AS cost23,\n AVG(CASE WHEN hour=23 THEN dispatch_forced END) AS forced\n FROM hourly_saved WHERE microgrid='MG3' AND hour IN (22,23)\n GROUP BY algorithm ORDER BY algorithm",
+    "monthly": "WITH pair AS (\n SELECT c.date,c.algorithm_team_profit-p.algorithm_team_profit AS gain\n FROM daily_saved c JOIN daily_saved p ON c.date=p.date AND c.test_seed=p.test_seed\n WHERE c.algorithm='CrossGate' AND p.algorithm='普通 MATD3')\n SELECT SUBSTR(date,1,7) AS month,AVG(gain) AS gain,COUNT(*) AS count,SUM(gain) AS total\n FROM pair GROUP BY SUBSTR(date,1,7) ORDER BY month",
+    "validation": "SELECT episode,profit,algorithm FROM validation_saved ORDER BY episode,algorithm"
+  },
+  "datasets": {
+    "microgrids": [
+      {
+        "microgrid": "MG1",
+        "external_gain": 33.68520559829241,
+        "physical_gain": 20.00494541577777,
+        "internal_transfer": -13.68026018251464,
+        "test_days": 55
+      },
+      {
+        "microgrid": "MG2",
+        "external_gain": -9.001749832518055,
+        "physical_gain": -1.785996660241406,
+        "internal_transfer": 7.215753172276649,
+        "test_days": 55
+      },
+      {
+        "microgrid": "MG3",
+        "external_gain": -16.381150278930622,
+        "physical_gain": -9.916643268692631,
+        "internal_transfer": 6.464507010237994,
+        "test_days": 55
+      }
+    ],
+    "economics": [
+      {
+        "component": "购电成本减少",
+        "gain": 11.888629211737225,
+        "plain": 1239.554799303893,
+        "crossgate": 1227.6661700921559,
+        "test_days": 55
+      },
+      {
+        "component": "外送收入减少",
+        "gain": -4.204219958388762,
+        "plain": 244.8710701644908,
+        "crossgate": 240.66685020610203,
+        "test_days": 55
+      },
+      {
+        "component": "电池损耗成本减少",
+        "gain": 0.5739180007819797,
+        "plain": 14.070190975049123,
+        "crossgate": 13.496272974267143,
+        "test_days": 55
+      },
+      {
+        "component": "其他成本减少",
+        "gain": 0.04397823271325363,
+        "plain": 2.8949233335435007,
+        "crossgate": 2.850945100830247,
+        "test_days": 55
+      }
+    ],
+    "terminal": [
+      {
+        "algorithm": "CrossGate",
+        "soc22": 0.1469403115867115,
+        "charge23": 30.5192673509812,
+        "cost23": 80.37429304468233,
+        "forced": 1.0
+      },
+      {
+        "algorithm": "普通 MATD3",
+        "soc22": 0.4023491868731633,
+        "charge23": 15.99139196894942,
+        "cost23": 60.66109658918384,
+        "forced": 1.0
+      }
+    ],
+    "monthly": [
+      {
+        "month": "2018-01",
+        "gain": 25.429316662127377,
+        "count": 4,
+        "total": 101.71726664850951
+      },
+      {
+        "month": "2018-02",
+        "gain": 0.4854305427305974,
+        "count": 5,
+        "total": 2.427152713652987
+      },
+      {
+        "month": "2018-03",
+        "gain": -13.975412438983694,
+        "count": 4,
+        "total": -55.90164975593478
+      },
+      {
+        "month": "2018-04",
+        "gain": 7.495359210981235,
+        "count": 5,
+        "total": 37.476796054906174
+      },
+      {
+        "month": "2018-05",
+        "gain": 0.5811635167368081,
+        "count": 4,
+        "total": 2.3246540669472324
+      },
+      {
+        "month": "2018-06",
+        "gain": -8.34345846691519,
+        "count": 5,
+        "total": -41.717292334575944
+      },
+      {
+        "month": "2018-07",
+        "gain": 45.88414683086563,
+        "count": 4,
+        "total": 183.53658732346253
+      },
+      {
+        "month": "2018-08",
+        "gain": 62.03663313673912,
+        "count": 4,
+        "total": 248.14653254695648
+      },
+      {
+        "month": "2018-09",
+        "gain": -10.578939527244026,
+        "count": 5,
+        "total": -52.89469763622013
+      },
+      {
+        "month": "2018-10",
+        "gain": -0.1935302452746214,
+        "count": 5,
+        "total": -0.967651226373107
+      },
+      {
+        "month": "2018-11",
+        "gain": 12.654152657026861,
+        "count": 5,
+        "total": 63.27076328513431
+      },
+      {
+        "month": "2018-12",
+        "gain": -6.1583319820118945,
+        "count": 5,
+        "total": -30.791659910059472
+      }
+    ],
+    "validation": [
+      {
+        "episode": 100,
+        "profit": -869.216240558732,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 100,
+        "profit": -873.1015380792452,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 200,
+        "profit": -882.2271021223421,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 200,
+        "profit": -879.5781874030517,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 300,
+        "profit": -866.0648523572736,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 300,
+        "profit": -905.5878398135844,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 400,
+        "profit": -864.6679290817224,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 400,
+        "profit": -911.5754390816971,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 500,
+        "profit": -884.4990271052218,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 500,
+        "profit": -901.0113182732371,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 600,
+        "profit": -875.9368604800836,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 600,
+        "profit": -861.3449182569991,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 700,
+        "profit": -862.457634733779,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 700,
+        "profit": -884.7074073654135,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 800,
+        "profit": -854.4053047050318,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 800,
+        "profit": -871.1213741522404,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 900,
+        "profit": -867.1074779792083,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 900,
+        "profit": -862.9296651616005,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 1000,
+        "profit": -856.6240705643394,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 1000,
+        "profit": -868.805810785621,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 1100,
+        "profit": -860.8258065926848,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 1100,
+        "profit": -861.4093649027877,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 1200,
+        "profit": -844.2215579572505,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 1200,
+        "profit": -861.5215227540403,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 1300,
+        "profit": -833.3046878591275,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 1300,
+        "profit": -849.3379134289604,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 1400,
+        "profit": -816.2344273835446,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 1400,
+        "profit": -850.5461521224672,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 1500,
+        "profit": -836.3761938729483,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 1500,
+        "profit": -838.3333260658759,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 1600,
+        "profit": -817.1291462300321,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 1600,
+        "profit": -846.7657729910338,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 1700,
+        "profit": -823.2948369881544,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 1700,
+        "profit": -836.4628092565905,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 1800,
+        "profit": -818.0821332105921,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 1800,
+        "profit": -831.9204503167299,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 1900,
+        "profit": -820.7481210838662,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 1900,
+        "profit": -836.8710055530108,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 2000,
+        "profit": -811.8107121661307,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 2000,
+        "profit": -844.4150375034833,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 2100,
+        "profit": -815.7742155784688,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 2100,
+        "profit": -842.2538025234958,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 2200,
+        "profit": -822.6456020225888,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 2200,
+        "profit": -827.9385202066081,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 2300,
+        "profit": -826.9618068489929,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 2300,
+        "profit": -846.4689072668999,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 2400,
+        "profit": -808.2506100884439,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 2400,
+        "profit": -848.5408359645453,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 2500,
+        "profit": -822.9385821350103,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 2500,
+        "profit": -842.6059967628344,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 2600,
+        "profit": -825.5185893453162,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 2600,
+        "profit": -848.5254669842689,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 2700,
+        "profit": -821.0599817393988,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 2700,
+        "profit": -853.3732363564817,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 2800,
+        "profit": -820.8682535029824,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 2800,
+        "profit": -857.6302074671277,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 2900,
+        "profit": -813.2063296844573,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 2900,
+        "profit": -841.4034790901144,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 3000,
+        "profit": -817.7659321109927,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 3000,
+        "profit": -855.4585655888134,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 3100,
+        "profit": -822.6016480750088,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 3100,
+        "profit": -838.401043371391,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 3200,
+        "profit": -825.065451416928,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 3200,
+        "profit": -843.2936608047928,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 3300,
+        "profit": -824.116767697558,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 3300,
+        "profit": -837.5507601942135,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 3400,
+        "profit": -824.1432915787697,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 3400,
+        "profit": -837.246703504863,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 3500,
+        "profit": -823.9960179556699,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 3500,
+        "profit": -838.5545229815125,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 3600,
+        "profit": -816.1573592473093,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 3600,
+        "profit": -851.3875804039893,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 3700,
+        "profit": -832.4506417351488,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 3700,
+        "profit": -835.2287203670613,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 3800,
+        "profit": -838.8360932709751,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 3800,
+        "profit": -843.7365677960145,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 3900,
+        "profit": -831.3595682295847,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 3900,
+        "profit": -846.5448096969138,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 4000,
+        "profit": -822.4079301125164,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 4000,
+        "profit": -848.8239917793793,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 4100,
+        "profit": -839.1579211775805,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 4100,
+        "profit": -851.260735413394,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 4200,
+        "profit": -834.8840195585956,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 4200,
+        "profit": -841.4177184454198,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 4300,
+        "profit": -826.445604077245,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 4300,
+        "profit": -835.5753345899457,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 4400,
+        "profit": -830.0431532934305,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 4400,
+        "profit": -832.2405918746508,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 4500,
+        "profit": -845.9559180881348,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 4500,
+        "profit": -824.734121366046,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 4600,
+        "profit": -838.9026691168549,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 4600,
+        "profit": -820.5016815657108,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 4700,
+        "profit": -826.2978389898104,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 4700,
+        "profit": -830.2951901403982,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 4800,
+        "profit": -830.0931490312718,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 4800,
+        "profit": -837.8918043350093,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 4900,
+        "profit": -833.7104568148577,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 4900,
+        "profit": -829.7713548160934,
+        "algorithm": "普通 MATD3"
+      },
+      {
+        "episode": 5000,
+        "profit": -829.5428727520515,
+        "algorithm": "CrossGate"
+      },
+      {
+        "episode": 5000,
+        "profit": -819.5730913409408,
+        "algorithm": "普通 MATD3"
+      }
+    ]
+  }
+}

@@ -39,10 +39,10 @@ class MultiMicrogridEnv:
         self.seed = int(self.config.get("env", {}).get("seed", 42))
         self.mode = str(self.config.get("env", {}).get("mode", "cooperative"))
         sharing_cfg = self.config.get("ess_sharing", {})
-        self.ess_sharing_control_mode = str(sharing_cfg.get("control_mode", "residual_auto"))
-        self.ess_sharing_observation_mode = str(sharing_cfg.get("observation_mode", "local"))
+        self.ess_sharing_control_mode = str(sharing_cfg.get("control_mode", "single_dispatch"))
+        self.ess_sharing_observation_mode = str(sharing_cfg.get("observation_mode", "cross_microgrid"))
         self.ess_p2p_enabled = bool(sharing_cfg.get("ess_p2p_enabled", True))
-        self.ess_offer_projection = str(sharing_cfg.get("offer_projection", "none"))
+        self.ess_offer_projection = str(sharing_cfg.get("offer_projection", "peer_demand_cap"))
         self.agent_ids = [str(mg["id"]) for mg in self.config["microgrids"]]
         self.data = DataManager(self.config, split=split, seed=self.seed)
         normalization = self.data if split == "train" else DataManager(self.config, split="train", seed=self.seed)
@@ -69,6 +69,10 @@ class MultiMicrogridEnv:
         self.obs_builder = ObservationBuilder(self.config, self.profiles, self.forecasts, self.delta_t)
         self.global_state_builder = GlobalStateBuilder(self.config, self.profiles, self.forecasts, self.delta_t)
         self.action_codec = ActionCodec(self.ess_sharing_control_mode)
+        from core.single_dispatch import SingleDispatchProjector
+        self.dispatch_projector = SingleDispatchProjector(
+            self.config, self.global_state_builder.schema(),
+            self.global_state_builder.norm, self.global_state_builder.price_norm)
         self.t = 0
         self.episode_df = None
         self.episode_context_df = None
@@ -138,6 +142,19 @@ class MultiMicrogridEnv:
             }
             for mg in self.agent_ids
         }
+        if self.ess_sharing_control_mode == "single_dispatch":
+            for mg in self.agent_ids:
+                battery = self.cores[mg].battery
+                floor, ceiling = battery.reachable_soc_envelope(
+                    index, self.episode_length,
+                    tolerance=float(self.config["terminal_soc"]["tolerance"]))
+                neutral = battery.map_action(0.0, floor, ceiling)
+                battery_flex[mg].update({
+                    "feasible_charge_min_ratio": neutral["charge_requested_kw"] / battery.max_charge_kw,
+                    "feasible_charge_max_ratio": -neutral["feasible_min_kw"] / battery.max_charge_kw,
+                    "feasible_discharge_min_ratio": neutral["discharge_requested_kw"] / battery.max_discharge_kw,
+                    "feasible_discharge_max_ratio": neutral["feasible_max_kw"] / battery.max_discharge_kw,
+                })
         return {
             mg: self.obs_builder.build(
                 mg, row, index, float(self.cores[mg].battery.soc),
@@ -151,6 +168,7 @@ class MultiMicrogridEnv:
     def _build_global_state(
         self,
         exogenous_by_microgrid: Mapping[str, Mapping[str, float]] | None = None,
+        dtype: Any = np.float32,
     ) -> np.ndarray:
         if self.episode_context_df is None or self.history is None:
             raise RuntimeError("Call reset() first")
@@ -159,7 +177,7 @@ class MultiMicrogridEnv:
         return self.global_state_builder.build(
             self.episode_context_df.iloc[index], index,
             self.cores, self.history,
-            exogenous_by_microgrid=current
+            exogenous_by_microgrid=current, dtype=dtype,
         )
 
     def global_state(self) -> np.ndarray:
@@ -259,6 +277,33 @@ class MultiMicrogridEnv:
             for mg in self.agent_ids
         }
 
+        direct_plans = {}
+        if self.dispatch_projector is not None:
+            import torch
+            with torch.no_grad():
+                effective, projected = self.dispatch_projector(
+                    torch.as_tensor(self._build_global_state(current, dtype=np.float64),
+                                    dtype=torch.float64).unsqueeze(0),
+                    torch.as_tensor(np.asarray([actions[mg] for mg in self.agent_ids]),
+                                    dtype=torch.float64).unsqueeze(0))
+            for i, mg in enumerate(self.agent_ids):
+                direct = {name: float(value[0]) for name, value in projected[i].items()}
+                direct_plans[mg] = direct
+                plans[mg].update({
+                    "battery_charge_kw": direct["charge"],
+                    "battery_discharge_kw": direct["local"] + direct["mandatory_export"] + direct["offer"],
+                    "mandatory_export_kw": direct["mandatory_export"],
+                    "direct_local_discharge_kw": direct["local"],
+                    "direct_local_priority_reserve_kw": direct["local_priority_reserve"],
+                    "direct_remaining_discharge_kw": direct["remaining"],
+                    "direct_trade_capacity_kw": direct["cap"],
+                    "effective_local_action": float(effective[0, i, 0]),
+                    "effective_trade_action": float(effective[0, i, 1]),
+                    **({"dispatch_requested_power_kw": direct["requested_power"],
+                        "dispatch_forced": bool(direct["forced_dispatch"])}
+                       if self.ess_sharing_control_mode == "single_dispatch" else {}),
+                })
+
         # 2. Build source-aware P2P offers and load/charging demands. Renewable
         # energy serves local load first; a requested battery charge may retain
         # local renewable surplus before the remainder is offered to P2P.
@@ -277,11 +322,16 @@ class MultiMicrogridEnv:
             renewable_surplus = max(0.0, renewable - load)
             local_discharge = min(requested_discharge, load_after_renewable)
             flexible_discharge = max(0.0, requested_discharge - local_discharge)
+            if mg in direct_plans:
+                local_discharge = direct_plans[mg]["local"]
+                flexible_discharge = direct_plans[mg]["remaining"]
             renewable_to_battery = min(requested_charge, renewable_surplus)
             renewable_offer = max(0.0, renewable_surplus - renewable_to_battery)
             charge_demand = max(0.0, requested_charge - renewable_to_battery)
             load_demand = max(0.0, load_after_renewable - local_discharge)
             requested_offer_ratio = float(decoded[mg].get("sharing_offer_ratio", 1.0))
+            if self.ess_sharing_control_mode == "single_dispatch":
+                requested_offer_ratio = direct_plans[mg]["requested_ratio"]
             offer_ratio = requested_offer_ratio if self.ess_p2p_enabled else 0.0
             uncapped_ess_offer = flexible_discharge * offer_ratio
             plans[mg].update({
@@ -323,6 +373,16 @@ class MultiMicrogridEnv:
             if projection_active and blocked:
                 projected = 0.0
             effective_ratio = projected / flexible if flexible > 1e-9 else 0.0
+            if mg in direct_plans:
+                direct = direct_plans[mg]
+                eligible_cap = direct["cap"]
+                projected = direct["offer"]
+                blocked = not bool(direct["mask"])
+                effective_ratio = direct["requested_ratio"] if not blocked else 0.0
+                if self.ess_sharing_control_mode == "single_dispatch":
+                    # This ratio is derived metadata, not a second policy action.
+                    # Report the capped offer separately from the raw intent.
+                    effective_ratio = projected / flexible if flexible > 1e-9 else 0.0
             plans[mg].update({
                 "sharing_offer_ratio": float(effective_ratio),
                 "ess_p2p_offer_kw": float(projected),
@@ -339,20 +399,14 @@ class MultiMicrogridEnv:
             {mg: prices[mg][0] for mg in self.agent_ids},
         )
 
-        # Residual-auto is the permanent one-dimensional baseline: unmatched
-        # flexible discharge is still physically dispatched and may reach the
-        # external grid. Offer-controlled variants commit only local plus accepted
-        # ESS discharge, so an unmatched offer remains stored in the battery.
+        # Only local, mandatory and accepted ESS power is discharged.
         total_buy_demand = sum(load_demands.values()) + sum(charge_demands.values())
         total_sell_offer = sum(renewable_offers.values()) + sum(ess_offers.values())
         for mg in self.agent_ids:
             accepted = float(sharing.by_microgrid[mg]["ess_p2p_sell_kw"])
             local = float(plans[mg]["ess_to_local_requested_kw"])
             requested = float(plans[mg]["battery_discharge_kw"])
-            if self.ess_sharing_control_mode == "residual_auto":
-                actual_discharge = requested
-            else:
-                actual_discharge = local + accepted
+            actual_discharge = local + accepted + float(plans[mg].get("mandatory_export_kw", 0.0))
             plans[mg]["battery_discharge_requested_kw"] = requested
             plans[mg]["battery_discharge_kw"] = actual_discharge
             plans[mg]["ess_to_local_kw"] = local

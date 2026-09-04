@@ -1,0 +1,38 @@
+algorithm:
+  name: crossgate
+  hidden_dims: [128, 128]
+  actor_lr: 0.0002
+  actor_max_grad_norm: 1.0
+  critic_lr: 0.0003
+  gamma: 0.99
+  tau: 0.005
+  policy_delay: 2
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  batch_size: 16
+  replay_capacity: 200000
+  warmup_steps: 0
+  exploration_noise: 0.15
+  network:
+    local_encoder_dim: 32
+    peer_encoder_dim: 32
+    market_encoder_dim: 16
+    hidden_dims: [96, 64]
+    gate_strength: 0.25
+runtime:
+  cpu_threads: 1
+training:
+  episodes: 3
+  test_episodes: 2
+validation:
+  enabled: true
+  interval: 1
+  max_days: 2
+  deterministic_policy: true
+  fixed_scenarios: true
+logging:
+  incremental_history: true
+  history_snapshot_interval: 500
+  dashboard: true
+  dashboard_refresh_hz: 4
+  rolling_windows: [50, 100, 500]

@@ -1,0 +1,10 @@
+matd3:
+  algorithm: matd3_dispatch
+  policy: mlp
+  action_design: single_dispatch
+  environment: cooperative_standard
+crossgate:
+  algorithm: crossgate
+  policy: crossgate
+  action_design: single_dispatch
+  environment: cooperative_standard

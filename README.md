@@ -11,7 +11,7 @@
 ## 研究流程
 
 1. `optimization/independent_dispatch.py` 分别求解三个微网的反事实独立基准，P2P 关闭。
-2. `envs/multi_microgrid_env.py` 执行合作型 MATD3 调度。标准基线使用一维 `[battery_action]`，显式 ESS 共享方法使用二维 `[battery_action, sharing_offer_ratio_raw]`；三个智能体接收相同团队奖励。
+2. `envs/multi_microgrid_env.py` 执行合作型 MATD3 调度。MATD3 和 CrossGate 均使用一维有符号调度意图 `[signed_dispatch_intent]`；三个智能体接收相同团队奖励。
 3. `optimization/cooperative_dispatch.py` 给出集中式联合优化的社会规划上界。
 4. `evaluation/compare_independent_cooperative.py` 输出 ESS、SOC、外部电网、P2P 和协调重调度差值。
 5. `evaluation/coalition_evaluator.py` 在每个完整测试日上分别求解 7 个非空联盟的 24h MILP value。
@@ -22,7 +22,7 @@
 
 - 风光先服务本地负荷。Actor 请求充电后，本地风光盈余先满足该请求，剩余部分进入 P2P。
 - P2P 先满足其他微网的负荷缺口，再满足其 Actor 已请求的 ESS 充电；P2P 可直接给负荷供电，也可给 ESS 充电。
-- 显式共享动作表示 ESS 可共享放电的“报价上限比例”，不等于实际成交比例；未成交的 ESS 报价保留在电池中。
+- 调度先满足本地负荷，剩余放电请求形成 ESS 报量；未成交的可选电量保留在电池中。
 - 同一时段禁止微网一边从外部电网购电一边向 P2P 出售，但历史时段由电网充入的能量允许以后跨微网出售。
 - P2P 内部支付严格和为零，不进入联盟总收益；它只进入各微网的个体账本及事后结算。
 - episode 末端按初始 SOC、容差和偏差电量施加配置化惩罚，MILP 也支持硬约束模式。
@@ -34,16 +34,18 @@
 python -m scripts.run_scenario_diagnostic
 python -m scripts.run_independent_baseline
 python -m scripts.run_cooperative_milp
+python scripts/run_experiment.py
 python scripts/run_experiment.py --algorithm matd3
-python scripts/run_experiment.py --algorithm matd3_ess_sharing
-python scripts/run_experiment.py --algorithm matd3_renewable_p2p_only
-python scripts/run_experiment.py --algorithm milp_ess_sharing_mpc
-python scripts/run_experiment.py --algorithm milp_renewable_p2p_only
-python scripts/plot_results.py --run-dir outputs/matd3/runs/MATD3_YYYY-MM-DD_HH-MM-SS_seed42
+python scripts/run_experiment.py --algorithm crossgate
+python scripts/plot_results.py --run-dir outputs/matd3_dispatch/runs/MATD3_YYYY-MM-DD_HH-MM-SS_seed42
 pytest -q
 ```
 
-`scripts/train_matd3.py` 继续作为原 MATD3 命令的兼容入口。全局环境配置位于 `configs/cooperative.yaml`，标准 MATD3 参数位于 `configs/algorithms/matd3.yaml`；根目录下的 `configs/matd3.yaml` 仅为旧命令兼容文件。
+全局默认采用普通 MATD3 的单调度方案。CrossGate 使用相同动作和物理环境。
+`--algorithm matd3` 对应实现 `algorithms/matd3_dispatch/`，参数位于 `configs/algorithms/matd3_dispatch.yaml`；
+CrossGate 参数位于 `configs/algorithms/crossgate.yaml`。方案名称不再包含动作版本编号。
+环境配置位于 `configs/cooperative.yaml`，完整说明见 [当前实验方案](docs/EXPERIMENT_PROFILES.md)。
+历史训练结果、分析和报告保留原有名称。`algorithms/matd3/` 及其原参数文件仅作永久源代码参考。
 
 新增隔离算法：
 

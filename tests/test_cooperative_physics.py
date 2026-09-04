@@ -8,7 +8,6 @@ import yaml
 from components.battery import BatteryModel
 from core.action_codec import ActionCodec
 from algorithms.registry import get_algorithm_spec
-from algorithms.milp_ess_sharing_mpc.algorithm import _invert_battery_action
 from envs.cooperative_energy_sharing import CooperativeEnergySharing
 from envs.multi_microgrid_env import MultiMicrogridEnv
 
@@ -51,10 +50,9 @@ def test_structured_p2p_prioritizes_load_then_battery_and_tracks_source() -> Non
 
 
 def test_sharing_action_is_offer_cap_not_executed_trade_ratio() -> None:
-    codec = ActionCodec("explicit_offer")
-    assert codec.decode([0.0, -1.0])["sharing_offer_ratio"] == 0.0
-    assert codec.decode([0.0, 0.0])["sharing_offer_ratio"] == 0.5
-    assert codec.decode([0.0, 1.0])["sharing_offer_ratio"] == 1.0
+    codec = ActionCodec()
+    assert codec.decode([0.0]) == {"battery": 0.0}
+    assert codec.decode([2.0]) == {"battery": 1.0}
 
     result = CooperativeEnergySharing().allocate_structured(
         renewable_offers_kw={"mg1": 0.0, "mg2": 0.0, "mg3": 0.0},
@@ -72,18 +70,18 @@ def test_sharing_action_is_offer_cap_not_executed_trade_ratio() -> None:
 def test_renewable_p2p_only_keeps_peer_pool_but_blocks_ess_exports() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     config["_project_root"] = str(ROOT)
-    config = get_algorithm_spec("matd3_renewable_p2p_only").build_environment_config(config)
+    config["ess_sharing"]["ess_p2p_enabled"] = False
     env = MultiMicrogridEnv(config, split="test")
     env.reset(seed=7, deterministic=True)
 
-    assert env.action_dim == 2
+    assert env.action_dim == 1
     assert env.energy_pool.enabled
     assert not env.ess_p2p_enabled
 
     done = False
     saw_renewable_offer = False
     while not done:
-        actions = {mg: np.asarray([1.0, 1.0], dtype=np.float32) for mg in env.agent_ids}
+        actions = {mg: np.asarray([1.0], dtype=np.float32) for mg in env.agent_ids}
         _, _, done, info = env.step(actions)
         for mg in env.agent_ids:
             plan = info["plans"][mg]
@@ -95,42 +93,6 @@ def test_renewable_p2p_only_keeps_peer_pool_but_blocks_ess_exports() -> None:
     assert saw_renewable_offer
 
 
-def test_milp_mpc_matches_sharing_interface_and_executes_first_step() -> None:
-    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    config["_project_root"] = str(ROOT)
-    spec = get_algorithm_spec("milp_ess_sharing_mpc")
-    env = MultiMicrogridEnv(spec.build_environment_config(config), split="test")
-    observations, _ = env.reset(seed=11, deterministic=True)
-    algorithm_config = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
-    controller = spec.create(env, algorithm_config, seed=11)
-    assert controller.forecast_horizon == env.obs_builder.future_h == 4
-
-    actions = controller.select_actions(observations)
-    assert all(action.shape == (2,) for action in actions.values())
-    assert all(np.isfinite(action).all() for action in actions.values())
-    assert all(np.max(np.abs(action)) <= 1.0 for action in actions.values())
-    _, _, _, info = env.step(actions)
-    assert all(abs(item["power_balance_residual_kw"]) < 1e-7 for item in info["settlements"].values())
-
-
-def test_renewable_only_milp_blocks_ess_exports_with_matching_mpc_interface() -> None:
-    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    config["_project_root"] = str(ROOT)
-    spec = get_algorithm_spec("milp_renewable_p2p_only")
-    env = MultiMicrogridEnv(spec.build_environment_config(config), split="test")
-    observations, _ = env.reset(seed=11, deterministic=True)
-    algorithm_config = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
-    controller = spec.create(env, algorithm_config, seed=11)
-
-    actions = controller.select_actions(observations)
-    assert all(action.shape == (2,) for action in actions.values())
-    assert all(np.isclose(action[1], -1.0) for action in actions.values())
-    _, _, _, info = env.step(actions)
-    assert all(
-        np.isclose(info["p2p"]["by_microgrid"][mg]["ess_p2p_sell_kw"], 0.0)
-        for mg in env.agent_ids
-    )
-    assert all(abs(item["power_balance_residual_kw"]) < 1e-7 for item in info["settlements"].values())
 
 
 def test_independent_mode_disables_p2p() -> None:
@@ -163,99 +125,18 @@ def test_environment_has_one_battery_action_and_no_capacity_commitment_fields() 
     assert all(abs(x["power_balance_residual_kw"]) < 1e-7 for x in info["settlements"].values())
 
 
-def test_unmatched_full_offer_remains_in_battery() -> None:
-    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    config["_project_root"] = str(ROOT)
-    config["p2p"]["enabled"] = False
-    config["ess_sharing"] = {"control_mode": "fixed_full_offer", "observation_mode": "local"}
-    env = MultiMicrogridEnv(config, split="test")
-    env.reset(day=str(env.data.valid_days[0].date()), seed=4, deterministic=True)
-    actions = {mg: np.asarray([1.0 if mg == "mg1" else 0.0]) for mg in env.agent_ids}
-    _, _, _, info = env.step(actions)
-    plan = info["plans"]["mg1"]
-    assert plan["ess_p2p_offer_kw"] > 0.0
-    assert np.isclose(plan["ess_p2p_unmatched_kw"], plan["ess_p2p_offer_kw"])
-    assert np.isclose(plan["battery_discharge_kw"], plan["ess_to_local_kw"])
-    assert plan["battery_discharge_kw"] < plan["battery_discharge_requested_kw"]
-    assert np.isclose(info["devices"]["mg1"]["discharge_kw"], plan["battery_discharge_kw"])
-
-
-def test_partial_offer_is_reproducible_by_full_offer_with_scaled_discharge() -> None:
-    base = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    base["_project_root"] = str(ROOT)
-    explicit_config = get_algorithm_spec("matd3_ess_sharing").build_environment_config(base)
-    full_config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
-    full_config["_project_root"] = str(ROOT)
-    full_config["ess_sharing"] = {
-        "control_mode": "fixed_full_offer",
-        "observation_mode": "cross_microgrid",
-    }
-    explicit = MultiMicrogridEnv(explicit_config, split="test")
-    full = MultiMicrogridEnv(full_config, split="test")
-    day = str(explicit.data.valid_days[0].date())
-    explicit.reset(day=day, seed=7, deterministic=True)
-    full.reset(day=day, seed=7, deterministic=True)
-
-    explicit_actions = {
-        "mg1": np.asarray([0.85, -0.50]),
-        "mg2": np.asarray([1.00, -0.20]),
-        "mg3": np.asarray([0.70, 0.20]),
-    }
-    current = explicit._exogenous_at(explicit.t)
-    tolerance = float(explicit.config["terminal_soc"]["tolerance"])
-    full_actions = {}
-    for mg, action in explicit_actions.items():
-        battery = explicit.cores[mg].battery
-        floor, ceiling = battery.reachable_soc_envelope(
-            t=explicit.t,
-            episode_length=explicit.episode_length,
-            target_soc=battery.initial_soc,
-            tolerance=tolerance,
-        )
-        mapped = battery.map_action(float(action[0]), floor, ceiling)
-        requested = float(mapped["discharge_requested_kw"])
-        local_deficit = max(
-            0.0, float(current[mg]["load_kw"]) - float(current[mg]["renewable_kw"])
-        )
-        local = min(requested, local_deficit)
-        flexible = max(0.0, requested - local)
-        offer_ratio = float((action[1] + 1.0) / 2.0)
-        equivalent_discharge = local + flexible * offer_ratio
-        equivalent_action = _invert_battery_action(
-            full.cores[mg].battery,
-            0.0,
-            equivalent_discharge,
-            floor,
-            ceiling,
-        )
-        full_actions[mg] = np.asarray([equivalent_action])
-
-    _, _, _, explicit_info = explicit.step(explicit_actions)
-    _, _, _, full_info = full.step(full_actions)
-    assert sum(
-        values["ess_p2p_sell_kw"]
-        for values in explicit_info["p2p"]["by_microgrid"].values()
-    ) > 0.0
-    assert explicit_info["p2p"]["pair_flows_kwh"].keys() == full_info["p2p"]["pair_flows_kwh"].keys()
-    for pair, energy in explicit_info["p2p"]["pair_flows_kwh"].items():
-        assert np.isclose(energy, full_info["p2p"]["pair_flows_kwh"][pair])
-    assert np.isclose(explicit_info["team_profit"], full_info["team_profit"])
-    for mg in explicit.agent_ids:
-        assert np.isclose(
-            explicit_info["devices"][mg]["soc"], full_info["devices"][mg]["soc"]
-        )
 
 
 def test_ess_p2p_sale_never_coincides_with_external_grid_import() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     config["_project_root"] = str(ROOT)
-    config = get_algorithm_spec("matd3_ess_sharing").build_environment_config(config)
+    config = get_algorithm_spec("matd3_dispatch").build_environment_config(config)
     env = MultiMicrogridEnv(config, split="test")
     env.reset(day=str(env.data.valid_days[0].date()), seed=5, deterministic=True)
     actions = {
-        "mg1": np.asarray([1.0, 1.0]),
-        "mg2": np.asarray([-1.0, -1.0]),
-        "mg3": np.asarray([-1.0, -1.0]),
+        "mg1": np.asarray([1.0]),
+        "mg2": np.asarray([-1.0]),
+        "mg3": np.asarray([-1.0]),
     }
     _, _, _, info = env.step(actions)
     assert info["p2p"]["by_microgrid"]["mg1"]["ess_p2p_sell_kw"] > 0.0
