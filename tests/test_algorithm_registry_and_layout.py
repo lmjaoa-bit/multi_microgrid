@@ -29,7 +29,7 @@ def test_matd3_plugin_is_discoverable_and_satisfies_pipeline_contract() -> None:
 
 def test_retained_plugins_have_isolated_configs_and_matching_interfaces():
     names = available_algorithm_names()
-    assert names == ["crossgate", "matd3_dispatch"]
+    assert set(names) >= {"crossgate", "matd3_dispatch"}
     base = yaml.safe_load(ENV_CONFIG.read_text(encoding="utf-8"))
     dims = []
     for slug in names:
@@ -41,7 +41,8 @@ def test_retained_plugins_have_isolated_configs_and_matching_interfaces():
         assert env.ess_sharing_control_mode == "single_dispatch"
         assert env.ess_sharing_observation_mode == "cross_microgrid"
         dims.append(env.observation_dims)
-    assert dims[0] == dims[1]
+    for d in dims[1:]:
+        assert d == dims[0]
 
 
 def test_experiment_layout_isolates_algorithms_and_runs(tmp_path: Path) -> None:

@@ -1,0 +1,2131 @@
+{
+  "surface": "report",
+  "manifest": {
+    "version": 1,
+    "surface": "report",
+    "title": "PNN vs MATD3: Performance Review",
+    "generatedAt": "2026-09-05T09:50:14.234Z",
+    "blocks": [
+      {
+        "id": "title",
+        "type": "markdown",
+        "body": "# PNN vs MATD3: Performance Review"
+      },
+      {
+        "id": "summary",
+        "type": "markdown",
+        "body": "## 技术摘要：PNN 尚未显示值得替换基线的收益优势\n\n同配置、同一批55个测试日、seed=42的保存结果中，PNN日均收益为 **−1011.10**，普通MATD3为 **−1011.65**。PNN只提高 **0.55/日**，相当于平均净成本减少 **0.055%**；26天更好、29天更差。\n\nPNN验证集表现更好，但训练耗时为 **59.18分钟**，普通MATD3为 **34.05分钟**，增加约 **73.8%**。当前更合理的选择是保留普通MATD3为默认基线，将PNN继续作为待验证的变体。\n\n收益单位沿用项目计价单位，未确认具体币种；负值表示净成本，越接近零越好。下文所有收益差均为PNN减MATD3。",
+        "sourceId": "saved_comparison"
+      },
+      {
+        "id": "scope",
+        "type": "markdown",
+        "body": "## 使用完整实验比较，排除3轮冒烟结果\n\nPNN取9月4日20:34开始的最新完整实验，普通MATD3取同日16:19开始、旧目录名为matd3_plain_single_dispatch的完整实验。当前matd3_dispatch目录只有3轮冒烟结果，不能作为5000轮PNN的性能基线。\n\n两者均训练 **5000轮 / 120000步**，使用同55个测试日期、单调度动作、每微网52维观测、相同物理与环境配置哈希；学习率、批大小、探索噪声等保存配置相同。正式测试都加载验证集选择的 **best_model.pt**。逐时负荷、可再生能源及Idle/合作MILP参照值一致。\n\n**可比性限制：** 两次运行记录的Git提交不同，旧基线包未包含在其记录提交中，无法完整还原运行时未提交代码。因此这是已核对配置与数据的历史实验比较，不能宣称完成了严格的同版本控制实验。",
+        "sourceId": "saved_comparison"
+      },
+      {
+        "id": "result",
+        "type": "markdown",
+        "body": "## 55天总共只多30.33，日间差异远大于平均优势\n\n逐日配对收益差的中位数为 **−0.95**，标准差为 **47.84**；最大领先 **107.73**，最大落后 **118.20**。下图按测试日期顺序展示55个收益差，正值表示PNN占优；横轴是所选测试日序号，并非连续自然日。\n\n逐日独立重采样得到均值差95%区间约 **[−12.16, 12.97]**，按月份聚类重采样约 **[−11.86, 12.71]**，均跨零。这两种区间只描述这批测试场景的敏感性，不能替代多训练种子结果。",
+        "sourceId": "saved_comparison"
+      },
+      {
+        "id": "paired_block",
+        "type": "chart",
+        "chartId": "paired"
+      },
+      {
+        "id": "metrics_block",
+        "type": "table",
+        "tableId": "metrics"
+      },
+      {
+        "id": "season",
+        "type": "markdown",
+        "body": "## 第一季度的优势，被后续季度抵消\n\n四个季度的平均收益差依次为 **+25.56、−7.13、−11.36、−3.63/日**，对应测试日数为13、14、13、15。PNN的平均微弱领先主要由第一季度支撑，不能解读为全年场景普遍改善。\n\n两者相对Idle的日均提升为 **73.36 / 72.81**（PNN / MATD3），说明两种策略都已学到有用调度；但相对合作MILP的日均收益参照 **−748.76**，仍分别相差约 **262.34 / 262.89**。该MILP是单独优化参照，不能把全部差距归因于Actor结构。",
+        "sourceId": "saved_comparison"
+      },
+      {
+        "id": "training",
+        "type": "markdown",
+        "body": "## 验证曲线更好，不等于测试收益明显提高\n\nPNN最佳验证收益 **−811.65**，出现在4200轮；普通MATD3为 **−819.57**，出现在5000轮。最后10次验证的均值为 **−818.39 / −832.33**，检查点间标准差为 **5.23 / 9.74**。本次运行中PNN后期验证表现更好、波动更小。\n\n下图使用全部50次保存验证结果，收益越高越好。它衡量固定验证集上模型随训练的变化；不能将验证曲线平稳直接解释为跨随机种子稳定，也不能仅凭最佳轮数判定收敛速度。PNN最后500轮训练收益均值高约9.77，但正式测试差仅0.55。",
+        "sourceId": "saved_comparison"
+      },
+      {
+        "id": "validation_block",
+        "type": "chart",
+        "chartId": "validation"
+      },
+      {
+        "id": "dispatch",
+        "type": "markdown",
+        "body": "## 更多储能交易，大部分没有转化为系统收益\n\nPNN的P2P电量从 **901.00增至944.64 kWh/日（+4.84%）**。ESS成交从 **148.56增至185.44 kWh/日**，但申报量从398.61增至529.16，未成交量从 **250.05增至343.72 kWh/日**。按累计电量计算的成交率反而由 **37.27%降至35.04%**。\n\nP2P付款属于系统内部转账，不能把交易增量直接当成系统新增利润。保存轨迹的收益分解为：购电支出减少 **+3.32**，外送收入减少 **−2.55**，电池损耗支出增加 **−0.27**，其他成本改善 **+0.05**，合计 **+0.55/日**。下图的正值增加收益、负值抵消收益；这些是会计分解，不是独立干预实验。",
+        "sourceId": "saved_comparison"
+      },
+      {
+        "id": "economics_block",
+        "type": "chart",
+        "chartId": "economics"
+      },
+      {
+        "id": "microgrid",
+        "type": "markdown",
+        "body": "## MG1的外部收益改善，被MG2与MG3基本抵消\n\n包含内部交易结算的物理收益差为：**MG1 +7.07、MG2 +2.58、MG3 −9.10/日**。扣除P2P内部净转账后，外部收益变化为 **+18.21、−4.10、−13.56/日**，合计仍为+0.55。\n\nMG2物理收益变好而外部收益变差，说明它的一部分改善来自内部转账。若要寻找系统效率问题，应优先检查MG3和MG2的购售电与储能时序，而不能仅凭某个微网的物理账面收益判优。",
+        "sourceId": "saved_comparison"
+      },
+      {
+        "id": "network",
+        "type": "markdown",
+        "body": "## PNN增加了交互表达，也带来更强的梯度与饱和\n\n当前PNN是Product-based Neural Network：将同一完整观测分为本地、市场反馈和同行三组，加入两两逐元素乘积，并配合归一化、0.2缩放及小权重输出初始化。普通MATD3也能读取同行信息，差异在处理信息的结构。\n\n每个Actor参数为 **27265 / 23425**（PNN / MATD3），增加 **16.4%**。最后500轮训练中，MG2动作饱和率（|动作|≥0.95）为 **38.16% / 19.05%**，梯度裁剪触发率为 **23.23% / 0.20%**。两者保存诊断均没有非有限数值。\n\n这提示PNN优化过程更依赖裁剪、更多动作接近边界；不能单凭饱和就认定策略错误或数值发散。训练耗时还包含实现和诊断开销，不能据此推算推理速度。当前差异同时包含分组、归一化、网络规模及初始化，尚未通过消融确认乘积项本身的贡献。",
+        "sourceId": "saved_comparison"
+      },
+      {
+        "id": "settlement",
+        "type": "markdown",
+        "body": "## 物理可行性相同，公平结算没有产生额外系统收益\n\n两者测试可行日比例均为 **100%**，SOC、功率平衡、P2P平衡违规率均为零，MILP失败和无效Shapley日均为零；可再生能源利用率都约 **97.97%**。\n\nEqual与Shapley只是重新分配同一系统收益。两种结算下，所有微网均不低于独立基准的日比例，PNN为 **45/55（81.82%）**，普通MATD3为 **46/55（83.64%）**。因此PNN也没有体现更稳定的全员获益。结算加总与系统收益一致，浮点预算平衡误差小于1e−12。",
+        "sourceId": "saved_comparison"
+      },
+      {
+        "id": "next",
+        "type": "markdown",
+        "body": "## 下一步：先证明可重复收益，再扩大结构复杂度\n\n1. **保持普通MATD3为基线。** 现有0.055%的平均净成本差，不足以支持为PNN承担约74%的训练耗时增加。\n2. 固定完整源代码快照、相同环境和验证/测试日，在相同5000轮预算下做多个配对训练种子；另报告相同墙钟时间预算，区分样本效率与计算效率。\n3. 用验证集检查MG2/MG3的储能申报、实际成交及后续购电成本；正式测试集仅作最终评估，避免按这55天反复调参。\n4. 若继续研究PNN，做参数量和归一化尽可能匹配的无乘积交互对照，才可判断二阶交互是否带来收益。\n\n待回答的问题是：优势是否能跨训练种子复现？哪些状态下新增ESS成交真正节省外部成本？目前没有单因素消融或多种子证据，不能把收益差归因于某个乘积项。",
+        "sourceId": "saved_comparison"
+      }
+    ],
+    "charts": [
+      {
+        "id": "paired",
+        "title": "逐日配对收益差",
+        "subtitle": "55个相同测试日；PNN−MATD3，项目计价单位/日",
+        "type": "line",
+        "dataset": "paired",
+        "sourceId": "saved_comparison",
+        "encodings": {
+          "x": {
+            "field": "test_day"
+          },
+          "y": {
+            "fields": [
+              "delta",
+              "zero"
+            ]
+          }
+        },
+        "layout": "full",
+        "valueFormat": "number",
+        "palette": {
+          "kind": "sequential",
+          "name": "blue"
+        }
+      },
+      {
+        "id": "validation",
+        "title": "验证收益随训练轮数的变化",
+        "subtitle": "固定验证集；每100轮一次，收益越高越好",
+        "type": "line",
+        "dataset": "validation",
+        "sourceId": "saved_comparison",
+        "encodings": {
+          "x": {
+            "field": "episode"
+          },
+          "y": {
+            "field": "profit"
+          },
+          "color": {
+            "field": "algorithm"
+          },
+          "lineStyle": {
+            "field": "line_style"
+          }
+        },
+        "layout": "full",
+        "valueFormat": "number",
+        "palette": {
+          "kind": "categorical",
+          "colors": [
+            "#3b6fb6",
+            "#c69235"
+          ]
+        }
+      },
+      {
+        "id": "economics",
+        "title": "日均收益差的收支分解",
+        "subtitle": "PNN−MATD3；四项合计+0.55，内部P2P转账抵消",
+        "type": "bar",
+        "dataset": "economics",
+        "sourceId": "saved_comparison",
+        "encodings": {
+          "x": {
+            "field": "label"
+          },
+          "y": {
+            "field": "gain"
+          }
+        },
+        "layout": "full",
+        "valueFormat": "number",
+        "palette": {
+          "kind": "sequential",
+          "name": "blue"
+        },
+        "labels": {
+          "values": "all"
+        }
+      }
+    ],
+    "tables": [
+      {
+        "id": "metrics",
+        "title": "正式测试与训练成本对比",
+        "dataset": "metrics",
+        "sourceId": "saved_comparison",
+        "defaultSort": {
+          "field": "algorithm",
+          "direction": "asc"
+        },
+        "columns": [
+          {
+            "field": "algorithm",
+            "label": "算法",
+            "type": "text"
+          },
+          {
+            "field": "profit",
+            "label": "日均收益",
+            "format": "number"
+          },
+          {
+            "field": "training_minutes",
+            "label": "训练分钟",
+            "format": "number"
+          },
+          {
+            "field": "best_episode",
+            "label": "最佳轮次",
+            "format": "number"
+          },
+          {
+            "field": "validation_best",
+            "label": "最佳验证收益",
+            "format": "number"
+          },
+          {
+            "field": "ess_acceptance",
+            "label": "ESS成交率",
+            "format": "percent"
+          }
+        ]
+      }
+    ],
+    "sources": [
+      {
+        "id": "saved_comparison",
+        "label": "PNN 与普通 MATD3 保存结果复核",
+        "path": "reports/pnn_matd3_comparison_20260905/evidence.json",
+        "query": {
+          "engine": "Python / pandas",
+          "language": "python",
+          "description": "analyze.py 读取两组保存的逐日、逐时、训练与验证文件；按测试日期配对，核对摘要与逐时加总。",
+          "tables_used": [
+            "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/test_daily_metrics.csv",
+            "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/test_summary.json",
+            "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/training_summary.json",
+            "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/validation_history.json",
+            "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/actor_diagnostics.csv",
+            "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/config_snapshot.yaml",
+            "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/run_metadata.json",
+            "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/test_hourly_trajectories/*.csv",
+            "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/training_history.jsonl",
+            "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/test_daily_metrics.csv",
+            "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/test_summary.json",
+            "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/training_summary.json",
+            "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/validation_history.json",
+            "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/actor_diagnostics.csv",
+            "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/config_snapshot.yaml",
+            "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/run_metadata.json",
+            "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/test_hourly_trajectories/*.csv",
+            "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/training_history.jsonl"
+          ],
+          "filters": [
+            "seed=42; 5000 training episodes; same 55 held-out dates, 2018-01-28 through 2018-12-31; best_model.pt selected on validation.",
+            "Exclude all smoke runs. Select latest completed 5000-episode PNN run and historical plain single-dispatch MATD3 run."
+          ],
+          "metric_definitions": [
+            "收益采用项目计价单位；负值表示净成本，越大越好。日均值为55个测试日的算术平均。",
+            "收益差 = PNN - MATD3；相对净成本改善 = 平均收益差 / abs(MATD3平均收益)。",
+            "外部收益差 = 物理收益差 - P2P内部净转账差；账户分解不代表单个Agent的因果贡献。",
+            "ESS成交率 = 55日累计成交电量 / 累计申报电量；不是逐日成交率的简单平均。",
+            "Bootstrap 20000次，随机种子20260905；月份聚类重采样保留同月天的共同变动；均不衡量训练随机性。"
+          ]
+        }
+      }
+    ]
+  },
+  "snapshot": {
+    "version": 1,
+    "status": "ready",
+    "generatedAt": "2026-09-05T09:50:14.234Z",
+    "datasets": {
+      "metrics": [
+        {
+          "algorithm": "MATD3",
+          "profit": -1011.648843447995,
+          "test_std": 925.6440626938667,
+          "test_days": 55,
+          "training_minutes": 34.05499888499999,
+          "best_episode": 5000,
+          "validation_best": -819.5730913409408,
+          "actor_parameters": 23425,
+          "p2p": 900.9977687696158,
+          "ess_offer": 398.61013673606965,
+          "ess_accepted": 148.56201624596827,
+          "ess_unmatched": 250.04812049010152,
+          "ess_acceptance": 0.37270004587047195,
+          "renewable": 0.9797292357375273,
+          "feasible": 1,
+          "ir": 0.8363636363636363,
+          "val_last10_mean": -832.3261623887608,
+          "val_last10_std": 9.738043406712789,
+          "idle_gain": 72.80686052434069
+        },
+        {
+          "algorithm": "PNN",
+          "profit": -1011.0973507281604,
+          "test_std": 936.2956981859752,
+          "test_days": 55,
+          "training_minutes": 59.17628667000002,
+          "best_episode": 4200,
+          "validation_best": -811.6541609121493,
+          "actor_parameters": 27265,
+          "p2p": 944.6375289886852,
+          "ess_offer": 529.1639146931111,
+          "ess_accepted": 185.44333250305002,
+          "ess_unmatched": 343.72058219006107,
+          "ess_acceptance": 0.35044591544115017,
+          "renewable": 0.9797177699516074,
+          "feasible": 1,
+          "ir": 0.8181818181818182,
+          "val_last10_mean": -818.3898664136693,
+          "val_last10_std": 5.230537872606849,
+          "idle_gain": 73.3583532441755
+        }
+      ],
+      "paired": [
+        {
+          "date": "2018-01-28",
+          "matd3": -731.5385795056882,
+          "pnn": -722.8406995123993,
+          "delta": 8.697879993288893,
+          "idle": -795.6352881774772,
+          "renewable_kwh": 4301.322920105821,
+          "cooperative_milp": -418.9404912839066,
+          "month": 1,
+          "quarter": 1,
+          "test_day": 1,
+          "zero": 0
+        },
+        {
+          "date": "2018-01-29",
+          "matd3": -1923.3021933933055,
+          "pnn": -1902.2671266150012,
+          "delta": 21.035066778304326,
+          "idle": -1945.636697968289,
+          "renewable_kwh": 3120.545182539682,
+          "cooperative_milp": -1635.5059767405062,
+          "month": 1,
+          "quarter": 1,
+          "test_day": 2,
+          "zero": 0
+        },
+        {
+          "date": "2018-01-30",
+          "matd3": -2663.596403912779,
+          "pnn": -2595.500360927924,
+          "delta": 68.0960429848551,
+          "idle": -2651.5789286431204,
+          "renewable_kwh": 1872.5189714285711,
+          "cooperative_milp": -2394.3573894321157,
+          "month": 1,
+          "quarter": 1,
+          "test_day": 3,
+          "zero": 0
+        },
+        {
+          "date": "2018-01-31",
+          "matd3": -3080.875978899548,
+          "pnn": -3082.718665932701,
+          "delta": -1.8426870331527425,
+          "idle": -3088.4301953735358,
+          "renewable_kwh": 1089.1113285714289,
+          "cooperative_milp": -2915.6964044832494,
+          "month": 1,
+          "quarter": 1,
+          "test_day": 4,
+          "zero": 0
+        },
+        {
+          "date": "2018-02-24",
+          "matd3": -271.6854951047882,
+          "pnn": -163.95221190370015,
+          "delta": 107.73328320108803,
+          "idle": -318.9415444307974,
+          "renewable_kwh": 7163.632190476189,
+          "cooperative_milp": 115.16621937787576,
+          "month": 2,
+          "quarter": 1,
+          "test_day": 5,
+          "zero": 0
+        },
+        {
+          "date": "2018-02-25",
+          "matd3": -1027.841510003529,
+          "pnn": -1146.0445009734665,
+          "delta": -118.20299096993745,
+          "idle": -1147.938107347021,
+          "renewable_kwh": 4033.934895767196,
+          "cooperative_milp": -766.0499341755334,
+          "month": 2,
+          "quarter": 1,
+          "test_day": 6,
+          "zero": 0
+        },
+        {
+          "date": "2018-02-26",
+          "matd3": -871.1045368293059,
+          "pnn": -793.3480575405556,
+          "delta": 77.75647928875026,
+          "idle": -907.3489803006958,
+          "renewable_kwh": 6172.318259259258,
+          "cooperative_milp": -570.7846953931672,
+          "month": 2,
+          "quarter": 1,
+          "test_day": 7,
+          "zero": 0
+        },
+        {
+          "date": "2018-02-27",
+          "matd3": -944.0583452077992,
+          "pnn": -861.3128215958584,
+          "delta": 82.74552361194083,
+          "idle": -953.294100936174,
+          "renewable_kwh": 6019.157719047619,
+          "cooperative_milp": -596.3698219425677,
+          "month": 2,
+          "quarter": 1,
+          "test_day": 8,
+          "zero": 0
+        },
+        {
+          "date": "2018-02-28",
+          "matd3": -858.0796906399509,
+          "pnn": -876.950229238441,
+          "delta": -18.870538598490157,
+          "idle": -975.987153529376,
+          "renewable_kwh": 6487.183639153439,
+          "cooperative_milp": -606.2304529849661,
+          "month": 2,
+          "quarter": 1,
+          "test_day": 9,
+          "zero": 0
+        },
+        {
+          "date": "2018-03-28",
+          "matd3": -16.953004795191056,
+          "pnn": 44.89149623441236,
+          "delta": 61.844501029603414,
+          "idle": -138.84289173933138,
+          "renewable_kwh": 8125.140211111111,
+          "cooperative_milp": 276.8728244146781,
+          "month": 3,
+          "quarter": 1,
+          "test_day": 10,
+          "zero": 0
+        },
+        {
+          "date": "2018-03-29",
+          "matd3": -1064.6135976618289,
+          "pnn": -1070.6461584248275,
+          "delta": -6.032560762998628,
+          "idle": -1192.5584376432537,
+          "renewable_kwh": 4573.400756613756,
+          "cooperative_milp": -792.4961456889985,
+          "month": 3,
+          "quarter": 1,
+          "test_day": 11,
+          "zero": 0
+        },
+        {
+          "date": "2018-03-30",
+          "matd3": -1444.156684072218,
+          "pnn": -1473.580041712131,
+          "delta": -29.423357639913092,
+          "idle": -1581.098704540219,
+          "renewable_kwh": 3262.3019645502645,
+          "cooperative_milp": -1246.123146515593,
+          "month": 3,
+          "quarter": 1,
+          "test_day": 12,
+          "zero": 0
+        },
+        {
+          "date": "2018-03-31",
+          "matd3": -739.0900853075628,
+          "pnn": -660.3882053376822,
+          "delta": 78.70187996988068,
+          "idle": -825.8216371711216,
+          "renewable_kwh": 4704.910102645503,
+          "cooperative_milp": -490.7719068721968,
+          "month": 3,
+          "quarter": 1,
+          "test_day": 13,
+          "zero": 0
+        },
+        {
+          "date": "2018-04-26",
+          "matd3": -1709.0683755165533,
+          "pnn": -1772.6487174996112,
+          "delta": -63.580341983057906,
+          "idle": -1818.455939936528,
+          "renewable_kwh": 2725.722443386243,
+          "cooperative_milp": -1465.9451212913923,
+          "month": 4,
+          "quarter": 2,
+          "test_day": 14,
+          "zero": 0
+        },
+        {
+          "date": "2018-04-27",
+          "matd3": -604.6687034557452,
+          "pnn": -603.4093213157524,
+          "delta": 1.2593821399927947,
+          "idle": -725.8154098351866,
+          "renewable_kwh": 5560.8874005291,
+          "cooperative_milp": -329.8861351085755,
+          "month": 4,
+          "quarter": 2,
+          "test_day": 15,
+          "zero": 0
+        },
+        {
+          "date": "2018-04-28",
+          "matd3": -381.6134507472625,
+          "pnn": -320.3960665369657,
+          "delta": 61.217384210296814,
+          "idle": -381.9044127346058,
+          "renewable_kwh": 5251.249057671957,
+          "cooperative_milp": -106.59378008976157,
+          "month": 4,
+          "quarter": 2,
+          "test_day": 16,
+          "zero": 0
+        },
+        {
+          "date": "2018-04-29",
+          "matd3": -719.9620012922605,
+          "pnn": -739.8392994463954,
+          "delta": -19.877298154134905,
+          "idle": -840.0836036109179,
+          "renewable_kwh": 3864.7249306878302,
+          "cooperative_milp": -492.0710771405054,
+          "month": 4,
+          "quarter": 2,
+          "test_day": 17,
+          "zero": 0
+        },
+        {
+          "date": "2018-04-30",
+          "matd3": -979.9670029988276,
+          "pnn": -1022.2376092524988,
+          "delta": -42.27060625367119,
+          "idle": -1094.3805213955138,
+          "renewable_kwh": 4453.7967301587305,
+          "cooperative_milp": -757.7573832095472,
+          "month": 4,
+          "quarter": 2,
+          "test_day": 18,
+          "zero": 0
+        },
+        {
+          "date": "2018-05-28",
+          "matd3": -869.8499622385865,
+          "pnn": -877.1598145951181,
+          "delta": -7.3098523565315645,
+          "idle": -966.5463734799974,
+          "renewable_kwh": 3462.610765608465,
+          "cooperative_milp": -625.7541840034443,
+          "month": 5,
+          "quarter": 2,
+          "test_day": 19,
+          "zero": 0
+        },
+        {
+          "date": "2018-05-29",
+          "matd3": -1499.9722657349323,
+          "pnn": -1516.4723897705978,
+          "delta": -16.50012403566552,
+          "idle": -1560.0502762973697,
+          "renewable_kwh": 2745.742148148148,
+          "cooperative_milp": -1228.316952405851,
+          "month": 5,
+          "quarter": 2,
+          "test_day": 20,
+          "zero": 0
+        },
+        {
+          "date": "2018-05-30",
+          "matd3": -1203.4087410671266,
+          "pnn": -1227.825533891788,
+          "delta": -24.416792824661343,
+          "idle": -1275.8966001874255,
+          "renewable_kwh": 3707.274714814815,
+          "cooperative_milp": -901.615526776022,
+          "month": 5,
+          "quarter": 2,
+          "test_day": 21,
+          "zero": 0
+        },
+        {
+          "date": "2018-05-31",
+          "matd3": -1406.5101760439532,
+          "pnn": -1380.4116565474842,
+          "delta": 26.098519496468953,
+          "idle": -1487.0508695980716,
+          "renewable_kwh": 3096.1404708994705,
+          "cooperative_milp": -1086.300996505414,
+          "month": 5,
+          "quarter": 2,
+          "test_day": 22,
+          "zero": 0
+        },
+        {
+          "date": "2018-06-26",
+          "matd3": 246.26793102902204,
+          "pnn": 233.3051137240197,
+          "delta": -12.962817305002346,
+          "idle": 66.88919376998253,
+          "renewable_kwh": 9555.4491994709,
+          "cooperative_milp": 560.0605940492422,
+          "month": 6,
+          "quarter": 2,
+          "test_day": 23,
+          "zero": 0
+        },
+        {
+          "date": "2018-06-27",
+          "matd3": 491.2849678373853,
+          "pnn": 495.9472341432223,
+          "delta": 4.662266305837022,
+          "idle": 475.9109037452417,
+          "renewable_kwh": 9339.065230687833,
+          "cooperative_milp": 788.3952808319401,
+          "month": 6,
+          "quarter": 2,
+          "test_day": 24,
+          "zero": 0
+        },
+        {
+          "date": "2018-06-28",
+          "matd3": -1111.0158265584405,
+          "pnn": -1066.002786220409,
+          "delta": 45.01304033803149,
+          "idle": -1201.3381708619124,
+          "renewable_kwh": 3873.532756613757,
+          "cooperative_milp": -850.3084269609129,
+          "month": 6,
+          "quarter": 2,
+          "test_day": 25,
+          "zero": 0
+        },
+        {
+          "date": "2018-06-29",
+          "matd3": -934.8188089606308,
+          "pnn": -935.5109458200866,
+          "delta": -0.6921368594557862,
+          "idle": -997.925473957068,
+          "renewable_kwh": 4087.6199994709,
+          "cooperative_milp": -683.6203128355119,
+          "month": 6,
+          "quarter": 2,
+          "test_day": 26,
+          "zero": 0
+        },
+        {
+          "date": "2018-06-30",
+          "matd3": -385.13864368434815,
+          "pnn": -435.6535594218919,
+          "delta": -50.51491573754373,
+          "idle": -424.5027460176786,
+          "renewable_kwh": 3672.5940349206335,
+          "cooperative_milp": -245.84340747643012,
+          "month": 6,
+          "quarter": 2,
+          "test_day": 27,
+          "zero": 0
+        },
+        {
+          "date": "2018-07-28",
+          "matd3": -863.4562926284898,
+          "pnn": -864.4109180904848,
+          "delta": -0.954625461994965,
+          "idle": -959.0983669002864,
+          "renewable_kwh": 4112.305858730158,
+          "cooperative_milp": -502.24279735053466,
+          "month": 7,
+          "quarter": 3,
+          "test_day": 28,
+          "zero": 0
+        },
+        {
+          "date": "2018-07-29",
+          "matd3": -992.6436988768164,
+          "pnn": -1048.0116251202403,
+          "delta": -55.36792624342388,
+          "idle": -1083.1346225124694,
+          "renewable_kwh": 2952.4060968253966,
+          "cooperative_milp": -756.3522250215582,
+          "month": 7,
+          "quarter": 3,
+          "test_day": 29,
+          "zero": 0
+        },
+        {
+          "date": "2018-07-30",
+          "matd3": -1179.1683877606436,
+          "pnn": -1181.2799066666114,
+          "delta": -2.1115189059678414,
+          "idle": -1279.6995291026074,
+          "renewable_kwh": 3858.16978042328,
+          "cooperative_milp": -879.9096251893352,
+          "month": 7,
+          "quarter": 3,
+          "test_day": 30,
+          "zero": 0
+        },
+        {
+          "date": "2018-07-31",
+          "matd3": -986.5354844247112,
+          "pnn": -990.8227605342952,
+          "delta": -4.287276109584013,
+          "idle": -1125.6001906926938,
+          "renewable_kwh": 4307.192059788359,
+          "cooperative_milp": -711.0276804523547,
+          "month": 7,
+          "quarter": 3,
+          "test_day": 31,
+          "zero": 0
+        },
+        {
+          "date": "2018-08-28",
+          "matd3": 20.1816229567169,
+          "pnn": 53.63971755889092,
+          "delta": 33.45809460217402,
+          "idle": -49.095494155561525,
+          "renewable_kwh": 6399.16598941799,
+          "cooperative_milp": 256.46883748882635,
+          "month": 8,
+          "quarter": 3,
+          "test_day": 32,
+          "zero": 0
+        },
+        {
+          "date": "2018-08-29",
+          "matd3": -198.3671994521096,
+          "pnn": -170.55461346213127,
+          "delta": 27.812585989978317,
+          "idle": -268.7751174634836,
+          "renewable_kwh": 6107.313970370371,
+          "cooperative_milp": 117.232815047875,
+          "month": 8,
+          "quarter": 3,
+          "test_day": 33,
+          "zero": 0
+        },
+        {
+          "date": "2018-08-30",
+          "matd3": -426.7225976078077,
+          "pnn": -415.42652353973074,
+          "delta": 11.296074068076962,
+          "idle": -572.2206928179986,
+          "renewable_kwh": 5505.337385714285,
+          "cooperative_milp": -144.60990042036738,
+          "month": 8,
+          "quarter": 3,
+          "test_day": 34,
+          "zero": 0
+        },
+        {
+          "date": "2018-08-31",
+          "matd3": -800.8047189455349,
+          "pnn": -754.021594481172,
+          "delta": 46.78312446436291,
+          "idle": -826.3672183739045,
+          "renewable_kwh": 3972.201312169312,
+          "cooperative_milp": -590.9987297422592,
+          "month": 8,
+          "quarter": 3,
+          "test_day": 35,
+          "zero": 0
+        },
+        {
+          "date": "2018-09-26",
+          "matd3": 446.4502528995861,
+          "pnn": 480.8175347763964,
+          "delta": 34.36728187681035,
+          "idle": 413.7928210690212,
+          "renewable_kwh": 7846.378395767195,
+          "cooperative_milp": 651.9842634386046,
+          "month": 9,
+          "quarter": 3,
+          "test_day": 36,
+          "zero": 0
+        },
+        {
+          "date": "2018-09-27",
+          "matd3": -335.1420680470208,
+          "pnn": -387.5366982816026,
+          "delta": -52.39463023458177,
+          "idle": -504.1578837767014,
+          "renewable_kwh": 5549.805476719576,
+          "cooperative_milp": -143.37460833587522,
+          "month": 9,
+          "quarter": 3,
+          "test_day": 37,
+          "zero": 0
+        },
+        {
+          "date": "2018-09-28",
+          "matd3": -2193.4573843060216,
+          "pnn": -2280.032854495394,
+          "delta": -86.57547018937248,
+          "idle": -2288.4166875776245,
+          "renewable_kwh": 2019.432558201058,
+          "cooperative_milp": -2015.591388447077,
+          "month": 9,
+          "quarter": 3,
+          "test_day": 38,
+          "zero": 0
+        },
+        {
+          "date": "2018-09-29",
+          "matd3": -1332.2726452996185,
+          "pnn": -1427.676650681054,
+          "delta": -95.40400538143558,
+          "idle": -1448.3271976006786,
+          "renewable_kwh": 3182.931301058201,
+          "cooperative_milp": -1027.1920921395122,
+          "month": 9,
+          "quarter": 3,
+          "test_day": 39,
+          "zero": 0
+        },
+        {
+          "date": "2018-09-30",
+          "matd3": 88.60637665767382,
+          "pnn": 84.36924830801145,
+          "delta": -4.23712834966237,
+          "idle": -104.54624796883928,
+          "renewable_kwh": 6045.444319576719,
+          "cooperative_milp": 354.4828524073662,
+          "month": 9,
+          "quarter": 3,
+          "test_day": 40,
+          "zero": 0
+        },
+        {
+          "date": "2018-10-27",
+          "matd3": -791.4745391191126,
+          "pnn": -887.5324873249226,
+          "delta": -96.05794820581002,
+          "idle": -935.6645851411485,
+          "renewable_kwh": 4670.109948148148,
+          "cooperative_milp": -471.81517778782336,
+          "month": 10,
+          "quarter": 4,
+          "test_day": 41,
+          "zero": 0
+        },
+        {
+          "date": "2018-10-28",
+          "matd3": 331.98389977505605,
+          "pnn": 336.32594061146904,
+          "delta": 4.342040836412991,
+          "idle": 189.2599873903658,
+          "renewable_kwh": 9415.751473544971,
+          "cooperative_milp": 698.4935530089805,
+          "month": 10,
+          "quarter": 4,
+          "test_day": 42,
+          "zero": 0
+        },
+        {
+          "date": "2018-10-29",
+          "matd3": -1266.990750556685,
+          "pnn": -1287.2903282741963,
+          "delta": -20.299577717511283,
+          "idle": -1320.645940099032,
+          "renewable_kwh": 4541.615969312169,
+          "cooperative_milp": -931.0495654811346,
+          "month": 10,
+          "quarter": 4,
+          "test_day": 43,
+          "zero": 0
+        },
+        {
+          "date": "2018-10-30",
+          "matd3": -1284.895654793408,
+          "pnn": -1276.4550942513863,
+          "delta": 8.440560542021785,
+          "idle": -1346.3803443381016,
+          "renewable_kwh": 4329.953716402117,
+          "cooperative_milp": -983.378514414491,
+          "month": 10,
+          "quarter": 4,
+          "test_day": 44,
+          "zero": 0
+        },
+        {
+          "date": "2018-10-31",
+          "matd3": -1647.1669881466748,
+          "pnn": -1615.2876373037377,
+          "delta": 31.87935084293713,
+          "idle": -1751.048559880182,
+          "renewable_kwh": 3803.033937037038,
+          "cooperative_milp": -1361.8146635764483,
+          "month": 10,
+          "quarter": 4,
+          "test_day": 45,
+          "zero": 0
+        },
+        {
+          "date": "2018-11-26",
+          "matd3": -3430.559760610937,
+          "pnn": -3421.001230403016,
+          "delta": 9.55853020792074,
+          "idle": -3433.8739143954235,
+          "renewable_kwh": 1405.7194936507938,
+          "cooperative_milp": -3269.8792257657487,
+          "month": 11,
+          "quarter": 4,
+          "test_day": 46,
+          "zero": 0
+        },
+        {
+          "date": "2018-11-27",
+          "matd3": -2961.9750207975576,
+          "pnn": -2966.9809485372352,
+          "delta": -5.005927739677645,
+          "idle": -2968.2996996578872,
+          "renewable_kwh": 1901.9719910052909,
+          "cooperative_milp": -2713.528919685545,
+          "month": 11,
+          "quarter": 4,
+          "test_day": 47,
+          "zero": 0
+        },
+        {
+          "date": "2018-11-28",
+          "matd3": -2568.794193873692,
+          "pnn": -2566.0550568183307,
+          "delta": 2.739137055361425,
+          "idle": -2554.8163696949177,
+          "renewable_kwh": 2134.8540619047617,
+          "cooperative_milp": -2357.3450333436986,
+          "month": 11,
+          "quarter": 4,
+          "test_day": 48,
+          "zero": 0
+        },
+        {
+          "date": "2018-11-29",
+          "matd3": -2633.013356729083,
+          "pnn": -2657.8151102489,
+          "delta": -24.801753519816884,
+          "idle": -2654.062710663704,
+          "renewable_kwh": 1961.645295238095,
+          "cooperative_milp": -2437.316225993437,
+          "month": 11,
+          "quarter": 4,
+          "test_day": 49,
+          "zero": 0
+        },
+        {
+          "date": "2018-11-30",
+          "matd3": -2359.8213431782087,
+          "pnn": -2403.3164662536474,
+          "delta": -43.49512307543864,
+          "idle": -2350.408495887423,
+          "renewable_kwh": 2256.1228862433863,
+          "cooperative_milp": -2146.306717282232,
+          "month": 11,
+          "quarter": 4,
+          "test_day": 50,
+          "zero": 0
+        },
+        {
+          "date": "2018-12-27",
+          "matd3": 410.20838030491086,
+          "pnn": 455.330662396005,
+          "delta": 45.12228209109412,
+          "idle": 479.93102270295947,
+          "renewable_kwh": 8199.337384656084,
+          "cooperative_milp": 689.9749203223507,
+          "month": 12,
+          "quarter": 4,
+          "test_day": 51,
+          "zero": 0
+        },
+        {
+          "date": "2018-12-28",
+          "matd3": 373.8346977172228,
+          "pnn": 439.8366671974576,
+          "delta": 66.00196948023478,
+          "idle": 368.5789505742126,
+          "renewable_kwh": 8429.39522063492,
+          "cooperative_milp": 694.6115285879725,
+          "month": 12,
+          "quarter": 4,
+          "test_day": 52,
+          "zero": 0
+        },
+        {
+          "date": "2018-12-29",
+          "matd3": 47.83110806770178,
+          "pnn": 12.701901550019798,
+          "delta": -35.12920651768198,
+          "idle": -45.77372791456016,
+          "renewable_kwh": 5473.803239153439,
+          "cooperative_milp": 223.74820734657908,
+          "month": 12,
+          "quarter": 4,
+          "test_day": 53,
+          "zero": 0
+        },
+        {
+          "date": "2018-12-30",
+          "matd3": -1242.454806028764,
+          "pnn": -1283.084662509075,
+          "delta": -40.62985648031099,
+          "idle": -1293.3184637103493,
+          "renewable_kwh": 2461.28902063492,
+          "cooperative_milp": -1075.8917442445047,
+          "month": 12,
+          "quarter": 4,
+          "test_day": 54,
+          "zero": 0
+        },
+        {
+          "date": "2018-12-31",
+          "matd3": -1158.728672069946,
+          "pnn": -1115.809859238268,
+          "delta": 42.918812831678,
+          "idle": -1178.6314716919856,
+          "renewable_kwh": 3463.8314211640213,
+          "cooperative_milp": -882.052582835964,
+          "month": 12,
+          "quarter": 4,
+          "test_day": 55,
+          "zero": 0
+        }
+      ],
+      "validation": [
+        {
+          "algorithm": "MATD3",
+          "episode": 100,
+          "profit": -873.1015380792452,
+          "std": 883.81191782176,
+          "best": true,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 200,
+          "profit": -879.5781874030517,
+          "std": 886.2621593595318,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 300,
+          "profit": -905.5878398135844,
+          "std": 861.0150258177276,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 400,
+          "profit": -911.5754390816971,
+          "std": 871.2822217086186,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 500,
+          "profit": -901.0113182732371,
+          "std": 878.4413182830232,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 600,
+          "profit": -861.3449182569991,
+          "std": 866.8946597026043,
+          "best": true,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 700,
+          "profit": -884.7074073654135,
+          "std": 859.6932070994228,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 800,
+          "profit": -871.1213741522404,
+          "std": 868.1905626803967,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 900,
+          "profit": -862.9296651616005,
+          "std": 870.8288893152852,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 1000,
+          "profit": -868.805810785621,
+          "std": 874.4988836015057,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 1100,
+          "profit": -861.4093649027877,
+          "std": 883.2278027499888,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 1200,
+          "profit": -861.5215227540403,
+          "std": 891.0587162525968,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 1300,
+          "profit": -849.3379134289604,
+          "std": 886.2478624568524,
+          "best": true,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 1400,
+          "profit": -850.5461521224672,
+          "std": 887.5094156630687,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 1500,
+          "profit": -838.3333260658759,
+          "std": 895.9567684114271,
+          "best": true,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 1600,
+          "profit": -846.7657729910338,
+          "std": 900.3006802886483,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 1700,
+          "profit": -836.4628092565905,
+          "std": 896.2076953723047,
+          "best": true,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 1800,
+          "profit": -831.9204503167299,
+          "std": 897.3447622325123,
+          "best": true,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 1900,
+          "profit": -836.8710055530108,
+          "std": 888.4169291277295,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 2000,
+          "profit": -844.4150375034833,
+          "std": 897.5495188564381,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 2100,
+          "profit": -842.2538025234958,
+          "std": 889.9196343820649,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 2200,
+          "profit": -827.9385202066081,
+          "std": 875.3047271310074,
+          "best": true,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 2300,
+          "profit": -846.4689072668999,
+          "std": 877.7689445152421,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 2400,
+          "profit": -848.5408359645453,
+          "std": 885.4440385541528,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 2500,
+          "profit": -842.6059967628344,
+          "std": 881.6204551447471,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 2600,
+          "profit": -848.5254669842689,
+          "std": 889.049486856984,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 2700,
+          "profit": -853.3732363564817,
+          "std": 881.27138734191,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 2800,
+          "profit": -857.6302074671277,
+          "std": 886.9850514289366,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 2900,
+          "profit": -841.4034790901144,
+          "std": 879.2255787720459,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 3000,
+          "profit": -855.4585655888134,
+          "std": 890.0003037092357,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 3100,
+          "profit": -838.401043371391,
+          "std": 891.162627975816,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 3200,
+          "profit": -843.2936608047928,
+          "std": 894.6594934622518,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 3300,
+          "profit": -837.5507601942135,
+          "std": 889.0101969217628,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 3400,
+          "profit": -837.246703504863,
+          "std": 885.8999825271513,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 3500,
+          "profit": -838.5545229815125,
+          "std": 890.3814876040545,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 3600,
+          "profit": -851.3875804039893,
+          "std": 890.9567943917456,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 3700,
+          "profit": -835.2287203670613,
+          "std": 883.5718976419405,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 3800,
+          "profit": -843.7365677960145,
+          "std": 884.1376127741706,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 3900,
+          "profit": -846.5448096969138,
+          "std": 883.8877104809578,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 4000,
+          "profit": -848.8239917793793,
+          "std": 890.8507992134961,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 4100,
+          "profit": -851.260735413394,
+          "std": 889.3596244361729,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 4200,
+          "profit": -841.4177184454198,
+          "std": 880.9299831664049,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 4300,
+          "profit": -835.5753345899457,
+          "std": 886.7833768225726,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 4400,
+          "profit": -832.2405918746508,
+          "std": 881.2684762636342,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 4500,
+          "profit": -824.734121366046,
+          "std": 883.114604601864,
+          "best": true,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 4600,
+          "profit": -820.5016815657108,
+          "std": 885.5293545527002,
+          "best": true,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 4700,
+          "profit": -830.2951901403982,
+          "std": 883.6552442534388,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 4800,
+          "profit": -837.8918043350093,
+          "std": 883.3084942947571,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 4900,
+          "profit": -829.7713548160934,
+          "std": 879.6338735210265,
+          "best": false,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "MATD3",
+          "episode": 5000,
+          "profit": -819.5730913409408,
+          "std": 878.8884395284393,
+          "best": true,
+          "seed": 42,
+          "line_style": "dashed"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 100,
+          "profit": -865.2824745059856,
+          "std": 894.6306802966058,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 200,
+          "profit": -877.0934349503023,
+          "std": 865.5694740502314,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 300,
+          "profit": -857.7622241301909,
+          "std": 872.1736510795698,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 400,
+          "profit": -859.2881928665989,
+          "std": 871.0420864581575,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 500,
+          "profit": -885.6936322166544,
+          "std": 863.9654599742437,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 600,
+          "profit": -858.4816206953408,
+          "std": 881.075541775098,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 700,
+          "profit": -852.6399278911923,
+          "std": 874.561834671156,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 800,
+          "profit": -849.0968935089062,
+          "std": 876.9538872687815,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 900,
+          "profit": -854.2211921473997,
+          "std": 876.165957852663,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 1000,
+          "profit": -844.2870151787521,
+          "std": 888.0889404768456,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 1100,
+          "profit": -833.2403296140412,
+          "std": 887.1995636568073,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 1200,
+          "profit": -830.570209232962,
+          "std": 884.0147291168299,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 1300,
+          "profit": -829.5123133717993,
+          "std": 885.4437354965464,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 1400,
+          "profit": -825.1942180214855,
+          "std": 885.4178489063999,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 1500,
+          "profit": -826.1304109742576,
+          "std": 892.7609825856314,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 1600,
+          "profit": -827.2944125018405,
+          "std": 885.7543326413742,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 1700,
+          "profit": -823.4402975157369,
+          "std": 887.5674416438691,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 1800,
+          "profit": -817.1394007212282,
+          "std": 891.0087162304959,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 1900,
+          "profit": -816.0151566071905,
+          "std": 881.3084088319692,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 2000,
+          "profit": -817.4993261092645,
+          "std": 885.0631218977032,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 2100,
+          "profit": -812.7990516379352,
+          "std": 886.2477833486703,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 2200,
+          "profit": -821.1245952681955,
+          "std": 885.0128706852395,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 2300,
+          "profit": -818.4464915378721,
+          "std": 886.22040892517,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 2400,
+          "profit": -820.7969747801479,
+          "std": 893.5512004804364,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 2500,
+          "profit": -815.5150736194582,
+          "std": 882.08510020138,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 2600,
+          "profit": -831.4266186264757,
+          "std": 884.1656999703189,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 2700,
+          "profit": -826.173062609379,
+          "std": 889.2103544770657,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 2800,
+          "profit": -835.4842351240675,
+          "std": 889.87596815528,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 2900,
+          "profit": -828.5985412935293,
+          "std": 891.7258888362559,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 3000,
+          "profit": -834.9783980646575,
+          "std": 889.1087783369306,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 3100,
+          "profit": -825.7194111419913,
+          "std": 889.6286139945562,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 3200,
+          "profit": -820.9366994072159,
+          "std": 889.6201530165296,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 3300,
+          "profit": -820.7761263135213,
+          "std": 887.7106781453799,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 3400,
+          "profit": -828.5206223273593,
+          "std": 883.3338676865014,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 3500,
+          "profit": -829.3907368718471,
+          "std": 893.8958405630322,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 3600,
+          "profit": -828.0870939026388,
+          "std": 889.3760928096035,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 3700,
+          "profit": -822.9008979760133,
+          "std": 882.2641152176858,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 3800,
+          "profit": -823.8736288208577,
+          "std": 883.556431232866,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 3900,
+          "profit": -823.4325980556299,
+          "std": 886.1140294539664,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 4000,
+          "profit": -819.2483661257056,
+          "std": 885.1995087070445,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 4100,
+          "profit": -819.824729209508,
+          "std": 883.6468834820117,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 4200,
+          "profit": -811.6541609121493,
+          "std": 886.6143229793466,
+          "best": true,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 4300,
+          "profit": -821.1795920740849,
+          "std": 893.9486841380705,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 4400,
+          "profit": -811.8512563228666,
+          "std": 889.3573540498569,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 4500,
+          "profit": -820.6869577869406,
+          "std": 883.2433215341644,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 4600,
+          "profit": -816.9342821893497,
+          "std": 891.882979396865,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 4700,
+          "profit": -815.650232492277,
+          "std": 888.5447226618567,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 4800,
+          "profit": -818.7207826467943,
+          "std": 890.8148301239379,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 4900,
+          "profit": -829.8988211321462,
+          "std": 882.6861448242671,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        },
+        {
+          "algorithm": "PNN",
+          "episode": 5000,
+          "profit": -817.497849370576,
+          "std": 888.8112625381802,
+          "best": false,
+          "seed": 42,
+          "line_style": "solid"
+        }
+      ],
+      "economics": [
+        {
+          "component": "grid_import_cost",
+          "matd3": 1239.554799303893,
+          "pnn": 1236.2346541136185,
+          "gain": 3.3201451902746157,
+          "label": "购电支出减少",
+          "days": 55
+        },
+        {
+          "component": "grid_export_revenue",
+          "matd3": 244.87107016449073,
+          "pnn": 242.3231619956886,
+          "gain": -2.547908168802138,
+          "label": "外送收入减少",
+          "days": 55
+        },
+        {
+          "component": "battery_degradation_cost",
+          "matd3": 14.070190975049123,
+          "pnn": 14.344834705601212,
+          "gain": -0.27464373055208924,
+          "label": "电池损耗增加",
+          "days": 55
+        },
+        {
+          "component": "other_costs",
+          "gain": 0.05389942891443689,
+          "label": "其他成本改善",
+          "days": 55
+        }
+      ],
+      "diagnostics": [
+        {
+          "algorithm": "MATD3",
+          "microgrid": "mg1",
+          "episodes": 500,
+          "grad": 0.5871003821282388,
+          "clip_rate": 0.045499999999999985,
+          "saturation": 0.22667838541666663
+        },
+        {
+          "algorithm": "MATD3",
+          "microgrid": "mg2",
+          "episodes": 500,
+          "grad": 0.45317197115887214,
+          "clip_rate": 0.001999999999999999,
+          "saturation": 0.19052083333333328
+        },
+        {
+          "algorithm": "MATD3",
+          "microgrid": "mg3",
+          "episodes": 500,
+          "grad": 0.41727720621775805,
+          "clip_rate": 0.0008333333333333331,
+          "saturation": 0.22190104166666663
+        },
+        {
+          "algorithm": "PNN",
+          "microgrid": "mg1",
+          "episodes": 500,
+          "grad": 0.7456837636892792,
+          "clip_rate": 0.15066666666666662,
+          "saturation": 0.32194661458333335
+        },
+        {
+          "algorithm": "PNN",
+          "microgrid": "mg2",
+          "episodes": 500,
+          "grad": 0.8801574471663514,
+          "clip_rate": 0.2323333333333333,
+          "saturation": 0.3815533854166666
+        },
+        {
+          "algorithm": "PNN",
+          "microgrid": "mg3",
+          "episodes": 500,
+          "grad": 0.5514107186117726,
+          "clip_rate": 0.030999999999999993,
+          "saturation": 0.27037890625
+        }
+      ],
+      "microgrids": [
+        {
+          "microgrid": "MG1",
+          "physical_delta": 7.065959492706545,
+          "external_delta": 18.21095210403511,
+          "transfer_delta": -11.144992611328561,
+          "matd3_profit": -172.0601923841877,
+          "pnn_profit": -164.99423289148118
+        },
+        {
+          "microgrid": "MG2",
+          "physical_delta": 2.5838005433674796,
+          "external_delta": -4.098937829578583,
+          "transfer_delta": 6.682738372946062,
+          "matd3_profit": -95.45015060390628,
+          "pnn_profit": -92.86635006053882
+        },
+        {
+          "microgrid": "MG3",
+          "physical_delta": -9.098267316239244,
+          "external_delta": -13.560521554621758,
+          "transfer_delta": 4.4622542383825134,
+          "matd3_profit": -744.138500459901,
+          "pnn_profit": -753.2367677761401
+        }
+      ],
+      "settlement": [
+        {
+          "algorithm": "MATD3",
+          "microgrid": "mg1",
+          "physical": -172.0601923841877,
+          "equal": -160.1100992924489,
+          "shapley": -172.4962479358391
+        },
+        {
+          "algorithm": "MATD3",
+          "microgrid": "mg2",
+          "physical": -95.45015060390628,
+          "equal": -115.00266944745472,
+          "shapley": -93.32924527084195
+        },
+        {
+          "algorithm": "MATD3",
+          "microgrid": "mg3",
+          "physical": -744.138500459901,
+          "equal": -736.5360747080914,
+          "shapley": -745.8233502413141
+        },
+        {
+          "algorithm": "PNN",
+          "microgrid": "mg1",
+          "physical": -164.99423289148118,
+          "equal": -159.9262683858373,
+          "shapley": -173.05853758558217
+        },
+        {
+          "algorithm": "PNN",
+          "microgrid": "mg2",
+          "physical": -92.86635006053882,
+          "equal": -114.81883854084312,
+          "shapley": -92.55562409175228
+        },
+        {
+          "algorithm": "PNN",
+          "microgrid": "mg3",
+          "physical": -753.2367677761401,
+          "equal": -736.35224380148,
+          "shapley": -745.4831890508256
+        }
+      ]
+    }
+  },
+  "sources": [
+    {
+      "id": "saved_comparison",
+      "label": "PNN 与普通 MATD3 保存结果复核",
+      "path": "reports/pnn_matd3_comparison_20260905/evidence.json",
+      "query": {
+        "engine": "Python / pandas",
+        "language": "python",
+        "description": "analyze.py 读取两组保存的逐日、逐时、训练与验证文件；按测试日期配对，核对摘要与逐时加总。",
+        "tables_used": [
+          "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/test_daily_metrics.csv",
+          "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/test_summary.json",
+          "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/training_summary.json",
+          "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/validation_history.json",
+          "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/actor_diagnostics.csv",
+          "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/config_snapshot.yaml",
+          "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/run_metadata.json",
+          "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/test_hourly_trajectories/*.csv",
+          "outputs/matd3_plain_single_dispatch/runs/MATD3PLAINA3_2026-09-04_16-19-49_seed42/training_history.jsonl",
+          "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/test_daily_metrics.csv",
+          "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/test_summary.json",
+          "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/training_summary.json",
+          "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/validation_history.json",
+          "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/actor_diagnostics.csv",
+          "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/config_snapshot.yaml",
+          "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/run_metadata.json",
+          "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/test_hourly_trajectories/*.csv",
+          "outputs/pnn/runs/PNN_2026-09-04_20-34-39_seed42/training_history.jsonl"
+        ],
+        "filters": [
+          "seed=42; 5000 training episodes; same 55 held-out dates, 2018-01-28 through 2018-12-31; best_model.pt selected on validation.",
+          "Exclude all smoke runs. Select latest completed 5000-episode PNN run and historical plain single-dispatch MATD3 run."
+        ],
+        "metric_definitions": [
+          "收益采用项目计价单位；负值表示净成本，越大越好。日均值为55个测试日的算术平均。",
+          "收益差 = PNN - MATD3；相对净成本改善 = 平均收益差 / abs(MATD3平均收益)。",
+          "外部收益差 = 物理收益差 - P2P内部净转账差；账户分解不代表单个Agent的因果贡献。",
+          "ESS成交率 = 55日累计成交电量 / 累计申报电量；不是逐日成交率的简单平均。",
+          "Bootstrap 20000次，随机种子20260905；月份聚类重采样保留同月天的共同变动；均不衡量训练随机性。"
+        ]
+      }
+    }
+  ]
+}

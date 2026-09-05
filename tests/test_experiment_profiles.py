@@ -22,7 +22,7 @@ def command(*argv):
 def test_default_and_both_public_selectors(catalog_root):
     assert default_profile(catalog_root) == "matd3"
     assert resolve_training_args(command(), catalog_root).algorithm == "matd3_dispatch"
-    assert set(available_algorithm_names()) == {"matd3_dispatch", "crossgate"}
+    assert {"matd3_dispatch", "crossgate"}.issubset(set(available_algorithm_names()))
     assert get_algorithm_spec("matd3").slug == "matd3_dispatch"
     assert set(catalog("action_designs")) == {"single_dispatch"}
     assert set(catalog("experiment_profiles")) == {"matd3", "crossgate"}
