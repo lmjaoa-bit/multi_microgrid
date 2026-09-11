@@ -41,6 +41,6 @@
 
 - `git diff --check` 与 staged diff check 均通过。
 - canonical `algorithms/matd3/` 无差异。
-- 已提交全部 Task 1 变更，commit：`27c9177` (`feat: normalize Shapley values against independent operation`)。
+- 实现内容提交：`27c9177` (`feat: normalize Shapley values against independent operation`)；包含实施报告的任务归档提交：`9c2b363247982904627161c1595d9ce7bcf8c10f`。
 
 顾虑：无。
