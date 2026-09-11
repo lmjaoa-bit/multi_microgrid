@@ -217,7 +217,7 @@ def solve_dispatch(
                             + variables["curtailment"][(mg, t)])
     tolerance = float(terminal_cfg["tolerance"])
     rate = float(terminal_cfg["penalty_per_kwh"])
-    if apply_terminal_condition:
+    if apply_terminal_condition and terminal_cfg["mode"] != "none":
         for mg in ids:
             battery = cfg_by_id[mg]["battery"]
             target_soc = (

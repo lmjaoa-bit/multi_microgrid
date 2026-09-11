@@ -1,0 +1,48 @@
+algorithm:
+  name: pnn_transformer
+  hidden_dims:
+  - 128
+  - 128
+  actor_lr: 0.0002
+  actor_max_grad_norm: 1.0
+  critic_lr: 0.0003
+  gamma: 0.99
+  tau: 0.005
+  policy_delay: 2
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  batch_size: 16
+  replay_capacity: 200000
+  warmup_steps: 24
+  exploration_noise: 0.15
+  network:
+    embed_dim: 32
+    num_heads: 4
+    num_layers: 2
+    hidden_dims:
+    - 128
+    - 64
+    forecast_horizon: 4
+    product_scale:
+      mg1: 0.08
+      mg2: 0.2
+      mg3: 0.12
+runtime:
+  cpu_threads: 4
+training:
+  episodes: 5000
+  test_episodes: 55
+validation:
+  enabled: true
+  interval: 100
+  deterministic_policy: true
+  fixed_scenarios: true
+logging:
+  incremental_history: true
+  history_snapshot_interval: 500
+  dashboard: true
+  dashboard_refresh_hz: 4
+  rolling_windows:
+  - 50
+  - 100
+  - 500

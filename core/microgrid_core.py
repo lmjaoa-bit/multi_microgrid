@@ -35,6 +35,7 @@ class MicrogridCore:
         episode_length: int = 24,
         tolerance: float = 0.03,
         exogenous: Mapping[str, float] | None = None,
+        enforce_terminal: bool = True,
     ) -> dict[str, float]:
         current = dict(exogenous) if exogenous is not None else self.exogenous(row)
         soc_min_reach, soc_max_reach = self.battery.reachable_soc_envelope(
@@ -42,6 +43,7 @@ class MicrogridCore:
             episode_length=episode_length,
             target_soc=self.battery.initial_soc,
             tolerance=tolerance,
+            enforce_terminal=enforce_terminal,
         )
         battery = self.battery.map_action(
             float(action["battery"]),

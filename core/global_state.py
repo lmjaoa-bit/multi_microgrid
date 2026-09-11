@@ -19,6 +19,9 @@ class GlobalStateBuilder:
         self.price_norm = profiles.price_max
         self.forecasts = forecasts
         self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
+        self.include_forecast_validity = bool(
+            config.get("observation", {}).get("mask_forecast_beyond_episode", False)
+        )
         self.control_mode = str(config.get("ess_sharing", {}).get("control_mode", "single_dispatch"))
         self.heterogeneous_tariffs = has_heterogeneous_tariffs(config)
 
@@ -44,7 +47,9 @@ class GlobalStateBuilder:
                 ])
             for k in range(1, self.future_h + 1):
                 for mg in self.agent_ids:
-                    names.append(f"{mg}_net_load_t+{k}")
+                    names.extend([f"{mg}_net_load_t+{k}", f"{mg}_price_t+{k}"])
+                if self.include_forecast_validity:
+                    names.append(f"forecast_valid_t+{k}")
             names.extend([
                 "previous_system_buy_demand", "previous_system_sell_offer",
                 "previous_clearing_ratio",
@@ -101,7 +106,10 @@ class GlobalStateBuilder:
                 for mg in self.agent_ids:
                     forecast = self.forecasts.combined(mg, t, k)
                     net_load = forecast["load_kw"] - forecast["pv_kw"] - forecast["wind_kw"]
-                    values.append(net_load / self.norm[mg]["power"])
+                    values.extend([net_load / self.norm[mg]["power"],
+                                   forecast["grid_price_per_kwh"] / self.norm[mg]["price"]])
+                if self.include_forecast_validity:
+                    values.append(self.forecasts.valid(t, k))
             values.extend([
                 history["total_buy_demand_kwh"] / system_norm,
                 history["total_sell_offer_kwh"] / system_norm,
@@ -112,7 +120,8 @@ class GlobalStateBuilder:
                 battery = cores[mg].battery
                 floor, ceiling = battery.reachable_soc_envelope(
                     t, int(self.config["time"].get("episode_length", 24)),
-                    tolerance=float(self.config["terminal_soc"]["tolerance"]))
+                    tolerance=float(self.config["terminal_soc"]["tolerance"]),
+                    enforce_terminal=self.config["terminal_soc"]["mode"] != "none")
                 neutral = battery.map_action(0.0, floor, ceiling)
                 values.extend([
                     neutral["charge_requested_kw"] / battery.max_charge_kw,

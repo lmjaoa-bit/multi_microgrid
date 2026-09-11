@@ -295,6 +295,10 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "ess_p2p_enabled": env_config.get("ess_sharing", {}).get("ess_p2p_enabled", True),
         "ess_offer_projection": env_config.get("ess_sharing", {}).get("offer_projection", "none"),
         "mpc_forecast_horizon": algorithm_cfg.get("mpc", {}).get("forecast_horizon"),
+        "forecast_horizon_hours": env_config.get("observation", {}).get("future_horizon"),
+        "evaluation_forecast_noise": env_config.get("observation", {}).get(
+            "evaluation_forecast_noise", False,
+        ),
         "config_hash": config_hash, "device": str(args.device),
         "python_version": platform.python_version(), "train_episodes": training_episodes,
         "test_episodes": test_episodes, "git_commit": _git_commit(),
@@ -417,6 +421,11 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                 val_summary, _ = evaluate_policy_on_days(
                     validation_env, validation_days, policy, seed=args.seed + 100_000,
                     deterministic_environment=bool(validation_cfg.get("fixed_scenarios", True)),
+                    forecast_noise=bool(
+                        env_config.get("observation", {}).get(
+                            "evaluation_forecast_noise", False,
+                        )
+                    ),
                 )
                 score = float(val_summary["team_profit_mean"])
                 is_best = score > best_validation_score

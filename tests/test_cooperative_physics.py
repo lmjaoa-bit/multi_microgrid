@@ -131,6 +131,9 @@ def test_ess_p2p_sale_never_coincides_with_external_grid_import() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     config["_project_root"] = str(ROOT)
     config = get_algorithm_spec("matd3_dispatch").build_environment_config(config)
+    # This sale test requires stored energy; the default study starts empty.
+    for mg in config["microgrids"]:
+        mg["battery"]["initial_soc"] = .55
     env = MultiMicrogridEnv(config, split="test")
     env.reset(day=str(env.data.valid_days[0].date()), seed=5, deterministic=True)
     actions = {

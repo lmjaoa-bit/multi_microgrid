@@ -37,14 +37,21 @@ ess_sharing:
   offer_projection: peer_demand_cap
 
 terminal_soc:
-  mode: penalty
+  # Independent daily dispatch: no terminal target, penalty, or SOC shaping.
+  mode: none
   tolerance: 0.03
   penalty_per_kwh: 1.5
 
 observation:
-  future_horizon: 4
+  # One-day-ahead point forecast. Values beyond the current natural-day
+  # episode are zeroed and accompanied by per-horizon validity features.
+  future_horizon: 24
   noisy_forecast: true
+  evaluation_forecast_noise: true
+  mask_forecast_beyond_episode: true
+  forecast_temporal_correlation: 0.80
   forecast_sigma_1h: {load: 0.03, ghi: 0.08, wind_speed: 0.10, price: 0.00}
+  forecast_error_max: {load: 0.15, ghi: 0.30, wind_speed: 0.35, price: 0.00}
 
 cost:
   unmet_load_cost_per_kwh: 20.0
@@ -70,7 +77,7 @@ microgrids:
       mode: flat
       buy_price_per_kwh: 0.60
       sell_price_per_kwh: 0.18
-    battery: {capacity_kwh: 210.0, max_charge_kw: 65.0, max_discharge_kw: 65.0, eta_charge: 0.95, eta_discharge: 0.95, soc_min: 0.10, soc_max: 0.90, initial_soc: 0.55, degradation_cost_per_kwh: 0.01}
+    battery: {capacity_kwh: 210.0, max_charge_kw: 65.0, max_discharge_kw: 65.0, eta_charge: 0.95, eta_discharge: 0.95, soc_min: 0.10, soc_max: 0.90, initial_soc: 0.10, degradation_cost_per_kwh: 0.01}
     grid: {import_limit_kw: 200.0, export_limit_kw: 200.0}
 
   - id: mg2
@@ -93,7 +100,7 @@ microgrids:
       minimum_buy_price_per_kwh: 0.38
       maximum_buy_price_per_kwh: 1.08
       sell_ratio: 0.38
-    battery: {capacity_kwh: 290.0, max_charge_kw: 80.0, max_discharge_kw: 80.0, eta_charge: 0.95, eta_discharge: 0.95, soc_min: 0.10, soc_max: 0.90, initial_soc: 0.55, degradation_cost_per_kwh: 0.01}
+    battery: {capacity_kwh: 290.0, max_charge_kw: 80.0, max_discharge_kw: 80.0, eta_charge: 0.95, eta_discharge: 0.95, soc_min: 0.10, soc_max: 0.90, initial_soc: 0.10, degradation_cost_per_kwh: 0.01}
     grid: {import_limit_kw: 200.0, export_limit_kw: 200.0}
 
   - id: mg3
@@ -117,5 +124,5 @@ microgrids:
       valley_hours: [0,1,2,3,4,5]
       sell_ratio: 0.45
       sell_price_per_kwh: 0.16
-    battery: {capacity_kwh: 95.0, max_charge_kw: 34.0, max_discharge_kw: 34.0, eta_charge: 0.95, eta_discharge: 0.95, soc_min: 0.10, soc_max: 0.90, initial_soc: 0.45, degradation_cost_per_kwh: 0.01}
+    battery: {capacity_kwh: 95.0, max_charge_kw: 34.0, max_discharge_kw: 34.0, eta_charge: 0.95, eta_discharge: 0.95, soc_min: 0.10, soc_max: 0.90, initial_soc: 0.10, degradation_cost_per_kwh: 0.01}
     grid: {import_limit_kw: 200.0, export_limit_kw: 200.0}

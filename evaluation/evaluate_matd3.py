@@ -131,6 +131,7 @@ def evaluate_policy_on_days(
     *,
     seed: int = 42,
     deterministic_environment: bool = True,
+    forecast_noise: bool | None = None,
     capture_hourly: bool = False,
 ) -> Any:
     """Evaluate fixed day/seed pairs so policies receive common random numbers."""
@@ -141,6 +142,7 @@ def evaluate_policy_on_days(
             day=day,
             seed=int(seed) + index,
             deterministic=bool(deterministic_environment),
+            forecast_noise=forecast_noise,
         )
         collector = EpisodeMetricsCollector(env, capture_hourly=capture_hourly)
         done = False
@@ -478,8 +480,12 @@ def evaluate(
     print(f"Selection metric:\n{metadata.get('selection_metric', 'validation_team_profit_mean')}\n")
 
     matd3_policy = lambda obs: algorithm.select_actions(obs, noise_std=0.0)
+    evaluation_forecast_noise = bool(
+        env_config.get("observation", {}).get("evaluation_forecast_noise", False)
+    )
     matd3_summary, matd3_daily, hourly_by_day = evaluate_policy_on_days(
-        env, days, matd3_policy, seed=test_seed, deterministic_environment=True, capture_hourly=True,
+        env, days, matd3_policy, seed=test_seed, deterministic_environment=True,
+        forecast_noise=evaluation_forecast_noise, capture_hourly=True,
     )
     idle_env = MultiMicrogridEnv(env_config, split=split)
     idle_policy = lambda obs: {
@@ -487,6 +493,7 @@ def evaluate(
     }
     idle_summary, idle_daily = evaluate_policy_on_days(
         idle_env, days, idle_policy, seed=test_seed, deterministic_environment=True,
+        forecast_noise=evaluation_forecast_noise,
     )
 
     matd3_values = np.asarray([day["team_profit"] for day in matd3_daily], dtype=np.float64)
@@ -571,7 +578,21 @@ def evaluate(
             "mpc_forecast_horizon": loaded_algorithm_config.get("mpc", {}).get("forecast_horizon"),
             "environment_overrides": dict(spec.environment_overrides),
         },
+        "forecast_setup": {
+            "future_horizon_hours": env_config.get("observation", {}).get("future_horizon"),
+            "point_forecast_noise": env_config.get("observation", {}).get("noisy_forecast", False),
+            "evaluation_forecast_noise": evaluation_forecast_noise,
+            "temporal_correlation": env_config.get("observation", {}).get(
+                "forecast_temporal_correlation", 0.0,
+            ),
+            "sigma_1h": env_config.get("observation", {}).get("forecast_sigma_1h", {}),
+            "error_max": env_config.get("observation", {}).get("forecast_error_max", {}),
+            "mask_beyond_episode": env_config.get("observation", {}).get(
+                "mask_forecast_beyond_episode", False,
+            ),
+        },
         "deterministic_policy": True, "deterministic_environment": True,
+        "forecast_noise_enabled": evaluation_forecast_noise,
         "common_random_numbers": {
             "enabled": True,
             "definition": "same dates, initial SOC configuration, and per-day environment seeds",

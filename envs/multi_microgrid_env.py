@@ -147,7 +147,8 @@ class MultiMicrogridEnv:
                 battery = self.cores[mg].battery
                 floor, ceiling = battery.reachable_soc_envelope(
                     index, self.episode_length,
-                    tolerance=float(self.config["terminal_soc"]["tolerance"]))
+                    tolerance=float(self.config["terminal_soc"]["tolerance"]),
+                    enforce_terminal=self.config["terminal_soc"]["mode"] != "none")
                 neutral = battery.map_action(0.0, floor, ceiling)
                 battery_flex[mg].update({
                     "feasible_charge_min_ratio": neutral["charge_requested_kw"] / battery.max_charge_kw,
@@ -186,7 +187,8 @@ class MultiMicrogridEnv:
         return self._last_global_state.copy()
 
     def reset(self, day: str | None = None, seed: int | None = None,
-              deterministic: bool = False) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
+              deterministic: bool = False,
+              forecast_noise: bool | None = None) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         if seed is not None:
             self.data.reseed(seed)
         context = self.data.get_episode_context(day, self.obs_builder.future_h)
@@ -199,6 +201,7 @@ class MultiMicrogridEnv:
             context,
             seed=seed,
             deterministic=deterministic,
+            forecast_noise=forecast_noise,
             exogenous_by_microgrid=self._episode_exogenous,
         )
         for core in self.cores.values():
@@ -216,6 +219,8 @@ class MultiMicrogridEnv:
 
     def _soc_potential(self, t: int) -> float:
         """Potential function for terminal SOC shaping."""
+        if self.config["terminal_soc"]["mode"] == "none":
+            return 0.0
         rate = float(self.config["terminal_soc"]["penalty_per_kwh"])
         tolerance = float(self.config["terminal_soc"]["tolerance"])
         progress = (t) / float(self.episode_length)
@@ -272,6 +277,7 @@ class MultiMicrogridEnv:
                 t=self.t,
                 episode_length=self.episode_length,
                 tolerance=tolerance,
+                enforce_terminal=self.config["terminal_soc"]["mode"] != "none",
                 exogenous=current[mg],
             )
             for mg in self.agent_ids
@@ -455,7 +461,7 @@ class MultiMicrogridEnv:
 
         terminal_penalties = {mg: 0.0 for mg in self.agent_ids}
         terminal = self.t + 1 >= len(self.episode_df)
-        if terminal:
+        if terminal and self.config["terminal_soc"]["mode"] != "none":
             terminal_cfg = self.config["terminal_soc"]
             rate = float(terminal_cfg["penalty_per_kwh"])
             for mg in self.agent_ids:

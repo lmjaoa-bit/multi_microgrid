@@ -12,10 +12,14 @@ from experiments.training_pipeline import _diagnostic_means, _append_actor_diagn
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def build(slug="crossgate", split="train", disabled=False):
+def build(slug="crossgate", split="train", disabled=False, terminal_mode="none"):
     spec = get_algorithm_spec(slug)
     cfg = yaml.safe_load((ROOT / "configs/cooperative.yaml").read_text(encoding="utf-8"))
     cfg["_project_root"] = str(ROOT)
+    cfg["terminal_soc"]["mode"] = terminal_mode
+    if terminal_mode != "none":
+        for mg in cfg["microgrids"]:
+            mg["battery"]["initial_soc"] = .55
     if disabled:
         cfg["p2p"]["enabled"] = False
     env = MultiMicrogridEnv(spec.build_environment_config(cfg), split=split)
@@ -162,7 +166,7 @@ def test_rollout_update_diagnostics_and_checkpoint(slug, tmp_path):
     assert "dispatch_action_grad_rms" in aggregate["actor_diagnostics"]["mg3"]
     for mg in env.agent_ids:
         b = env.cores[mg].battery
-        assert abs(b.soc - b.initial_soc) <= .030001
+        assert b.soc_min - 1e-6 <= b.soc <= b.soc_max + 1e-6
     path = tmp_path / "best_model.pt"
     alg.save(path)
     _, restored = build(slug, split="test")
@@ -179,7 +183,7 @@ def test_rollout_update_diagnostics_and_checkpoint(slug, tmp_path):
 
 
 def test_forced_terminal_export_without_market():
-    env, _ = build(disabled=True)
+    env, _ = build(disabled=True, terminal_mode="penalty")
     env.reset(seed=1, deterministic=True)
     env.t = 23
     for mg in env.agent_ids:

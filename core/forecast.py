@@ -20,10 +20,19 @@ class SharedForecastProvider:
         self.agent_ids = list(profiles.agent_ids)
         self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
         self.noisy = bool(config.get("observation", {}).get("noisy_forecast", True))
+        observation = config.get("observation", {})
+        self.temporal_correlation = float(
+            observation.get("forecast_temporal_correlation", 0.0)
+        )
+        self.error_max = dict(observation.get("forecast_error_max", {}))
+        self.mask_beyond_episode = bool(
+            observation.get("mask_forecast_beyond_episode", False)
+        )
         self.seed = int(seed)
         self.rng = np.random.default_rng(self.seed)
         self._public_arrays: dict[str, np.ndarray] = {}
         self._local_arrays: dict[str, dict[str, np.ndarray]] = {}
+        self._valid_array = np.empty((0, self.future_h), dtype=np.float64)
         self.context: pd.DataFrame | None = None
         self.deterministic = False
         self.heterogeneous_tariffs = has_heterogeneous_tariffs(config)
@@ -33,6 +42,7 @@ class SharedForecastProvider:
         context: pd.DataFrame,
         seed: int | None = None,
         deterministic: bool = False,
+        forecast_noise: bool | None = None,
         exogenous_by_microgrid: Mapping[str, Mapping[str, np.ndarray]] | None = None,
     ) -> None:
         self.context = context.reset_index(drop=True)
@@ -42,9 +52,44 @@ class SharedForecastProvider:
         episode_length = int(self.config.get("time", {}).get("episode_length", 24))
         times = np.arange(episode_length + 1, dtype=np.int64)[:, None]
         horizons = np.arange(1, self.future_h + 1, dtype=np.int64)[None, :]
-        indices = np.minimum(times + horizons, len(self.context) - 1)
+        raw_indices = times + horizons
+        context_valid = raw_indices < len(self.context)
+        if self.mask_beyond_episode:
+            valid = context_valid & (raw_indices < episode_length)
+        else:
+            valid = context_valid
+        indices = np.minimum(raw_indices, len(self.context) - 1)
+        self._valid_array = valid.astype(np.float64)
         growth = np.sqrt(horizons.astype(np.float64))
         shape = indices.shape
+        apply_noise = self.noisy and (
+            bool(forecast_noise) if forecast_noise is not None else not self.deterministic
+        )
+
+        def multiplier(name: str) -> np.ndarray:
+            """Correlated, horizon-growing multiplicative forecast error."""
+            sigma_1h = float(sigma.get(name, 0.0))
+            if not apply_noise or sigma_1h <= 0.0:
+                return np.ones(shape, dtype=np.float64)
+            innovations = rng.normal(size=shape)
+            correlated = np.empty(shape, dtype=np.float64)
+            correlated[:, 0] = innovations[:, 0]
+            rho = self.temporal_correlation
+            innovation_scale = np.sqrt(max(0.0, 1.0 - rho * rho))
+            for k in range(1, self.future_h):
+                correlated[:, k] = (
+                    rho * correlated[:, k - 1]
+                    + innovation_scale * innovations[:, k]
+                )
+            error = correlated * sigma_1h * growth
+            maximum = self.error_max.get(name)
+            if maximum is not None:
+                error = np.clip(error, -float(maximum), float(maximum))
+            return 1.0 + error
+
+        def finish(values: np.ndarray) -> np.ndarray:
+            nonnegative = np.maximum(0.0, values)
+            return np.where(valid, nonnegative, 0.0)
 
         ghi_source = self.context["ghi_w_per_m2"].to_numpy(dtype=np.float64)
         wind_source = self.context["wind_speed_mps"].to_numpy(dtype=np.float64)
@@ -53,19 +98,18 @@ class SharedForecastProvider:
         shared_price = None
         if not self.heterogeneous_tariffs:
             shared_price = self.context["buy_price_per_kwh"].to_numpy(dtype=np.float64)[indices].copy()
-        if self.noisy and not self.deterministic:
-            ghi *= 1.0 + rng.normal(size=shape) * float(sigma.get("ghi", 0.0)) * growth
-            wind_speed *= 1.0 + rng.normal(size=shape) * float(sigma.get("wind_speed", 0.0)) * growth
-            if shared_price is not None:
-                shared_price *= 1.0 + rng.normal(size=shape) * float(sigma.get("price", 0.0)) * growth
-        ghi = np.maximum(0.0, ghi)
-        wind_speed = np.maximum(0.0, wind_speed)
+        ghi *= multiplier("ghi")
+        wind_speed *= multiplier("wind_speed")
+        if shared_price is not None:
+            shared_price *= multiplier("price")
+        ghi = finish(ghi)
+        wind_speed = finish(wind_speed)
         self._public_arrays = {
             "ghi_w_per_m2": ghi,
             "wind_speed_mps": wind_speed,
         }
         if shared_price is not None:
-            self._public_arrays["grid_price_per_kwh"] = np.maximum(0.0, shared_price)
+            self._public_arrays["grid_price_per_kwh"] = finish(shared_price)
 
         self._local_arrays = {}
         for mg_id in self.agent_ids:
@@ -74,8 +118,7 @@ class SharedForecastProvider:
             else:
                 exogenous = exogenous_by_microgrid[mg_id]
             load = np.asarray(exogenous["load_kw"], dtype=np.float64)[indices].copy()
-            if self.noisy and not self.deterministic:
-                load *= 1.0 + rng.normal(size=shape) * float(sigma.get("load", 0.0)) * growth
+            load *= multiplier("load")
             renewable_cfg = self.profiles.mg_cfg[mg_id]["renewables"]
             has_local_weather = (
                 "ghi_column" in renewable_cfg
@@ -87,18 +130,17 @@ class SharedForecastProvider:
                 # path so the deterministic forecast matches the environment.
                 pv = np.asarray(exogenous["pv_kw"], dtype=np.float64)[indices].copy()
                 wind = np.asarray(exogenous["wind_kw"], dtype=np.float64)[indices].copy()
-                if self.noisy and not self.deterministic:
-                    pv *= 1.0 + rng.normal(size=shape) * float(sigma.get("ghi", 0.0)) * growth
-                    wind *= 1.0 + rng.normal(size=shape) * float(sigma.get("wind_speed", 0.0)) * growth
-                    pv = np.maximum(0.0, pv)
-                    wind = np.maximum(0.0, wind)
+                pv *= multiplier("ghi")
+                wind *= multiplier("wind_speed")
+                pv = finish(pv)
+                wind = finish(wind)
             else:
                 pv = float(renewable_cfg["pv_capacity_kw"]) * self.profiles.pv_capacity_factor_series(ghi)
                 wind = float(renewable_cfg["wind_capacity_kw"]) * self.profiles.wind_capacity_factor_series(wind_speed)
             self._local_arrays[mg_id] = {
-                "load_kw": np.maximum(0.0, load),
-                "pv_kw": pv,
-                "wind_kw": wind,
+                "load_kw": finish(load),
+                "pv_kw": np.where(valid, pv, 0.0),
+                "wind_kw": np.where(valid, wind, 0.0),
             }
             if self.heterogeneous_tariffs:
                 buy_source = self.context[buy_price_column(mg_id)].to_numpy(dtype=np.float64)
@@ -106,20 +148,25 @@ class SharedForecastProvider:
                 buy_price = buy_source[indices].copy()
                 sell_price = sell_source[indices].copy()
                 price_sigma = float(sigma.get("price", 0.0))
-                if self.noisy and not self.deterministic and price_sigma > 0.0:
-                    price_noise = 1.0 + rng.normal(size=shape) * price_sigma * growth
+                if price_sigma > 0.0:
+                    price_noise = multiplier("price")
                     buy_price *= price_noise
                     sell_price *= price_noise
                 self._local_arrays[mg_id].update({
-                    "grid_price_per_kwh": np.maximum(0.0, buy_price),
-                    "grid_sell_price_per_kwh": np.maximum(0.0, sell_price),
+                    "grid_price_per_kwh": finish(buy_price),
+                    "grid_sell_price_per_kwh": finish(sell_price),
                 })
             else:
                 sell_ratio = float(self.config.get("price", {}).get("sell_ratio", 0.5))
                 assert shared_price is not None
                 self._local_arrays[mg_id]["grid_sell_price_per_kwh"] = (
-                    np.maximum(0.0, shared_price) * sell_ratio
+                    finish(shared_price) * sell_ratio
                 )
+
+    def valid(self, t: int, k: int) -> float:
+        if self.context is None:
+            raise RuntimeError("Forecast provider has not been initialized for an episode.")
+        return float(self._valid_array[int(t), int(k) - 1])
 
     def public(self, t: int, k: int) -> dict[str, float]:
         if self.context is None:

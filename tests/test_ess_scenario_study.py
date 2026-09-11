@@ -61,7 +61,8 @@ def test_global_config_uses_local_weather_generation_and_tariffs() -> None:
     expected_buy, expected_sell = env.data.prices_at(env.episode_context_df.iloc[1], "mg3")
     assert np.isclose(forecast["grid_price_per_kwh"], expected_buy)
     assert np.isclose(forecast["grid_sell_price_per_kwh"], expected_sell)
-    assert env.global_state_dim == 66
+    horizon = env.obs_builder.future_h
+    assert env.global_state_dim == 54 + 7 * horizon
     assert "mg1_feasible_charge_max" in env.global_state_builder.schema()
 
 

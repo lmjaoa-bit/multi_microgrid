@@ -40,9 +40,33 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if sharing.get("offer_projection", "peer_demand_cap") != "peer_demand_cap":
         raise ValueError("single_dispatch requires peer_demand_cap projection")
     terminal = config["terminal_soc"]
-    if terminal.get("mode") not in {"penalty", "hard"}:
-        raise ValueError("terminal_soc.mode must be penalty or hard")
+    if terminal.get("mode") not in {"none", "penalty", "hard"}:
+        raise ValueError("terminal_soc.mode must be none, penalty or hard")
     _number(terminal.get("tolerance"), "terminal_soc.tolerance", 0.0)
+    observation = config.get("observation", {})
+    horizon = observation.get("future_horizon", 4)
+    if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 1:
+        raise ValueError("observation.future_horizon must be a positive integer")
+    for key in ("noisy_forecast", "evaluation_forecast_noise", "mask_forecast_beyond_episode"):
+        if key in observation and not isinstance(observation[key], bool):
+            raise ValueError(f"observation.{key} must be boolean")
+    correlation = _number(
+        observation.get("forecast_temporal_correlation", 0.0),
+        "observation.forecast_temporal_correlation",
+        0.0,
+    )
+    if correlation >= 1.0:
+        raise ValueError("observation.forecast_temporal_correlation must be < 1")
+    sigma = observation.get("forecast_sigma_1h", {})
+    maximum = observation.get("forecast_error_max", {})
+    if not isinstance(sigma, Mapping):
+        raise ValueError("observation.forecast_sigma_1h must be a mapping")
+    if not isinstance(maximum, Mapping):
+        raise ValueError("observation.forecast_error_max must be a mapping")
+    for name in ("load", "ghi", "wind_speed", "price"):
+        _number(sigma.get(name, 0.0), f"observation.forecast_sigma_1h.{name}", 0.0)
+        if name in maximum:
+            _number(maximum[name], f"observation.forecast_error_max.{name}", 0.0)
     ids: list[str] = []
     for index, mg in enumerate(config["microgrids"]):
         mg_id = str(mg.get("id", ""))

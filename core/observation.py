@@ -18,6 +18,9 @@ class ObservationBuilder:
         self.config = config
         self.agent_ids = [str(m["id"]) for m in config["microgrids"]]
         self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
+        self.include_forecast_validity = bool(
+            config.get("observation", {}).get("mask_forecast_beyond_episode", False)
+        )
         sharing_cfg = config.get("ess_sharing", {})
         self.control_mode = str(sharing_cfg.get("control_mode", "single_dispatch"))
         self.observation_mode = str(sharing_cfg.get("observation_mode", "cross_microgrid"))
@@ -34,6 +37,8 @@ class ObservationBuilder:
                  "grid_sell_price", "soc"]
         for k in range(1, self.future_h + 1):
             names.extend([f"load_t+{k}", f"pv_t+{k}", f"wind_t+{k}", f"price_t+{k}"])
+            if self.include_forecast_validity:
+                names.append(f"forecast_valid_t+{k}")
         names.extend(["previous_p2p_net", "previous_grid_net", "previous_system_p2p"])
         if self.control_mode == "single_dispatch":
             names.extend([
@@ -86,6 +91,8 @@ class ObservationBuilder:
                 f["wind_kw"] / n["wind"],
                 f["grid_price_per_kwh"] / n["price"],
             ])
+            if self.include_forecast_validity:
+                values.append(self.forecasts.valid(t, k))
         previous = history["by_microgrid"][mg_id]
         values.extend([
             previous["p2p_net_kwh"] / n["trade"],
@@ -97,7 +104,8 @@ class ObservationBuilder:
             values.extend([
                 float(flex.get("available_charge_ratio", 0.0)),
                 float(flex.get("available_discharge_ratio", 0.0)),
-                float(battery_soc) - self.initial_soc[mg_id],
+                (float(battery_soc) - self.initial_soc[mg_id]
+                 if self.config["terminal_soc"]["mode"] != "none" else 0.0),
                 previous["ess_p2p_offer_kwh"] / n["trade"],
                 previous["ess_p2p_accepted_kwh"] / n["trade"],
                 previous["ess_p2p_unmatched_kwh"] / n["trade"],

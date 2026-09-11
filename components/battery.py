@@ -65,8 +65,11 @@ class BatteryModel:
         episode_length: int = 24,
         target_soc: float | None = None,
         tolerance: float = 0.03,
+        enforce_terminal: bool = True,
     ) -> tuple[float, float]:
         """Compute the feasible SOC interval at step t+1 that guarantees terminal target reachability."""
+        if not enforce_terminal:
+            return float(self.soc_min), float(self.soc_max)
         target = float(self.initial_soc if target_soc is None else target_soc)
         tol = max(0.0, float(tolerance))
         steps_remaining_after_next = max(0, int(episode_length) - 1 - int(t))
