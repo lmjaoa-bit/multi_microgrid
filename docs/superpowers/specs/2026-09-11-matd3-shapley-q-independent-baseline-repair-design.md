@@ -1,8 +1,8 @@
-# MATD3-ShapleyQ Independent Baseline Repair Design
+# MATD3-ShapleyQ Independent Baseline 修复设计
 
-## Goal
+## 目标
 
-Complete the partially implemented `matd3_shapley_q` algorithm so that Shapley-Q decomposes only the long-term cooperation surplus:
+完成当前尚未收尾的 `matd3_shapley_q` 算法，使 Shapley-Q 只分解长期合作增量价值：
 
 ```text
 Q_coop = Q_grand - Q_ind
@@ -10,136 +10,137 @@ sum_i Q_phi_i = Q_coop
 Q_grand = Q_ind + sum_i Q_phi_i
 ```
 
-The shared environment continues to emit one `team_reward` for the grand coalition. Shapley values remain long-term credit assignments and are never injected into immediate per-agent rewards.
+共享环境继续只输出一个代表大联盟整体表现的 `team_reward`。Shapley value 仍然只用于长期信用分配，不会注入即时的逐智能体 reward。
 
-## Scope and invariants
+## 修改范围与不变量
 
-The repair stays inside the existing experimental package and shared algorithm-neutral lifecycle hooks. It preserves:
+本次修复以现有实验算法包为基础，只增加必要的共享算法生命周期钩子，并保持以下设计不变：
 
-- three decentralized actors;
-- three centralized Twin Marginal-Contribution Critics;
-- exact three-agent predecessor enumeration and weights `1/3, 1/6, 1/6, 1/3`;
-- single-dispatch action semantics;
-- local operation for microgrids outside a coalition;
-- hard terminal SOC with `SOC_start = SOC_end = 0.1`;
-- the shared training, validation, formal-test, settlement, and plotting workflow.
+- 保留 3 个去中心化 Actor；
+- 保留 3 组 centralized Twin Marginal-Contribution Critic；
+- 保留 3-agent exact Shapley predecessor enumeration，以及权重 `1/3, 1/6, 1/6, 1/3`；
+- 保留 `single_dispatch` 动作语义；
+- 不属于 coalition 的微网仍然进行本地运行；
+- 采用 hard terminal SOC，且 `SOC_start = SOC_end = 0.1`；
+- 继续使用共享的训练、验证、正式测试、结算和绘图流程。
 
-The canonical implementation under `algorithms/matd3/` will not change.
+不会修改 `algorithms/matd3/` 下的 canonical MATD3 实现。
 
-## Independent baseline
+## Independent Baseline
 
-`IndependentBaselineEvaluator` is a fixed counterfactual evaluator. Its environment uses the same physical configuration as the grand-coalition environment, except that all cross-microgrid P2P and ESS cooperation are disabled. Local renewable generation, load, ESS dispatch, and main-grid exchange remain active.
+`IndependentBaselineEvaluator` 是固定的反事实评估器。它使用与 Grand Coalition 环境相同的物理配置，唯一差异是关闭所有跨微网 P2P 和 ESS cooperation。每个微网的本地新能源、负荷、本地 ESS 调度和主网交互仍然有效。
 
-The default mode is a deterministic heuristic because the repository currently has no compatible trained no-cooperation MATD3 checkpoint. The heuristic has no learnable parameters and therefore cannot receive gradients or be manipulated by the Shapley actors.
+由于当前仓库中没有兼容的 no-cooperation MATD3 checkpoint，默认使用确定性的固定启发式策略。该策略没有可学习参数，因此不会接收梯度，也不能被 Shapley Actor 操纵。
 
-An optional `frozen_policy` mode remains supported, but it must require an explicit compatible checkpoint. Missing, incompatible, or incomplete checkpoints fail at construction rather than silently leaving a random policy in place. Loaded parameters have `requires_grad=False`, the module stays in evaluation mode, and inference runs under `torch.no_grad()`.
+继续支持可选的 `frozen_policy` 模式，但必须显式提供兼容 checkpoint。checkpoint 缺失、不兼容或内容不完整时，在算法构造阶段直接报错，不能静默保留随机初始化策略。加载后的所有参数均设置为 `requires_grad=False`，模型保持 evaluation mode，并在 `torch.no_grad()` 中推理。
 
-For every episode, the baseline and grand branches use the same day, seed, deterministic/noisy-forecast settings, exogenous load/PV/wind arrays, price context, and initial SOC. Tests compare the complete scenario inputs rather than only one load array.
+每个 episode 中，Independent 与 Grand 分支必须使用完全相同的日期、seed、确定性设置、预测噪声设置、load/PV/wind 外生序列、价格上下文和初始 SOC。测试将比较完整场景输入，而不只是某一个微网的 load 数组。
 
-The evaluator caches per-step independent rewards, profits, and discounted return-to-go references for diagnostics. Out-of-range or uninitialized reward access raises an error instead of returning zero.
+评估器缓存每一步的 independent reward、profit 和用于诊断的 discounted return-to-go reference。未初始化或越界访问 baseline step 时直接报错，不再返回会掩盖问题的零值。
 
-## Replay and value targets
+## Replay Buffer 与价值目标
 
-The Shapley replay transition stores the raw authoritative values:
+Shapley replay transition 保存以下权威原始量：
 
-- `team_reward`;
-- `independent_reward`;
-- `cooperation_surplus_reward`;
-- observations, state, action, next observations/state, and terminal flag.
+- `team_reward`；
+- `independent_reward`；
+- `cooperation_surplus_reward`；
+- observations、state、action、next observations/state 和 terminal flag。
 
-The buffer enforces:
+Replay Buffer 强制检查：
 
 ```text
 cooperation_surplus_reward == team_reward - independent_reward
 ```
 
-If discounted independent references are used for the grand-decomposition diagnostic, they are stored alongside the transition with the same episode/time identity.
+如果 grand-decomposition diagnostic 使用 discounted independent reference，则该 reference 连同相同的 episode/time identity 一起存入 transition。
 
-The Shapley Bellman target is:
+Shapley Bellman target 定义为：
 
 ```text
 y_coop = r_coop + gamma * (1 - done) * sum_i min(Q_phi_i_A', Q_phi_i_B')
 ```
 
-The Twin minimum is therefore applied per agent before summation. Both current global twin sums are fitted to `y_coop`; they no longer fit the grand-coalition return.
+因此，应先对每个智能体的 Twin Q 取最小值，再对三个智能体求和。当前两组 global twin sum 都拟合 `y_coop`，不再拟合 Grand Coalition return。
 
-Actor `i` continues to maximize its own `Q_phi_i_A`. Independent-baseline computation is outside every actor and critic graph.
+Actor `i` 继续最大化自己的 `Q_phi_i_A`。Independent Baseline 的全部计算都位于 Actor 和 Critic 的梯度图之外。
 
-## Characteristic-value semantics
+## Characteristic Value 语义
 
-The coalition utility API distinguishes physical value `J(S)` from normalized characteristic value:
+Coalition value API 明确区分物理价值 `J(S)` 和归一化特征值：
 
 ```text
 V(S) = J(S) - J(empty)
 ```
 
-`J(empty)` represents three independently operating microgrids and is not forced to zero. Pure exact-Shapley helpers normalize real coalition-value mappings and calculate contributions from marginal differences. This gives executable coverage for `V(empty)=0`, Shapley efficiency, no-cooperation zero contributions, and positive cooperation.
+`J(empty)` 表示三个微网独立运行，不能被强制设为零。纯函数形式的 exact-Shapley 工具会对真实 coalition-value mapping 进行归一化，并根据边际差计算 contribution。由此可执行地验证 `V(empty)=0`、Shapley efficiency、无合作时 contribution 为零，以及存在合作收益时 contribution 总和为正。
 
-`CoalitionAwareProjector` only masks cooperation channels. It preserves every microgrid's local dispatch channel for all coalition masks, including the empty coalition.
+`CoalitionAwareProjector` 只 mask cooperation channel。对于所有 coalition mask（包括空联盟），每个微网的 local dispatch channel 都必须保留。
 
-## Diagnostics and output
+## 诊断指标与输出
 
-Training episode records include:
+训练 episode 记录新增或补齐：
 
-- grand team return/profit;
-- independent baseline return/profit;
-- cooperation-surplus return/profit;
-- `shapley_q_mg1`, `shapley_q_mg2`, `shapley_q_mg3`, and their sum;
-- cooperation-surplus Q target;
-- efficiency residual;
-- grand-decomposition residual when an independent return-to-go reference is available.
+- Grand team return/profit；
+- Independent Baseline return/profit；
+- Cooperation Surplus return/profit；
+- `shapley_q_mg1`、`shapley_q_mg2`、`shapley_q_mg3` 及其总和；
+- Cooperation Surplus Q target；
+- efficiency residual；
+- 当存在真实 independent return-to-go reference 时，记录 grand-decomposition residual。
 
-Validation continues to select `best_model.pt` solely by deterministic grand-coalition team profit. This preserves the real optimization objective.
+Validation 继续只依据确定性 Grand Coalition team profit 选择 `best_model.pt`，从而保证 checkpoint selection 始终围绕真实优化目标。
 
-Formal testing evaluates the selected policy and the same configured independent-baseline policy on matched days and seeds. Its daily CSV and JSON summary report grand, independent, and cooperation-surplus results. Existing daily coalition MILP evaluation and Equal/Shapley settlement remain separate post-processing and are not used as the online baseline reward.
+Formal test 使用匹配的日期和 seed，分别评估已选中的 Grand Coalition policy 与同一配置下的 Independent Baseline policy。每日 CSV 和 JSON summary 输出 Grand、Independent 和 Cooperation Surplus 结果。现有 daily coalition MILP evaluation 以及 Equal/Shapley settlement 继续作为独立的后处理流程，不能用于在线 baseline reward。
 
-The TensorBoard exporter maps the new record fields to the requested reward and Q namespaces. The terminal dashboard displays the essential grand/independent/surplus and Shapley efficiency diagnostics without changing saved data semantics.
+TensorBoard exporter 将新增字段映射到所要求的 reward 和 Q namespaces。训练终端 dashboard 显示关键的 Grand/Independent/Surplus 与 Shapley efficiency 指标，但不改变保存数据的语义。
 
-Only residuals with a real reference are emitted. No tautological quantity is labeled as a learned grand-decomposition residual.
+只有存在真实 reference 的 residual 才允许输出。不能把恒等式计算结果伪装成 learned grand-decomposition residual。
 
-## Checkpoint compatibility
+## Checkpoint 兼容性
 
-New checkpoints identify the cooperation-surplus objective explicitly and record baseline mode/configuration metadata. Loading an older `full_enumeration_v1` checkpoint is rejected because its critic objective may decompose `Q_grand` rather than `Q_grand - Q_ind`.
+新 checkpoint 明确记录 cooperation-surplus objective，并保存 baseline mode/configuration metadata。旧的 `full_enumeration_v1` checkpoint 必须拒绝加载，因为其 Critic 目标可能仍在分解 `Q_grand`，而不是 `Q_grand - Q_ind`。
 
-Checkpoint loading still validates action semantics, projection signature, state schema, and observation schemas.
+Checkpoint 加载仍然校验 action semantics、projection signature、state schema 和 observation schemas。
 
-## Error handling
+## 错误处理
 
-The implementation fails early for:
+以下情况必须尽早失败并给出明确错误：
 
-- a missing or incompatible frozen-baseline checkpoint;
-- unsupported baseline modes;
-- inconsistent replay rewards;
-- baseline/grand scenario mismatches;
-- unavailable baseline step values;
-- old Shapley-Q checkpoint semantics;
-- non-finite losses, gradients, rewards, or diagnostics.
+- frozen baseline checkpoint 缺失或不兼容；
+- baseline mode 不受支持；
+- replay rewards 不满足一致性关系；
+- Independent 与 Grand 场景不一致；
+- 请求了不存在的 baseline step；
+- checkpoint 使用旧版 Shapley-Q 目标语义；
+- loss、gradient、reward 或 diagnostic 出现非有限值。
 
-## Testing strategy
+## 测试策略
 
-Tests are written or strengthened before production changes and must demonstrate the intended failure first. Coverage includes:
+先新增或强化测试并观察其因缺少目标行为而失败，再修改生产代码使其通过。测试范围包括：
 
-1. Empty-coalition physics: local ESS and grid operation remain available while all P2P flows are zero.
-2. Characteristic normalization: the implementation computes `V(empty)=0` from a nonzero `J(empty)`.
-3. Exact Shapley efficiency: contributions sum to `J(grand)-J(empty)`.
-4. No-cooperation case: equal physical coalition values yield zero surplus and zero Shapley contributions.
-5. Positive deterministic cooperation case: a renewable-rich seller and high-price deficit buyer produce positive surplus and positive total contribution.
-6. Frozen-baseline isolation: all baseline gradients remain `None`, while every actor obtains a finite nonzero gradient in an update designed to exercise it.
-7. Common scenario: timestamps, physical exogenous arrays, prices, forecasts, forecast masks/noise, seed, and initial SOC match.
-8. Replay consistency and invalid-input rejection.
-9. Per-agent Twin-min ordering in the cooperation target.
-10. Training/formal-test output fields and strict checkpoint compatibility.
+1. 空联盟物理语义：local ESS 和 grid operation 仍然可用，所有 P2P flow 为零。
+2. Characteristic normalization：实现基于非零 `J(empty)` 计算出 `V(empty)=0`。
+3. Exact Shapley efficiency：contribution 总和等于 `J(grand)-J(empty)`。
+4. No-cooperation case：所有物理 coalition value 相同时，surplus 和全部 Shapley contribution 为零。
+5. Positive deterministic cooperation case：构造新能源富余卖方与高价缺电买方，使 surplus 及 contribution 总和严格大于零。
+6. Frozen-baseline isolation：baseline 所有梯度均为 `None`；在能够激活更新的 batch 上，三个 Actor 均获得有限且非零的梯度。
+7. Common scenario：timestamp、物理外生数组、price、forecast、forecast mask/noise、seed 和初始 SOC 完全一致。
+8. Replay consistency 以及非法输入拒绝。
+9. Cooperation target 的 per-agent Twin-min 顺序。
+10. Training/formal-test 输出字段与严格 checkpoint compatibility。
 
-## Verification and acceptance
+## 验证与验收
 
-Before completion is reported:
+在报告完成前执行：
 
-1. Run the focused MATD3-ShapleyQ tests.
-2. Run `pytest -q` for the full repository.
-3. Run a 1-3 day `scripts/run_experiment.py --algorithm matd3_shapley_q` smoke workflow with learning enabled early enough to exercise critic and actor updates.
-4. Confirm the plugin and `configs/algorithms/matd3_shapley_q.yaml` were selected.
-5. Confirm formal testing used `best_model.pt`.
-6. Confirm test evaluation, Equal/Shapley settlement, summaries, and saved-result-only plotting completed.
-7. Confirm exactly 15 PNG and 15 PDF figures were produced.
-8. Confirm the run is under `outputs/matd3_shapley_q/runs/`.
-9. Confirm no file under `algorithms/matd3/` changed.
+1. 运行 MATD3-ShapleyQ 专属测试。
+2. 运行全仓库 `pytest -q`。
+3. 运行 1–3 天的 `scripts/run_experiment.py --algorithm matd3_shapley_q` smoke workflow，并确保足够早地启用学习，以实际覆盖 Critic 和 Actor update。
+4. 确认选中了 `matd3_shapley_q` plugin 及 `configs/algorithms/matd3_shapley_q.yaml`。
+5. 确认 formal test 使用 `best_model.pt`。
+6. 确认 test evaluation、Equal/Shapley settlement、summary 和 saved-result-only plotting 全部完成。
+7. 确认生成 15 个 PNG 和 15 个 PDF。
+8. 确认结果位于 `outputs/matd3_shapley_q/runs/`。
+9. 确认 `algorithms/matd3/` 下没有任何文件发生变化。
+
