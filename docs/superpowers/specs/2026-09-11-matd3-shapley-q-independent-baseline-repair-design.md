@@ -143,4 +143,3 @@ Checkpoint 加载仍然校验 action semantics、projection signature、state sc
 7. 确认生成 15 个 PNG 和 15 个 PDF。
 8. 确认结果位于 `outputs/matd3_shapley_q/runs/`。
 9. 确认 `algorithms/matd3/` 下没有任何文件发生变化。
-
