@@ -16,6 +16,12 @@ algorithm:
   replay_capacity: 200000
   warmup_steps: 1000
   exploration_noise: 0.15
+  shapley_q:
+    baseline:
+      mode: heuristic
+      checkpoint: null
+      disable_p2p: true
+      freeze_parameters: true
 runtime:
   cpu_threads: 1
 training:

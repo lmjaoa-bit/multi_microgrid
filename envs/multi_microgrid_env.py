@@ -194,6 +194,12 @@ class MultiMicrogridEnv:
         context = self.data.get_episode_context(day, self.obs_builder.future_h)
         self.episode_context_df = context
         self.episode_df = context.iloc[:self.episode_length].reset_index(drop=True).copy()
+        self.last_reset_options = {
+            "day": str(self.episode_df.iloc[0]["timestamp"]),
+            "seed": None if seed is None else int(seed),
+            "deterministic": bool(deterministic),
+            "forecast_noise": forecast_noise,
+        }
         self._episode_exogenous = {
             mg: self.profiles.exogenous_series(mg, context) for mg in self.agent_ids
         }
