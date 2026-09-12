@@ -49,7 +49,7 @@ def test_history_nonfinite_values_are_sanitized(tmp_path):
     assert json.loads(path.read_text())["bad"] is None
 
 
-def test_cpu_threads_are_opt_in_and_validated():
+def test_cpu_threads_are_opt_in_validated_and_apply_with_cuda_models():
     original = torch.get_num_threads()
     try:
         assert configure_torch_runtime({}, "cpu")["cpu_threads"] == original
@@ -58,6 +58,6 @@ def test_cpu_threads_are_opt_in_and_validated():
             with pytest.raises(ValueError, match="positive integer"):
                 configure_torch_runtime({"runtime": {"cpu_threads": invalid}}, "cpu")
         configure_torch_runtime({"runtime": {"cpu_threads": 2}}, "cuda:0")
-        assert torch.get_num_threads() == 1
+        assert torch.get_num_threads() == 2
     finally:
         torch.set_num_threads(original)
