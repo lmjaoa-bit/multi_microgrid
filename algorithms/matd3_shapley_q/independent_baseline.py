@@ -27,6 +27,8 @@ class IndependentBaselineEvaluator:
         self.mode = str(baseline.get("mode", "heuristic"))
         self.checkpoint_path = baseline.get("checkpoint")
         self.gamma = float(settings.get("gamma", 0.99))
+        if not np.isfinite(self.gamma) or not 0.0 <= self.gamma <= 1.0:
+            raise ValueError("Independent baseline gamma must be finite and in [0, 1]")
         self.device = torch.device(device)
 
         allowed_modes = {"heuristic", "frozen_policy"}
@@ -140,6 +142,17 @@ class IndependentBaselineEvaluator:
         actor_state = checkpoint.get("actors")
         if not isinstance(actor_state, Mapping):
             raise ValueError("Independent baseline checkpoint actor state dict is missing")
+        for tensor_name, tensor in actor_state.items():
+            if not isinstance(tensor, torch.Tensor):
+                raise ValueError(
+                    "Independent baseline checkpoint actor state dict entry "
+                    f"{tensor_name} is not a tensor"
+                )
+            if not torch.isfinite(tensor).all():
+                raise ValueError(
+                    "Independent baseline checkpoint actor state tensor "
+                    f"{tensor_name} is non-finite"
+                )
         try:
             source.actors.load_state_dict(actor_state, strict=True)
         except (KeyError, RuntimeError, TypeError, ValueError) as exc:
@@ -180,7 +193,14 @@ class IndependentBaselineEvaluator:
         self.step_profits = []
         self.discounted_returns = []
         self.step_infos = []
-        observations, _ = self.ind_env.reset(**dict(env.last_reset_options))
+        self.total_return = 0.0
+        self.total_profit = 0.0
+        options = dict(env.last_reset_options)
+        if options["seed"] is None:
+            self.ind_env.forecasts.rng.bit_generator.state = copy.deepcopy(
+                env.last_forecast_rng_state
+            )
+        observations, _ = self.ind_env.reset(**options)
         self._assert_common_scenario(env)
 
         done = False
@@ -191,16 +211,35 @@ class IndependentBaselineEvaluator:
                 else self._frozen_policy_actions(observations)
             )
             observations, rewards, done, info = self.ind_env.step(actions)
-            self.step_rewards.append(float(rewards[self.ind_env.agent_ids[0]]))
-            self.step_profits.append(float(info["team_profit"]))
+            step_index = len(self.step_rewards)
+            reward = float(rewards[self.ind_env.agent_ids[0]])
+            profit = float(info["team_profit"])
+            if not np.isfinite(reward):
+                raise ValueError(
+                    f"Independent baseline step {step_index} reward is non-finite"
+                )
+            if not np.isfinite(profit):
+                raise ValueError(
+                    f"Independent baseline step {step_index} profit is non-finite"
+                )
+            self.step_rewards.append(reward)
+            self.step_profits.append(profit)
             self.step_infos.append(info)
 
         self.total_return = float(sum(self.step_rewards))
         self.total_profit = float(sum(self.step_profits))
+        if not np.isfinite(self.total_return):
+            raise ValueError("Independent baseline total_return is non-finite")
+        if not np.isfinite(self.total_profit):
+            raise ValueError("Independent baseline total_profit is non-finite")
         running = 0.0
         self.discounted_returns = [0.0] * len(self.step_rewards)
         for index in range(len(self.step_rewards) - 1, -1, -1):
             running = self.step_rewards[index] + self.gamma * running
+            if not np.isfinite(running):
+                raise ValueError(
+                    f"Independent baseline step {index} return_to_go is non-finite"
+                )
             self.discounted_returns[index] = float(running)
 
     def get_step_data(self, t: int) -> dict[str, float]:

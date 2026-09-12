@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -203,6 +204,9 @@ class MultiMicrogridEnv:
         self._episode_exogenous = {
             mg: self.profiles.exogenous_series(mg, context) for mg in self.agent_ids
         }
+        self.last_forecast_rng_state = copy.deepcopy(
+            self.forecasts.rng.bit_generator.state
+        )
         self.forecasts.begin_episode(
             context,
             seed=seed,

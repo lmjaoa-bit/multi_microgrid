@@ -69,3 +69,34 @@ Task 3 之后的 replay、Bellman target、训练 pipeline 或正式测试输出
   lifecycle 或 formal evaluation；这些属于 Task 3 及之后。因此此增量提交未运行端到端
   Shapley-Q smoke workflow，因为当前 pipeline 尚不会消费本 evaluator，运行它不能验证
   Task 2 的 baseline 生命周期。完整验收 smoke 应在后续 lifecycle 接入完成后执行。
+
+## 独立审查修复轮
+
+独立审查指出并已修复三个 Task 2 缺口：
+
+1. 当 `seed=None` 时，Grand environment 现在会在 forecast provider 消费 RNG 前深拷贝
+   bit-generator state；baseline 在影子 reset 前恢复该 state。`last_reset_options` 仍严格保持
+   `day`、`seed`、`deterministic`、`forecast_noise` 四字段，不改变日期采样、预测或 reward。
+2. evaluator 构造时拒绝 non-finite 或超出 `[0, 1]` 的 gamma；frozen checkpoint 的每个
+   actor state entry 必须是 finite tensor；rollout 逐 step 校验 reward/profit，并在结束时
+   校验 total return/profit 与每个 discounted return-to-go。所有错误包含 checkpoint tensor、
+   step 或字段上下文。
+3. 新增独立 SOC mutation 测试：在影子 reset 完成后、scenario comparison 前直接修改一侧
+   battery `initial_soc`，不复用 production `scenario_signature` 构造期望，确认 mismatch 会
+   fail-fast。
+
+### 审查修复 TDD 证据
+
+- 首轮 RED：
+  `pytest -q tests/test_matd3_shapley_q.py -k "no_seed_forecast_rng or invalid_gamma or nonfinite_actor_tensor or nonfinite_step_values or initial_soc_mismatch"`
+  → `7 failed, 1 passed, 22 deselected`。SOC mutation 已保护现有行为；其余失败准确对应 RNG、
+  gamma、actor tensor 与 step 数值缺口。
+- RNG GREEN：无 seed noisy forecast 回归与四字段 reset-options 测试 → `2 passed`。
+- 构造期 finite GREEN：invalid gamma 与 non-finite actor tensor → `4 passed, 26 deselected`。
+- trajectory RED：step、totals、discounted-return mutation → `5 failed, 28 deselected`。
+- trajectory GREEN：同一命令 → `5 passed, 28 deselected`。
+- 审查聚焦集合最终：`11 passed, 22 deselected`。
+- 完整 Task 2 文件最终：`33 passed in 12.00s`。
+- 全仓库最终：`117 passed, 2 warnings in 30.14s`；两条 warning 与首轮相同，均为已有预期
+  RuntimeWarning。
+- `git diff --check` 通过；相对上一 Task 2 commit，`algorithms/matd3/` 仍无差异。

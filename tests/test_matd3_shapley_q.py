@@ -109,12 +109,57 @@ def test_common_scenario_matches_all_physical_and_forecast_inputs(env):
     assert evaluator.scenario_signature(env) == evaluator.scenario_signature(ind)
 
 
+def test_common_scenario_restores_no_seed_forecast_rng_after_prior_resets(env):
+    env.reset(seed=None, deterministic=False, forecast_noise=True)
+    env.reset(seed=None, deterministic=False, forecast_noise=True)
+    evaluator = IndependentBaselineEvaluator(
+        env, algorithm_config_with_baseline("heuristic")
+    )
+    evaluator.reset_episode(env)
+    ind = evaluator.ind_env
+    pd.testing.assert_frame_equal(env.episode_context_df, ind.episode_context_df)
+    for mg in env.agent_ids:
+        for field in ("load_kw", "pv_kw", "wind_kw"):
+            np.testing.assert_allclose(
+                env._episode_exogenous[mg][field], ind._episode_exogenous[mg][field]
+            )
+        for field in env.forecasts._local_arrays[mg]:
+            np.testing.assert_allclose(
+                env.forecasts._local_arrays[mg][field],
+                ind.forecasts._local_arrays[mg][field],
+            )
+    for field in env.forecasts._public_arrays:
+        np.testing.assert_allclose(
+            env.forecasts._public_arrays[field], ind.forecasts._public_arrays[field]
+        )
+    np.testing.assert_allclose(env.forecasts._valid_array, ind.forecasts._valid_array)
+
+
 def test_common_scenario_mismatch_fails_fast(env):
     evaluator = IndependentBaselineEvaluator(
         env, algorithm_config_with_baseline("heuristic")
     )
     env.reset(seed=73, deterministic=False, forecast_noise=True)
     env._episode_exogenous["mg1"]["load_kw"][0] += 1.0
+    with pytest.raises(ValueError, match="scenario"):
+        evaluator.reset_episode(env)
+
+
+def test_independent_baseline_detects_initial_soc_mismatch_during_reset(
+    env, monkeypatch
+):
+    evaluator = IndependentBaselineEvaluator(
+        env, algorithm_config_with_baseline("heuristic")
+    )
+    env.reset(seed=73, deterministic=True)
+    original_reset = evaluator.ind_env.reset
+
+    def reset_with_mismatched_initial_soc(*args, **kwargs):
+        result = original_reset(*args, **kwargs)
+        evaluator.ind_env.cores["mg1"].battery.initial_soc += 0.01
+        return result
+
+    monkeypatch.setattr(evaluator.ind_env, "reset", reset_with_mismatched_initial_soc)
     with pytest.raises(ValueError, match="scenario"):
         evaluator.reset_episode(env)
 
@@ -128,6 +173,14 @@ def test_independent_baseline_rejects_noncooperation_physics_mismatch(env):
     env.reset(seed=73, deterministic=True)
     with pytest.raises(ValueError, match="physical configuration"):
         evaluator.reset_episode(env)
+
+
+@pytest.mark.parametrize("gamma", [float("nan"), -0.01, 1.01])
+def test_independent_baseline_rejects_invalid_gamma(env, gamma):
+    cfg = algorithm_config_with_baseline("heuristic")
+    cfg["algorithm"]["gamma"] = gamma
+    with pytest.raises(ValueError, match="gamma"):
+        IndependentBaselineEvaluator(env, cfg)
 
 
 def test_independent_baseline_keeps_local_ess_and_grid_but_disables_p2p(env):
@@ -200,6 +253,81 @@ def test_baseline_episode_metrics_match_cached_trajectory_and_reset_clears_infos
     assert evaluator.step_infos[0] is not first_infos[0]
 
 
+@pytest.mark.parametrize("field", ["reward", "profit"])
+def test_baseline_rollout_rejects_nonfinite_step_values(env, monkeypatch, field):
+    evaluator = IndependentBaselineEvaluator(
+        env, algorithm_config_with_baseline("heuristic")
+    )
+    env.reset(seed=42, deterministic=True)
+    original_step = evaluator.ind_env.step
+
+    def step_with_nonfinite_value(actions):
+        observations, rewards, done, info = original_step(actions)
+        if field == "reward":
+            rewards = dict(rewards)
+            rewards[evaluator.ind_env.agent_ids[0]] = float("nan")
+        else:
+            info = dict(info)
+            info["team_profit"] = float("inf")
+        return observations, rewards, done, info
+
+    monkeypatch.setattr(evaluator.ind_env, "step", step_with_nonfinite_value)
+    with pytest.raises(ValueError, match=rf"step 0.*{field}"):
+        evaluator.reset_episode(env)
+
+
+@pytest.mark.parametrize(
+    ("field", "total_field"),
+    [("reward", "total_return"), ("profit", "total_profit")],
+)
+def test_baseline_rollout_rejects_nonfinite_totals(
+    env, monkeypatch, field, total_field
+):
+    evaluator = IndependentBaselineEvaluator(
+        env, algorithm_config_with_baseline("heuristic")
+    )
+    env.reset(seed=42, deterministic=True)
+    original_step = evaluator.ind_env.step
+
+    def step_with_large_finite_value(actions):
+        observations, rewards, done, info = original_step(actions)
+        if field == "reward":
+            rewards = dict(rewards)
+            rewards[evaluator.ind_env.agent_ids[0]] = 1e308
+        else:
+            info = dict(info)
+            info["team_profit"] = 1e308
+        return observations, rewards, done, info
+
+    monkeypatch.setattr(evaluator.ind_env, "step", step_with_large_finite_value)
+    with pytest.raises(ValueError, match=rf"{total_field}.*non-finite"):
+        evaluator.reset_episode(env)
+
+
+def test_baseline_rollout_rejects_nonfinite_discounted_return(env, monkeypatch):
+    evaluator = IndependentBaselineEvaluator(
+        env, algorithm_config_with_baseline("heuristic")
+    )
+    env.reset(seed=42, deterministic=True)
+    original_step = evaluator.ind_env.step
+    rewards_by_step = [1e308, -1e308, -1e308]
+    step_index = 0
+
+    def step_with_discount_overflow(actions):
+        nonlocal step_index
+        observations, rewards, done, info = original_step(actions)
+        rewards = dict(rewards)
+        rewards[evaluator.ind_env.agent_ids[0]] = (
+            rewards_by_step[step_index] if step_index < len(rewards_by_step) else 0.0
+        )
+        step_index += 1
+        return observations, rewards, done, info
+
+    monkeypatch.setattr(evaluator.ind_env, "step", step_with_discount_overflow)
+    with pytest.raises(ValueError, match=r"step 1.*return_to_go.*non-finite"):
+        evaluator.reset_episode(env)
+
+
 def test_frozen_baseline_rejects_missing_checkpoint_file(env, tmp_path):
     missing = tmp_path / "missing.pt"
     with pytest.raises(ValueError, match="checkpoint.*exist"):
@@ -228,6 +356,19 @@ def test_frozen_baseline_rejects_incompatible_checkpoint(
     broken = tmp_path / f"broken_{field}.pt"
     torch.save(payload, broken)
     with pytest.raises(ValueError, match=message):
+        IndependentBaselineEvaluator(
+            env, algorithm_config_with_baseline("frozen_policy", str(broken))
+        )
+
+
+def test_frozen_baseline_rejects_nonfinite_actor_tensor(env, tmp_path):
+    checkpoint = save_independent_dispatch_checkpoint(env, tmp_path / "source.pt")
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=True)
+    tensor_name = next(iter(payload["actors"]))
+    payload["actors"][tensor_name].reshape(-1)[0] = float("nan")
+    broken = tmp_path / "nonfinite_actor.pt"
+    torch.save(payload, broken)
+    with pytest.raises(ValueError, match=rf"checkpoint.*{tensor_name}.*non-finite"):
         IndependentBaselineEvaluator(
             env, algorithm_config_with_baseline("frozen_policy", str(broken))
         )
