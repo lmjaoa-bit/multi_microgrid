@@ -95,3 +95,21 @@ Shapley replay 或 marginal critic；因此本任务在指定的 algorithm.py �
 ## 提交
 
 本报告随 Task 3 实现一起提交，提交信息为 `fix: train Shapley critics on cooperation surplus`。
+
+## 独立审查修复轮
+
+独立审查在首轮提交后发现四个 P2 边界问题，随后由主代理直接接管并修复：
+
+- checkpoint 在校验 `update_steps` 前会修改 live 网络；现改为先要求非 bool 的非负整数，
+  再对全部临时网络完成严格加载和有限值检查，全部通过后才提交到 live modules。
+- finite float64 大值可能在转成模型 float32 后溢出；现额外检查临时网络完成 dtype
+  转换后的全部参数与 buffer。
+- coalition projector 现同时支持 agent-id 集合及 `[batch, agents]` 的 bool/0-1 mask，
+  并为每个 plan 返回 `[batch]` bool `in_coalition`，支持同一 batch 的不同 coalition。
+- Replay 现按实际训练 dtype float32 归一化后检查全部标量、observation、action、state 和
+  next 字段；严格校验 done、agent key、向量维度和跨 transition schema，一次失败不会污染
+  buffer 或建立错误 schema。
+
+修复轮 TDD 证据：新增边界集合在修复前为 `62 failed, 35 passed, 50 deselected`；修复后
+`97 passed, 50 deselected`。完整 `tests/test_matd3_shapley_q.py` 为 `147 passed`，全仓库
+`pytest -q` 为 `231 passed, 2 warnings in 45.82s`。两条 warning 仍为仓库既有预期场景。

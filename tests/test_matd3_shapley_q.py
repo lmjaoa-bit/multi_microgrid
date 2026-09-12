@@ -9,6 +9,7 @@ import yaml
 
 from algorithms.matd3_dispatch.algorithm import Matd3Dispatch
 from algorithms.matd3_shapley_q.algorithm import Matd3ShapleyQ
+from algorithms.matd3_shapley_q.replay_buffer import ShapleyReplayBuffer
 from algorithms.matd3_shapley_q.independent_baseline import IndependentBaselineEvaluator
 from envs.multi_microgrid_env import MultiMicrogridEnv
 
@@ -667,3 +668,166 @@ def test_checkpoint_roundtrip_and_strict_surplus_metadata(env, tmp_path, field, 
     torch.save(payload, path)
     with pytest.raises(ValueError):
         restored.load(path)
+
+
+def assert_algorithm_state_unchanged(algorithm, saved, update_steps):
+    assert algorithm.update_steps == update_steps
+    for name, state in saved.items():
+        for key, value in getattr(algorithm, name).state_dict().items():
+            torch.testing.assert_close(value, state[key], rtol=0, atol=0)
+
+
+@pytest.mark.parametrize("bad_steps", ["missing", float("nan"), -2, 1.5, True, "3", None])
+def test_checkpoint_invalid_update_steps_is_atomic(env, tmp_path, bad_steps):
+    source = Matd3ShapleyQ.from_env(env, small_shapley_config(), seed=42)
+    destination = Matd3ShapleyQ.from_env(env, small_shapley_config(), seed=73)
+    destination.update_steps = 9
+    saved = {name: copy.deepcopy(getattr(destination, name).state_dict())
+             for name in ("actors", "target_actors", "critics", "target_critics")}
+    path = tmp_path / "invalid_steps.pt"
+    source.save(path)
+    payload = torch.load(path, weights_only=True)
+    if bad_steps == "missing":
+        payload.pop("update_steps")
+    else:
+        payload["update_steps"] = bad_steps
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match="update_steps"):
+        destination.load(path)
+    assert_algorithm_state_unchanged(destination, saved, 9)
+
+
+def test_checkpoint_float64_overflow_is_rejected_before_live_mutation(env, tmp_path):
+    source = Matd3ShapleyQ.from_env(env, small_shapley_config(), seed=42)
+    destination = Matd3ShapleyQ.from_env(env, small_shapley_config(), seed=73)
+    destination.update_steps = 9
+    saved = {name: copy.deepcopy(getattr(destination, name).state_dict())
+             for name in ("actors", "target_actors", "critics", "target_critics")}
+    path = tmp_path / "overflow.pt"
+    source.save(path)
+    payload = torch.load(path, weights_only=True)
+    tensor_name = next(iter(payload["target_critics"]))
+    original = payload["target_critics"][tensor_name]
+    payload["target_critics"][tensor_name] = torch.full(original.shape, 1e300, dtype=torch.float64)
+    torch.save(payload, path)
+    with pytest.raises(ValueError, match="target_critics.*finite"):
+        destination.load(path)
+    assert_algorithm_state_unchanged(destination, saved, 9)
+
+
+def test_coalition_projector_accepts_batch_masks_and_returns_tensor_membership(env):
+    alg = Matd3ShapleyQ.from_env(env, small_shapley_config())
+    _, info = env.reset(seed=42)
+    state = torch.tensor(info["global_state"]).unsqueeze(0).repeat(3, 1)
+    for mg in AGENTS:
+        for field, value in {"load": 0.0 if mg == "mg1" else 1.0,
+                             "pv": 1.0 if mg == "mg1" else 0.0, "wind": 0.0,
+                             "feasible_discharge_max": 1.0,
+                             "feasible_discharge_min": 0.0,
+                             "feasible_charge_min": 0.0}.items():
+            state[:, alg.state_schema.index(f"{mg}_{field}")] = value
+    raw = torch.tensor([[[1.0], [-0.5], [-0.5]]]).repeat(3, 1, 1)
+    grand, _ = alg.project_actions(state, raw)
+    empty, plans = alg.coalition_projector(state, raw, torch.zeros((3, 3)))
+    torch.testing.assert_close(empty[..., 0], grand[..., 0])
+    assert not empty[..., 1].any()
+    for plan in plans:
+        assert plan["in_coalition"].dtype == torch.bool
+        assert plan["in_coalition"].shape == (3,)
+        assert not plan["in_coalition"].any()
+    mask = torch.tensor([[False, False, False], [True, False, False], [True, True, False]])
+    mixed, plans = alg.coalition_projector(state, raw, mask)
+    torch.testing.assert_close(mixed[..., 0], grand[..., 0])
+    assert not mixed[:2, :, 1].any()
+    assert mixed[2, 0, 1] > 0
+    assert not mixed[:, 2, 1].any()
+    for i, plan in enumerate(plans):
+        torch.testing.assert_close(plan["in_coalition"], mask[:, i])
+    _, set_plans = alg.coalition_projector(state, raw, {"mg1", "mg2"})
+    for i, plan in enumerate(set_plans):
+        torch.testing.assert_close(plan["in_coalition"], torch.full((3,), i < 2))
+
+
+@pytest.mark.parametrize("mask", [torch.zeros(3), torch.zeros(2, 3), torch.zeros(3, 2),
+    torch.full((3, 3), 0.5), torch.full((3, 3), float("nan")),
+    torch.full((3, 3), float("inf")), torch.full((3, 3), -1)])
+def test_coalition_projector_rejects_invalid_batch_masks(env, mask):
+    alg = Matd3ShapleyQ.from_env(env, small_shapley_config())
+    _, info = env.reset(seed=42)
+    state = torch.tensor(info["global_state"]).unsqueeze(0).repeat(3, 1)
+    with pytest.raises(ValueError, match="coalition|mask"):
+        alg.coalition_projector(state, torch.zeros((3, 3, 1)), mask)
+
+
+def valid_replay_transition():
+    return dict(observations={mg: np.array([1., 2.]) for mg in AGENTS},
+        global_state=np.array([1., 2., 3.]), actions={mg: np.array([0.25]) for mg in AGENTS},
+        team_reward=5., next_observations={mg: np.array([3., 4.]) for mg in AGENTS},
+        next_global_state=np.array([3., 4., 5.]), done=False,
+        independent_reward=2., cooperation_surplus_reward=3.,
+        independent_return_to_go=12., next_independent_return_to_go=7.)
+
+
+@pytest.mark.parametrize("field", ["team_reward", "independent_reward", "cooperation_surplus_reward",
+    "independent_return_to_go", "next_independent_return_to_go", "observations", "actions",
+    "next_observations", "global_state", "next_global_state"])
+@pytest.mark.parametrize("bad", [1e40, float("nan"), float("inf")])
+def test_replay_rejects_nonfinite_or_float32_overflow_every_field(field, bad):
+    buf = ShapleyReplayBuffer(4)
+    data = valid_replay_transition()
+    if field in ("observations", "next_observations", "actions"):
+        data[field]["mg2"][0] = bad
+    elif field in ("global_state", "next_global_state"):
+        data[field][0] = bad
+    else:
+        data[field] = bad
+    with pytest.raises(ValueError, match=field):
+        buf.add(**data)
+    assert len(buf) == 0
+    buf.add(**valid_replay_transition())
+    batch = buf.sample(1, AGENTS, torch.device("cpu"))
+    assert batch["team_reward"].item() == 5.0
+
+
+@pytest.mark.parametrize("done", ["False", 0, 1, 2, -1, 0.5, float("nan"), None, [False]])
+def test_replay_rejects_nonboolean_done(done):
+    data = valid_replay_transition()
+    data["done"] = done
+    with pytest.raises(ValueError, match="done"):
+        ShapleyReplayBuffer(4).add(**data)
+
+
+@pytest.mark.parametrize("field", ["actions", "observations", "next_observations"])
+@pytest.mark.parametrize("mutation", ["missing", "extra", "scalar", "matrix", "empty", "wrong_width"])
+def test_replay_rejects_agent_or_shape_mismatch_without_poisoning_buffer(field, mutation):
+    buf = ShapleyReplayBuffer(4)
+    buf.add(**valid_replay_transition())
+    data = valid_replay_transition()
+    if mutation == "missing":
+        data[field].pop("mg3")
+    elif mutation == "extra":
+        data[field]["mg4"] = data[field]["mg3"].copy()
+    else:
+        data[field]["mg2"] = {"scalar": np.array(0.5), "matrix": np.ones((1, 2)),
+                               "empty": np.array([]), "wrong_width": np.ones(4)}[mutation]
+    with pytest.raises(ValueError, match=field):
+        buf.add(**data)
+    assert len(buf) == 1
+    buf.add(**valid_replay_transition())
+    assert buf.sample(2, AGENTS, torch.device("cpu"))["actions"]["mg3"].shape == (2, 1)
+
+
+@pytest.mark.parametrize("field", ["global_state", "next_global_state"])
+@pytest.mark.parametrize("bad", [np.array(3.0), np.array([]), np.ones((1, 3)), np.ones(4)])
+def test_replay_rejects_state_shape_mismatch(field, bad):
+    data = valid_replay_transition()
+    data[field] = bad
+    with pytest.raises(ValueError, match="state"):
+        ShapleyReplayBuffer(4).add(**data)
+
+
+def test_replay_first_add_rejects_inconsistent_agent_keys():
+    data = valid_replay_transition()
+    data["actions"].pop("mg3")
+    with pytest.raises(ValueError, match="actions"):
+        ShapleyReplayBuffer(4).add(**data)

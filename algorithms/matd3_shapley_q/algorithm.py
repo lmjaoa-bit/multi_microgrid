@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 from pathlib import Path
 
 import numpy as np
@@ -22,24 +23,51 @@ class CoalitionAwareProjector:
         self.projector = projector
         self.agent_ids = tuple(agent_ids)
 
-    def __call__(self, state, raw, coalition):
-        coalition = frozenset(coalition)
-        if not coalition.issubset(self.agent_ids):
+    def _membership_mask(self, coalition, batch_size, device):
+        if isinstance(coalition, torch.Tensor):
+            if coalition.ndim != 2 or coalition.shape != (batch_size, len(self.agent_ids)):
+                raise ValueError(
+                    "Coalition mask must have shape [batch, agents]"
+                )
+            if coalition.dtype == torch.bool:
+                return coalition.to(device=device)
+            if not torch.isfinite(coalition).all() or not torch.all(
+                (coalition == 0) | (coalition == 1)
+            ):
+                raise ValueError("Coalition mask values must be finite booleans or 0/1")
+            return coalition.to(device=device, dtype=torch.bool)
+
+        try:
+            coalition_ids = frozenset(coalition)
+        except TypeError as exc:
+            raise ValueError("Coalition must be an agent-id collection or batch mask") from exc
+        if not coalition_ids.issubset(self.agent_ids):
             raise ValueError("Unknown agent in coalition")
+        row = torch.tensor(
+            [mg in coalition_ids for mg in self.agent_ids],
+            dtype=torch.bool,
+            device=device,
+        )
+        return row.unsqueeze(0).expand(batch_size, -1)
+
+    def __call__(self, state, raw, coalition):
         effective, plans = self.projector(state, raw)
+        membership = self._membership_mask(coalition, state.shape[0], state.device)
         channels = []
         for i, mg in enumerate(self.agent_ids):
             plan = plans[i]
-            member = mg in coalition
+            member = membership[:, i]
             peer_cap = torch.zeros_like(plan["local"])
-            if member and self.projector.enabled:
+            if self.projector.enabled:
                 for j, other in enumerate(plans):
-                    if j != i and self.agent_ids[j] in coalition:
+                    if j != i:
+                        eligible_pair = member & membership[:, j]
                         peer_cap = peer_cap + torch.where(
-                            other["buy"] + 1e-10 >= plan["sell"],
+                            eligible_pair & (other["buy"] + 1e-10 >= plan["sell"]),
                             other["demand"].clamp(max=self.projector.pair_capacity),
                             torch.zeros_like(peer_cap))
-            cap = torch.where(plan["charging"] | (plan["deficit"] - plan["local"] > 1e-7),
+            cap = torch.where((~member) | plan["charging"] |
+                              (plan["deficit"] - plan["local"] > 1e-7),
                               torch.zeros_like(peer_cap), torch.minimum(plan["remaining"], peer_cap))
             offer = torch.minimum(plan["uncapped_offer"], cap)
             scale = max(self.projector.batteries[mg]["max_charge_kw"],
@@ -229,18 +257,30 @@ class Matd3ShapleyQ(Matd3Dispatch):
         for field, expected in self._checkpoint_metadata().items():
             if checkpoint.get(field) != expected:
                 raise ValueError(f"Shapley checkpoint {field} does not match surplus_q_v2 configuration")
-        states = {}
+        update_steps = checkpoint.get("update_steps")
+        if type(update_steps) is not int or update_steps < 0:
+            raise ValueError("Shapley checkpoint update_steps must be a non-negative integer")
+
+        validated_states = {}
         for name in ("actors", "target_actors", "critics", "target_critics"):
             state = checkpoint.get(name)
-            if not isinstance(state, dict) or any(
+            if not isinstance(state, Mapping) or any(
                 not isinstance(v, torch.Tensor) or not torch.isfinite(v).all() for v in state.values()
             ):
                 raise ValueError(f"Shapley checkpoint {name} is missing or non-finite")
+            candidate = copy.deepcopy(getattr(self, name))
             try:
-                copy.deepcopy(getattr(self, name)).load_state_dict(state, strict=True)
+                candidate.load_state_dict(state, strict=True)
             except (RuntimeError, TypeError, ValueError) as exc:
                 raise ValueError(f"Shapley checkpoint {name} is incompatible: {exc}") from exc
-            states[name] = state
-        for name, state in states.items():
+            if any(not torch.isfinite(value).all()
+                   for value in candidate.state_dict().values()):
+                raise ValueError(
+                    f"Shapley checkpoint {name} is non-finite after dtype conversion"
+                )
+            validated_states[name] = candidate.state_dict()
+
+        # Commit only after every metadata field and network has passed validation.
+        for name, state in validated_states.items():
             getattr(self, name).load_state_dict(state, strict=True)
-        self.update_steps = int(checkpoint.get("update_steps", 0))
+        self.update_steps = update_steps
