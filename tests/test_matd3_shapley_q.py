@@ -8,6 +8,7 @@ import torch
 import yaml
 
 from algorithms.matd3_dispatch.algorithm import Matd3Dispatch
+from algorithms.matd3_shapley_q.algorithm import Matd3ShapleyQ
 from algorithms.matd3_shapley_q.independent_baseline import IndependentBaselineEvaluator
 from envs.multi_microgrid_env import MultiMicrogridEnv
 
@@ -448,3 +449,221 @@ def test_exact_shapley_sum_is_positive_for_positive_cooperation():
     values = positive_cooperation_values()
     phi = exact_shapley_values(values, AGENTS)
     assert sum(phi.values()) > 0.0
+
+
+def test_replay_surplus_consistency(env):
+    alg = Matd3ShapleyQ.from_env(env, algorithm_config_with_baseline("heuristic"))
+    obs, reset = env.reset(seed=42)
+    actions = {mg: np.array([-0.5], dtype=np.float32) for mg in AGENTS}
+    buf = alg.replay
+    buf.add(obs, reset["global_state"], actions, 5.0, obs, reset["global_state"], False,
+            independent_reward=2.0, cooperation_surplus_reward=3.0,
+            independent_return_to_go=12.0, next_independent_return_to_go=7.0)
+    batch = buf.sample(1, AGENTS, torch.device("cpu"))
+    for field, expected in {"team_reward": 5.0, "independent_reward": 2.0,
+                            "cooperation_surplus_reward": 3.0,
+                            "independent_return_to_go": 12.0,
+                            "next_independent_return_to_go": 7.0}.items():
+        assert batch[field].shape == (1, 1)
+        assert batch[field].dtype == torch.float32
+        assert batch[field].item() == pytest.approx(expected)
+
+
+def test_conservative_target_takes_twin_min_per_agent_before_sum():
+    q1 = {mg: torch.tensor([[v]]) for mg, v in zip(AGENTS, (10., 1., 10.))}
+    q2 = {mg: torch.tensor([[v]]) for mg, v in zip(AGENTS, (1., 10., 1.))}
+    result = Matd3ShapleyQ._conservative_shapley_sum(q1, q2, AGENTS)
+    assert result.item() == pytest.approx(3.0)
+
+
+@pytest.mark.parametrize("field", ["team_reward", "independent_reward",
+    "cooperation_surplus_reward", "independent_return_to_go", "next_independent_return_to_go"])
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), -float("inf")])
+def test_replay_rejects_nonfinite_rewards_and_references(env, field, bad):
+    alg = Matd3ShapleyQ.from_env(env, algorithm_config_with_baseline("heuristic"))
+    obs, info = env.reset(seed=42)
+    values = dict(team_reward=5., independent_reward=2., cooperation_surplus_reward=3.,
+                  independent_return_to_go=12., next_independent_return_to_go=7.)
+    values[field] = bad
+    with pytest.raises(ValueError, match=field):
+        alg.replay.add(obs, info["global_state"], alg.select_actions(obs),
+                       next_observations=obs, next_global_state=info["global_state"],
+                       done=False, **values)
+    assert len(alg.replay) == 0
+
+
+def test_replay_rejects_inconsistent_surplus_and_copies_inputs(env):
+    alg = Matd3ShapleyQ.from_env(env, algorithm_config_with_baseline("heuristic"))
+    obs, info = env.reset(seed=42)
+    state, actions = info["global_state"], alg.select_actions(obs)
+    with pytest.raises(ValueError, match="surplus"):
+        alg.replay.add(obs, state, actions, 5., obs, state, False,
+                       independent_reward=2., cooperation_surplus_reward=9.,
+                       independent_return_to_go=12., next_independent_return_to_go=7.)
+    alg.replay.add(obs, state, actions, 5., obs, state, False,
+                   independent_reward=2., cooperation_surplus_reward=3.,
+                   independent_return_to_go=12., next_independent_return_to_go=7.)
+    expected_obs, expected_state = obs["mg1"].copy(), state.copy()
+    obs["mg1"][:] = -999
+    state[:] = -999
+    actions["mg1"][:] = -999
+    batch = alg.replay.sample(1, AGENTS, torch.device("cpu"))
+    np.testing.assert_array_equal(batch["observations"]["mg1"][0], expected_obs)
+    np.testing.assert_array_equal(batch["next_global_state"][0], expected_state)
+    assert batch["actions"]["mg1"].item() != -999
+
+
+def test_coalition_projection_preserves_local_dispatch_and_masks_only_cooperation(env):
+    alg = Matd3ShapleyQ.from_env(env, algorithm_config_with_baseline("heuristic"))
+    _, reset = env.reset(seed=42)
+    state = torch.tensor(reset["global_state"]).unsqueeze(0)
+    raw = torch.full((1, 3, 1), -0.5)
+    grand, _ = alg.project_actions(state, raw)
+    for coalition in all_coalitions(AGENTS):
+        projected, plans = alg.coalition_projector(state, raw, coalition)
+        torch.testing.assert_close(projected[..., 0], grand[..., 0])
+        assert projected[..., 0].abs().sum() > 0
+        for i, mg in enumerate(AGENTS):
+            assert plans[i]["in_coalition"] == (mg in coalition)
+            if mg not in coalition:
+                assert projected[:, i, 1].item() == 0.0
+    # Exercise an actual seller/buyer opportunity; charging-only inputs cannot
+    # detect accidentally leaving a nonmember's offer enabled.
+    for mg in AGENTS:
+        for field, value in {"load": 0.0 if mg == "mg1" else 1.0,
+                             "pv": 1.0 if mg == "mg1" else 0.0, "wind": 0.0,
+                             "feasible_discharge_max": 1.0,
+                             "feasible_discharge_min": 0.0,
+                             "feasible_charge_min": 0.0}.items():
+            state[:, alg.state_schema.index(f"{mg}_{field}")] = value
+    raw = torch.tensor([[[1.0], [0.0], [0.0]]])
+    grand, _ = alg.project_actions(state, raw)
+    assert grand[0, 0, 1] > 0
+    empty, _ = alg.coalition_projector(state, raw, frozenset())
+    singleton, _ = alg.coalition_projector(state, raw, {"mg1"})
+    pair, _ = alg.coalition_projector(state, raw, {"mg1", "mg2"})
+    assert empty[..., 1].abs().sum() == 0
+    assert singleton[..., 1].abs().sum() == 0
+    assert pair[0, 0, 1] > 0
+    assert pair[0, 2, 1] == 0
+    torch.testing.assert_close(empty[..., 0], grand[..., 0])
+
+
+def test_marginal_critics_enumerate_exact_predecessor_weights(env):
+    cfg = small_shapley_config()
+    cfg["algorithm"]["hidden_dims"] = [1]
+    alg = Matd3ShapleyQ.from_env(env, cfg, seed=42)
+    # ReLU(|S|-1) only activates for the two-agent predecessor. Its correct
+    # weight is 1/3, not the uniform-enumeration weight 1/4.
+    with torch.no_grad():
+        for critic in alg.critics.values():
+            for p in critic.parameters():
+                p.zero_()
+            for network, output in [(critic.q1_network, 3.), (critic.q2_network, 6.)]:
+                network[0].weight[:, env.global_state_dim:env.global_state_dim + 3] = 1.0
+                network[0].bias.fill_(-1.)
+                network[-1].weight.fill_(output)
+    _, info = env.reset(seed=42)
+    q1, q2 = alg._shapley_values(torch.tensor(info["global_state"]).unsqueeze(0),
+                               torch.full((1, 3, 1), -0.5), alg.critics)
+    for mg in AGENTS:
+        assert q1[mg].item() == pytest.approx(1.0)
+        assert q2[mg].item() == pytest.approx(2.0)
+
+
+def small_shapley_config(mode="heuristic", checkpoint=None):
+    cfg = algorithm_config_with_baseline(mode, checkpoint)
+    cfg["algorithm"].update(hidden_dims=[16, 16], target_policy_noise=0.0)
+    return cfg
+
+
+def constant_twin_critics(critics, q1_values, q2_values):
+    with torch.no_grad():
+        for mg, v1, v2 in zip(AGENTS, q1_values, q2_values):
+            critic = critics[mg]
+            for p in critic.parameters():
+                p.zero_()
+            critic.q1_network[-1].bias.fill_(v1)
+            critic.q2_network[-1].bias.fill_(v2)
+
+
+@pytest.mark.parametrize("done, target, residual", [(False, 4.5, 8.0), (True, 3.0, 13.0)])
+def test_update_uses_surplus_bellman_target_and_real_grand_reference(env, done, target, residual):
+    cfg = small_shapley_config()
+    cfg["algorithm"]["gamma"] = 0.5
+    alg = Matd3ShapleyQ.from_env(env, cfg, seed=42)
+    constant_twin_critics(alg.critics, (2., 2., 2.), (2., 2., 2.))
+    constant_twin_critics(alg.target_critics, (10., 1., 10.), (1., 10., 1.))
+    obs, info = env.reset(seed=42)
+    alg.replay.add(obs, info["global_state"], alg.select_actions(obs), 5.,
+                   obs, info["global_state"], done, independent_reward=2.,
+                   cooperation_surplus_reward=3., independent_return_to_go=12.,
+                   next_independent_return_to_go=7.)
+    metrics = alg.update(1)
+    assert metrics["cooperation_surplus_q_target"] == pytest.approx(target)
+    assert metrics["critic1_loss"] == pytest.approx((6.0 - target) ** 2)
+    assert metrics["critic2_loss"] == pytest.approx((6.0 - target) ** 2)
+    assert metrics["grand_decomposition_residual"] == pytest.approx(residual)
+    assert metrics["algorithm_diagnostics"]["grand_decomposition_residual"] == pytest.approx(residual)
+    assert metrics["shapley_q_sum"] == pytest.approx(6.)
+
+
+@pytest.mark.parametrize("mode", ["heuristic", "frozen_policy"])
+def test_actor_gradients_are_finite_nonzero_and_baseline_is_frozen(env, tmp_path, mode):
+    checkpoint = None
+    if mode == "frozen_policy":
+        checkpoint = str(save_independent_dispatch_checkpoint(env, tmp_path / "baseline.pt"))
+    # The frozen source uses the default actor architecture.
+    alg = Matd3ShapleyQ.from_env(env, algorithm_config_with_baseline(mode, checkpoint), seed=42)
+    alg.policy_delay = 1
+    obs, reset = env.reset(seed=42)
+    alg.on_episode_start(env, seed=42)
+    assert len(alg.actors) == len(alg.critics) == 3
+    assert alg.replay.__class__.__module__ == "algorithms.matd3_shapley_q.replay_buffer"
+    state = reset["global_state"]
+    before = {mg: [p.detach().clone() for p in alg.actors[mg].parameters()] for mg in AGENTS}
+    for t in range(8):
+        actions = {mg: np.array([-0.5], dtype=np.float32) for mg in AGENTS}
+        next_obs, rewards, done, info = env.step(actions)
+        assert len(set(rewards.values())) == 1
+        baseline = alg.get_independent_step_data(t)
+        alg.replay.add(obs, state, actions, rewards["mg1"], next_obs,
+            info["global_state_after"], done, independent_reward=baseline["reward"],
+            cooperation_surplus_reward=rewards["mg1"] - baseline["reward"],
+            independent_return_to_go=baseline["return_to_go"],
+            next_independent_return_to_go=baseline["next_return_to_go"])
+        obs, state = next_obs, info["global_state_after"]
+    metrics = alg.update(8)
+    for mg in AGENTS:
+        assert np.isfinite(metrics["actor_grad_norms"][mg])
+        assert metrics["actor_grad_norms"][mg] > 0
+        assert any(not torch.equal(old, p) for old, p in zip(before[mg], alg.actors[mg].parameters()))
+    if alg.baseline_evaluator.frozen_actors is not None:
+        assert all(p.grad is None and not p.requires_grad
+                   for p in alg.baseline_evaluator.frozen_actors.parameters())
+
+
+@pytest.mark.parametrize("field,bad", [("shapley_q_version", "full_enumeration_v1"),
+    ("value_definition", "grand_return"), ("algorithm_slug", "matd3"),
+    ("action_semantics", "retired"), ("projection_signature", "wrong"),
+    ("state_schema", ()), ("observation_schemas", {}),
+    ("baseline", {"mode": "trainable"})])
+def test_checkpoint_roundtrip_and_strict_surplus_metadata(env, tmp_path, field, bad):
+    cfg = small_shapley_config()
+    alg = Matd3ShapleyQ.from_env(env, cfg, seed=42)
+    obs, _ = env.reset(seed=42)
+    expected = alg.select_actions(obs)
+    path = tmp_path / "shapley.pt"
+    alg.save(path)
+    payload = torch.load(path, weights_only=True)
+    assert payload["shapley_q_version"] == "surplus_q_v2"
+    assert payload["value_definition"] == "cooperation_surplus"
+    assert payload["baseline"]["mode"] == "heuristic"
+    restored = Matd3ShapleyQ.from_env(env, cfg, seed=73)
+    restored.load(path)
+    for mg in AGENTS:
+        np.testing.assert_array_equal(restored.select_actions(obs)[mg], expected[mg])
+    payload[field] = bad
+    torch.save(payload, path)
+    with pytest.raises(ValueError):
+        restored.load(path)
