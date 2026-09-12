@@ -229,7 +229,7 @@ class MultiMicrogridEnv:
 
     def _soc_potential(self, t: int) -> float:
         """Potential function for terminal SOC shaping."""
-        if self.config["terminal_soc"]["mode"] == "none":
+        if self.config["terminal_soc"]["mode"] != "penalty":
             return 0.0
         rate = float(self.config["terminal_soc"]["penalty_per_kwh"])
         tolerance = float(self.config["terminal_soc"]["tolerance"])
@@ -471,7 +471,7 @@ class MultiMicrogridEnv:
 
         terminal_penalties = {mg: 0.0 for mg in self.agent_ids}
         terminal = self.t + 1 >= len(self.episode_df)
-        if terminal and self.config["terminal_soc"]["mode"] != "none":
+        if terminal and self.config["terminal_soc"]["mode"] == "penalty":
             terminal_cfg = self.config["terminal_soc"]
             rate = float(terminal_cfg["penalty_per_kwh"])
             for mg in self.agent_ids:

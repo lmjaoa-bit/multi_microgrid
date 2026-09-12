@@ -952,3 +952,90 @@ def test_formal_evaluation_exports_matched_independent_baseline(env, tmp_path):
     )
     assert result["independent_baseline_profit_statistics"]["mean"] is not None
     assert result["cooperation_surplus_return_statistics"]["mean"] is not None
+
+
+TEST_DAY = "2018-01-01"
+
+
+def make_deterministic_cooperation_config(tmp_path):
+    timestamps = pd.date_range(TEST_DAY, periods=24, freq="h")
+    frame = pd.DataFrame({
+        "timestamp": timestamps,
+        "load_kw": np.ones(24),
+        "pv_kw": np.zeros(24),
+        "wind_kw": np.zeros(24),
+        "buy_price_per_kwh": np.full(24, 1.20),
+        "grid_carbon_factor_kg_per_kwh": np.full(24, 0.5),
+        "temperature_c": np.full(24, 20.0),
+        "ghi_w_per_m2": np.full(24, 1000.0),
+        "wind_speed_mps": np.zeros(24),
+        "mg1_ghi_w_per_m2": np.full(24, 1000.0),
+        "mg1_wind_speed_mps": np.zeros(24),
+        "mg2_ghi_w_per_m2": np.zeros(24),
+        "mg2_wind_speed_mps": np.zeros(24),
+        "mg3_ghi_w_per_m2": np.zeros(24),
+        "mg3_wind_speed_mps": np.zeros(24),
+    })
+    csv_path = tmp_path / "deterministic.csv"
+    frame.to_csv(csv_path, index=False)
+    cfg = yaml.safe_load((ROOT / "configs/cooperative.yaml").read_text(encoding="utf-8"))
+    cfg["_project_root"] = str(ROOT)
+    for key in ("train_path", "val_path", "test_path"):
+        cfg["data"][key] = str(csv_path)
+    cfg["observation"]["noisy_forecast"] = False
+    return cfg
+
+
+def rollout_fixed_zero_actions(current_env, day=TEST_DAY, seed=17):
+    current_env.reset(day=day, seed=seed, deterministic=True)
+    rewards, profit, p2p = [], 0.0, 0.0
+    done = False
+    while not done:
+        actions = {mg: np.zeros(1, dtype=np.float32) for mg in current_env.agent_ids}
+        _, shared_rewards, done, info = current_env.step(actions)
+        rewards.append(float(shared_rewards[current_env.agent_ids[0]]))
+        profit += float(info["team_profit"])
+        p2p += float(info["p2p"]["total_p2p_kwh"])
+    return {"rewards": rewards, "profit": profit, "p2p": p2p}
+
+
+def test_deterministic_physics_has_positive_cooperation_surplus(tmp_path):
+    base = make_deterministic_cooperation_config(tmp_path)
+    grand_cfg = copy.deepcopy(base)
+    independent_cfg = copy.deepcopy(base)
+    grand_cfg["p2p"]["enabled"] = True
+    grand_cfg["ess_sharing"]["ess_p2p_enabled"] = True
+    independent_cfg["p2p"]["enabled"] = False
+    independent_cfg["ess_sharing"]["ess_p2p_enabled"] = False
+    grand = rollout_fixed_zero_actions(MultiMicrogridEnv(grand_cfg))
+    independent = rollout_fixed_zero_actions(MultiMicrogridEnv(independent_cfg))
+    assert grand["p2p"] > 0.0
+    assert grand["profit"] > independent["profit"]
+    assert sum(grand["rewards"]) - sum(independent["rewards"]) > 0.0
+
+
+def test_deterministic_no_cooperation_has_zero_shapley_surplus(tmp_path):
+    config = make_deterministic_cooperation_config(tmp_path)
+    config["p2p"]["enabled"] = False
+    config["ess_sharing"]["ess_p2p_enabled"] = False
+    first = rollout_fixed_zero_actions(MultiMicrogridEnv(copy.deepcopy(config)), seed=23)
+    second = rollout_fixed_zero_actions(MultiMicrogridEnv(copy.deepcopy(config)), seed=23)
+    assert first["rewards"] == pytest.approx(second["rewards"])
+    assert first["profit"] == pytest.approx(second["profit"])
+    values = {coalition: second["profit"] for coalition in all_coalitions(AGENTS)}
+    assert exact_shapley_values(values, AGENTS) == pytest.approx(
+        {mg: 0.0 for mg in AGENTS}
+    )
+
+
+def test_empty_coalition_projector_preserves_local_dispatch(env):
+    algorithm = Matd3ShapleyQ.from_env(env, small_shapley_config())
+    _, info = env.reset(seed=42)
+    state = torch.as_tensor(info["global_state"]).unsqueeze(0)
+    raw = torch.full((1, 3, 1), -0.5)
+    effective, plans = algorithm.coalition_projector(
+        state, raw, torch.zeros((1, 3))
+    )
+    assert torch.count_nonzero(effective[..., 0]).item() > 0
+    assert torch.count_nonzero(effective[..., 1]).item() == 0
+    assert all(not plan["in_coalition"].any() for plan in plans)

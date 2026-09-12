@@ -13,6 +13,7 @@ CONFIG = Path(__file__).resolve().parents[1] / "configs/cooperative.yaml"
 
 def test_milp_none_allows_retaining_terminal_energy():
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    config["terminal_soc"]["mode"] = "none"
     data = DispatchData(
         timestamps=["last-hour"], agent_ids=["mg1"],
         load_kw={"mg1": np.array([0.0])},
@@ -27,7 +28,10 @@ def test_milp_none_allows_retaining_terminal_energy():
 
 
 def test_empty_start_no_terminal_target_or_shaping():
-    env = MultiMicrogridEnv(CONFIG)
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    config["_project_root"] = str(CONFIG.parent.parent)
+    config["terminal_soc"]["mode"] = "none"
+    env = MultiMicrogridEnv(config)
     env.reset(seed=42, deterministic=True)
     for core in env.cores.values():
         assert core.battery.soc == core.battery.soc_min
@@ -50,6 +54,29 @@ def test_empty_start_no_terminal_target_or_shaping():
     assert rewards[env.agent_ids[0]] == pytest.approx(profit / env.accounting.reward_scale)
     env.reset(seed=43, deterministic=True)
     assert all(core.battery.soc == core.battery.soc_min for core in env.cores.values())
+
+
+def test_hard_terminal_soc_has_no_reward_shaping_or_penalty():
+    env = MultiMicrogridEnv(CONFIG)
+    assert env.config["terminal_soc"]["mode"] == "hard"
+    env.reset(seed=42, deterministic=True)
+    done = False
+    step_info = None
+    while not done:
+        actions = {
+            mg: np.asarray([-1.0 if env.t < 12 else 1.0], dtype=np.float32)
+            for mg in env.agent_ids
+        }
+        _, rewards, done, step_info = env.step(actions)
+        assert step_info["shaping_reward"] == pytest.approx(0.0)
+        assert all(value == pytest.approx(0.0)
+                   for value in step_info["terminal_soc_penalty"].values())
+        assert all(np.isfinite(value) for value in rewards.values())
+    assert step_info is not None
+    assert all(
+        core.battery.soc == pytest.approx(core.battery.initial_soc, abs=1.1e-5)
+        for core in env.cores.values()
+    )
 
 
 @pytest.mark.parametrize("deterministic", [True, False])

@@ -37,9 +37,9 @@ ess_sharing:
   offer_projection: peer_demand_cap
 
 terminal_soc:
-  # Independent daily dispatch: no terminal target, penalty, or SOC shaping.
-  mode: none
-  tolerance: 0.03
+  # Daily dispatch uses a hard terminal target with no reward shaping.
+  mode: hard
+  tolerance: 1.0e-6
   penalty_per_kwh: 1.5
 
 observation:
