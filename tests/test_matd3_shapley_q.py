@@ -20,6 +20,7 @@ from experiments.training_pipeline import (
     _training_diagnostic_summary,
     build_parser,
 )
+from evaluation.evaluate_matd3 import evaluate
 
 from algorithms.matd3_shapley_q.coalition import (
     all_coalitions,
@@ -920,3 +921,34 @@ def test_invalid_smoke_hyperparameter_overrides_fail_fast(argv):
     args = build_parser().parse_args(argv)
     with pytest.raises(ValueError, match="warmup_steps|batch_size"):
         _runtime_hyperparameters(args, {"warmup_steps": 10, "batch_size": 4})
+
+
+def test_formal_evaluation_exports_matched_independent_baseline(env, tmp_path):
+    config = small_shapley_config()
+    algorithm_path = tmp_path / "matd3_shapley_q.yaml"
+    algorithm_path.write_text(yaml.safe_dump(config, sort_keys=False), encoding="utf-8")
+    algorithm = Matd3ShapleyQ.from_env(env, config, seed=42)
+    checkpoint = tmp_path / "best_model.pt"
+    algorithm.save(checkpoint)
+    output = tmp_path / "formal"
+
+    result = evaluate(
+        ROOT / "configs/cooperative.yaml",
+        algorithm_path,
+        checkpoint,
+        split="test",
+        run_milp=False,
+        output_dir=output,
+        test_seed=42,
+        max_days=1,
+        algorithm_name="matd3_shapley_q",
+    )
+    row = pd.read_csv(output / "test_daily_metrics.csv").iloc[0]
+    assert row["cooperation_surplus_return"] == pytest.approx(
+        row["grand_team_return"] - row["independent_baseline_return"]
+    )
+    assert row["cooperation_surplus_profit"] == pytest.approx(
+        row["algorithm_team_profit"] - row["independent_baseline_profit"]
+    )
+    assert result["independent_baseline_profit_statistics"]["mean"] is not None
+    assert result["cooperation_surplus_return_statistics"]["mean"] is not None

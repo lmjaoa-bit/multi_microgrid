@@ -6,6 +6,7 @@ from pathlib import Path
 import numpy as np
 
 from envs.multi_microgrid_env import MultiMicrogridEnv
+from evaluation.evaluate_matd3 import evaluate_policy_on_days
 from utils.metrics_collector import EpisodeMetricsCollector, distribution_statistics, write_json
 from scripts import export_runs_to_tensorboard as tensorboard_export
 
@@ -96,3 +97,30 @@ def test_tensorboard_export_writes_independent_and_shapley_tags(tmp_path, monkey
         "q/shapley_mg1", "q/shapley_mg2", "q/shapley_mg3", "q/shapley_sum",
         "q/efficiency_residual", "q/grand_decomposition_residual",
     }.issubset(tags)
+
+
+def test_evaluation_baseline_lifecycle_adds_matched_daily_fields():
+    env = MultiMicrogridEnv(CONFIG, split="test")
+    day = str(env.data.valid_days[0].date())
+    starts = []
+
+    def start(current_env, episode_seed):
+        starts.append((current_env.last_reset_options["day"], episode_seed))
+
+    def finish():
+        return {"independent_baseline_return": -3.0,
+                "independent_baseline_profit": -300.0}
+
+    policy = lambda observations: {
+        mg: np.zeros(env.action_dim, dtype=np.float32) for mg in env.agent_ids
+    }
+    _, daily = evaluate_policy_on_days(
+        env, [day], policy, seed=73, deterministic_environment=True,
+        episode_start_fn=start, episode_finalize_fn=finish,
+    )
+    row = daily[0]
+    assert starts == [(row["date"] + " 00:00:00", 73)]
+    assert row["grand_team_return"] == row["team_reward"]
+    assert row["grand_team_profit"] == row["team_profit"]
+    assert row["cooperation_surplus_return"] == row["grand_team_return"] + 3.0
+    assert row["cooperation_surplus_profit"] == row["grand_team_profit"] + 300.0

@@ -133,17 +133,22 @@ def evaluate_policy_on_days(
     deterministic_environment: bool = True,
     forecast_noise: bool | None = None,
     capture_hourly: bool = False,
+    episode_start_fn: Any | None = None,
+    episode_finalize_fn: Any | None = None,
 ) -> Any:
     """Evaluate fixed day/seed pairs so policies receive common random numbers."""
     daily_metrics: list[dict[str, Any]] = []
     hourly_by_day: dict[str, list[dict[str, Any]]] = {}
     for index, day in enumerate(days):
+        episode_seed = int(seed) + index
         observations, _ = env.reset(
             day=day,
-            seed=int(seed) + index,
+            seed=episode_seed,
             deterministic=bool(deterministic_environment),
             forecast_noise=forecast_noise,
         )
+        if episode_start_fn is not None:
+            episode_start_fn(env, episode_seed)
         collector = EpisodeMetricsCollector(env, capture_hourly=capture_hourly)
         done = False
         while not done:
@@ -151,8 +156,23 @@ def evaluate_policy_on_days(
             observations, rewards, done, info = env.step(actions)
             collector.record_step(actions, info, rewards)
         metrics = collector.finalize_episode()
+        if episode_finalize_fn is not None:
+            baseline_metrics = {
+                name: float(value) for name, value in episode_finalize_fn().items()
+            }
+            metrics.update(baseline_metrics)
+            metrics["grand_team_return"] = float(metrics["team_reward"])
+            metrics["grand_team_profit"] = float(metrics["team_profit"])
+            metrics["cooperation_surplus_return"] = (
+                metrics["grand_team_return"]
+                - metrics["independent_baseline_return"]
+            )
+            metrics["cooperation_surplus_profit"] = (
+                metrics["grand_team_profit"]
+                - metrics["independent_baseline_profit"]
+            )
         metrics["date"] = day
-        metrics["test_seed"] = int(seed) + index
+        metrics["test_seed"] = episode_seed
         daily_metrics.append(metrics)
         if capture_hourly:
             hourly_by_day[day] = collector.hourly_rows
@@ -253,6 +273,16 @@ def _daily_row(
         "power_balance_violation_day": constraints["power_balance_violation"]["count"] > 0,
         "p2p_balance_violation_day": constraints["p2p_balance_violation"]["count"] > 0,
     }
+    for field in (
+        "grand_team_return",
+        "grand_team_profit",
+        "independent_baseline_return",
+        "independent_baseline_profit",
+        "cooperation_surplus_return",
+        "cooperation_surplus_profit",
+    ):
+        if field in day:
+            row[field] = float(day[field])
     for mg, value in day["profit_by_microgrid"].items():
         row[f"{mg}_profit"] = value
         row[f"physical_profit_{mg}"] = value
@@ -483,9 +513,18 @@ def evaluate(
     evaluation_forecast_noise = bool(
         env_config.get("observation", {}).get("evaluation_forecast_noise", False)
     )
+    episode_start = getattr(algorithm, "on_episode_start", None)
+    episode_finalize = getattr(algorithm, "episode_metrics", None)
+    if episode_start is not None:
+        def matched_episode_start(current_env, episode_seed):
+            episode_start(current_env, seed=episode_seed)
+    else:
+        matched_episode_start = None
     matd3_summary, matd3_daily, hourly_by_day = evaluate_policy_on_days(
         env, days, matd3_policy, seed=test_seed, deterministic_environment=True,
         forecast_noise=evaluation_forecast_noise, capture_hourly=True,
+        episode_start_fn=matched_episode_start,
+        episode_finalize_fn=episode_finalize,
     )
     idle_env = MultiMicrogridEnv(env_config, split=split)
     idle_policy = lambda obs: {
@@ -501,6 +540,15 @@ def evaluate(
     comparisons = {
         "vs_idle": _paired_comparison(matd3_values, idle_values, "Idle", spec.display_name),
     }
+    matched_statistics = ({
+        f"{field}_statistics": distribution_statistics(_column_values(matd3_daily, field))
+        for field in (
+            "independent_baseline_return", "independent_baseline_profit",
+            "cooperation_surplus_return", "cooperation_surplus_profit",
+        )
+    } if episode_finalize is not None else {})
+    if episode_finalize is not None:
+        matd3_summary.update(matched_statistics)
 
     daily_rows: list[dict[str, Any]] = []
     paired_days: list[dict[str, Any]] = []
@@ -523,6 +571,13 @@ def evaluate(
             "matd3_terminal_soc": {mg: values["terminal_soc"] for mg, values in
                                     day["soc_statistics_by_microgrid"].items()},
         }
+        for field in (
+            "grand_team_return", "grand_team_profit",
+            "independent_baseline_return", "independent_baseline_profit",
+            "cooperation_surplus_return", "cooperation_surplus_profit",
+        ):
+            if field in day:
+                paired[field] = day[field]
         if run_milp:
             paired.update({
                 "independent_milp_profit": row.get("independent_total_profit"),
@@ -612,6 +667,7 @@ def evaluate(
         "algorithm": matd3_summary,
         "matd3": matd3_summary,
         "idle": idle_summary, "paired_daily": paired_days,
+        **matched_statistics,
         **joint_summary,
     }
     if output_dir is not None:
