@@ -7,6 +7,7 @@ import numpy as np
 
 from envs.multi_microgrid_env import MultiMicrogridEnv
 from utils.metrics_collector import EpisodeMetricsCollector, distribution_statistics, write_json
+from scripts import export_runs_to_tensorboard as tensorboard_export
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -52,3 +53,46 @@ def test_json_writer_converts_numpy_and_rejects_nonfinite_json(tmp_path: Path) -
     assert value["bad"] is None
     assert value["serialization_warnings"][0]["field"] == "bad"
     assert distribution_statistics([1.0, 2.0, 3.0])["median"] == 2.0
+
+
+def test_tensorboard_export_writes_independent_and_shapley_tags(tmp_path, monkeypatch):
+    run_dir = tmp_path / "outputs" / "matd3_shapley_q" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    record = {
+        "team_reward": 12.0,
+        "independent_baseline_return": 8.0,
+        "cooperation_surplus_return": 4.0,
+        "shapley_q_mg1": 1.0,
+        "shapley_q_mg2": 1.25,
+        "shapley_q_mg3": 1.75,
+        "shapley_q_sum": 4.0,
+        "efficiency_residual": 0.1,
+        "grand_decomposition_residual": -0.2,
+    }
+    (run_dir / "training_history.json").write_text(
+        json.dumps([record]), encoding="utf-8"
+    )
+
+    calls = []
+
+    class FakeWriter:
+        def __init__(self, log_dir):
+            self.log_dir = log_dir
+
+        def add_scalar(self, tag, value, step):
+            calls.append((tag, value, step))
+
+        def flush(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(tensorboard_export, "SummaryWriter", FakeWriter)
+    assert tensorboard_export.export_run(run_dir, tmp_path / "tb")
+    tags = {tag for tag, _, _ in calls}
+    assert {
+        "reward/team", "reward/independent", "reward/cooperation_surplus",
+        "q/shapley_mg1", "q/shapley_mg2", "q/shapley_mg3", "q/shapley_sum",
+        "q/efficiency_residual", "q/grand_decomposition_residual",
+    }.issubset(tags)

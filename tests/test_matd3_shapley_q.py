@@ -12,6 +12,14 @@ from algorithms.matd3_shapley_q.algorithm import Matd3ShapleyQ
 from algorithms.matd3_shapley_q.replay_buffer import ShapleyReplayBuffer
 from algorithms.matd3_shapley_q.independent_baseline import IndependentBaselineEvaluator
 from envs.multi_microgrid_env import MultiMicrogridEnv
+from experiments.training_pipeline import (
+    _algorithm_episode_metrics,
+    _algorithm_replay_extras,
+    _diagnostic_means,
+    _runtime_hyperparameters,
+    _training_diagnostic_summary,
+    build_parser,
+)
 
 from algorithms.matd3_shapley_q.coalition import (
     all_coalitions,
@@ -831,3 +839,84 @@ def test_replay_first_add_rejects_inconsistent_agent_keys():
     data["actions"].pop("mg3")
     with pytest.raises(ValueError, match="actions"):
         ShapleyReplayBuffer(4).add(**data)
+
+
+def test_algorithm_replay_extras_uses_fixed_baseline_step():
+    class FakeAlgorithm:
+        def get_independent_step_data(self, t):
+            assert t == 3
+            return {"reward": 2.0, "profit": 200.0,
+                    "return_to_go": 8.0, "next_return_to_go": 6.0}
+
+    extras = _algorithm_replay_extras(FakeAlgorithm(), 3, team_reward=5.0)
+    assert extras == pytest.approx({
+        "independent_reward": 2.0,
+        "cooperation_surplus_reward": 3.0,
+        "independent_return_to_go": 8.0,
+        "next_independent_return_to_go": 6.0,
+    })
+    assert _algorithm_replay_extras(object(), 3, team_reward=5.0) == {}
+
+
+def test_algorithm_episode_metrics_derives_grand_and_surplus_fields():
+    class FakeAlgorithm:
+        def episode_metrics(self):
+            return {"independent_baseline_return": 8.0,
+                    "independent_baseline_profit": 80.0}
+
+    result = _algorithm_episode_metrics(
+        FakeAlgorithm(), {"team_reward": 12.0, "team_profit": 125.0}
+    )
+    assert result == pytest.approx({
+        "grand_team_return": 12.0,
+        "grand_team_profit": 125.0,
+        "independent_baseline_return": 8.0,
+        "independent_baseline_profit": 80.0,
+        "cooperation_surplus_return": 4.0,
+        "cooperation_surplus_profit": 45.0,
+    })
+    assert _algorithm_episode_metrics(object(), {"team_reward": 1.0, "team_profit": 2.0}) == {}
+
+
+def test_shapley_diagnostics_and_summary_preserve_missing_as_none():
+    diagnostics = _diagnostic_means([{
+        "shapley_q_mg1": 1.0, "shapley_q_mg2": 2.0, "shapley_q_mg3": 3.0,
+        "shapley_q_sum": 6.0, "cooperation_surplus_q_target": 5.0,
+        "efficiency_residual": 1.0, "grand_decomposition_residual": -0.5,
+    }])
+    assert diagnostics["shapley_q_sum"] == pytest.approx(6.0)
+    assert diagnostics["grand_decomposition_residual"] == pytest.approx(-0.5)
+
+    history = [{
+        "grand_team_return": 12.0,
+        "independent_baseline_return": 8.0,
+        "cooperation_surplus_return": 4.0,
+        **diagnostics,
+    }]
+    summary = _training_diagnostic_summary(history)
+    assert summary["final_100_grand_return_mean"] == pytest.approx(12.0)
+    assert summary["final_100_shapley_q_sum_mean"] == pytest.approx(6.0)
+    assert summary["final_100_grand_decomposition_residual_mean"] == pytest.approx(-0.5)
+    empty = _training_diagnostic_summary([{}])
+    assert all(value is None for value in empty.values())
+
+
+def test_hidden_smoke_hyperparameter_overrides_are_run_local():
+    parser = build_parser()
+    args = parser.parse_args(["--warmup-steps", "0", "--batch-size", "8"])
+    settings = {"warmup_steps": 1000, "batch_size": 128}
+    original = copy.deepcopy(settings)
+    assert _runtime_hyperparameters(args, settings) == (0, 8)
+    assert settings == original
+    assert "--warmup-steps" not in parser.format_help()
+    assert "--batch-size" not in parser.format_help()
+
+
+@pytest.mark.parametrize("argv", [
+    ["--warmup-steps", "-1"],
+    ["--batch-size", "0"],
+])
+def test_invalid_smoke_hyperparameter_overrides_fail_fast(argv):
+    args = build_parser().parse_args(argv)
+    with pytest.raises(ValueError, match="warmup_steps|batch_size"):
+        _runtime_hyperparameters(args, {"warmup_steps": 10, "batch_size": 4})

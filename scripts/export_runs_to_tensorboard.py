@@ -5,6 +5,19 @@ import json
 from pathlib import Path
 from torch.utils.tensorboard import SummaryWriter
 
+
+TRAINING_TAGS = {
+    "team_reward": "reward/team",
+    "independent_baseline_return": "reward/independent",
+    "cooperation_surplus_return": "reward/cooperation_surplus",
+    "shapley_q_mg1": "q/shapley_mg1",
+    "shapley_q_mg2": "q/shapley_mg2",
+    "shapley_q_mg3": "q/shapley_mg3",
+    "shapley_q_sum": "q/shapley_sum",
+    "efficiency_residual": "q/efficiency_residual",
+    "grand_decomposition_residual": "q/grand_decomposition_residual",
+}
+
 def export_run(run_dir: Path, tb_root: Path):
     run_name = run_dir.name
     # Identify algorithm name from parent or directory name
@@ -25,6 +38,10 @@ def export_run(run_dir: Path, tb_root: Path):
         train_data = json.load(f)
         
     for ep, record in enumerate(train_data, start=1):
+        for field, tag in TRAINING_TAGS.items():
+            value = record.get(field)
+            if value is not None:
+                writer.add_scalar(tag, value, ep)
         if "team_reward" in record:
             writer.add_scalar("Train/Team_Reward", record["team_reward"], ep)
         if "shaping_reward" in record:

@@ -81,6 +81,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--test-episodes", type=int)
     parser.add_argument("--validation-interval", type=int)
     parser.add_argument("--validation-days", type=int)
+    parser.add_argument("--warmup-steps", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--batch-size", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--no-validation", action="store_true")
     parser.add_argument("--no-milp", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-dashboard", action="store_true")
@@ -107,12 +109,88 @@ def _moving(history: Sequence[Mapping[str, Any]], field: str, window: int) -> fl
     return _mean([item.get(field) for item in history[-window:]])
 
 
+def _algorithm_replay_extras(
+    algorithm: Any, step_idx: int, team_reward: float
+) -> dict[str, float]:
+    """Return optional algorithm-owned replay fields without inspecting internals."""
+    getter = getattr(algorithm, "get_independent_step_data", None)
+    if getter is None:
+        return {}
+    baseline = getter(step_idx)
+    independent_reward = float(baseline["reward"])
+    return {
+        "independent_reward": independent_reward,
+        "cooperation_surplus_reward": float(team_reward) - independent_reward,
+        "independent_return_to_go": float(baseline["return_to_go"]),
+        "next_independent_return_to_go": float(baseline["next_return_to_go"]),
+    }
+
+
+def _algorithm_episode_metrics(
+    algorithm: Any, episode_record: Mapping[str, Any]
+) -> dict[str, float]:
+    """Collect optional episode metrics through an algorithm-level public hook."""
+    finalize = getattr(algorithm, "episode_metrics", None)
+    if finalize is None:
+        return {}
+    metrics = {name: float(value) for name, value in finalize().items()}
+    grand_return = float(episode_record["team_reward"])
+    grand_profit = float(episode_record["team_profit"])
+    independent_return = metrics["independent_baseline_return"]
+    independent_profit = metrics["independent_baseline_profit"]
+    return {
+        "grand_team_return": grand_return,
+        "grand_team_profit": grand_profit,
+        **metrics,
+        "cooperation_surplus_return": grand_return - independent_return,
+        "cooperation_surplus_profit": grand_profit - independent_profit,
+    }
+
+
+def _runtime_hyperparameters(
+    args: argparse.Namespace, settings: Mapping[str, Any]
+) -> tuple[int, int]:
+    """Resolve run-local smoke overrides without mutating the YAML mapping."""
+    warmup_override = getattr(args, "warmup_steps", None)
+    batch_override = getattr(args, "batch_size", None)
+    warmup = int(warmup_override if warmup_override is not None
+                 else settings.get("warmup_steps", 1000))
+    batch_size = int(batch_override if batch_override is not None
+                     else settings.get("batch_size", 128))
+    if warmup < 0:
+        raise ValueError("warmup_steps must be non-negative")
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
+    return warmup, batch_size
+
+
+def _training_diagnostic_summary(
+    history: Sequence[Mapping[str, Any]], window: int = 100
+) -> dict[str, float | None]:
+    def final_mean(field: str) -> float | None:
+        return _mean([record.get(field) for record in history[-window:]])
+
+    return {
+        "final_100_grand_return_mean": final_mean("grand_team_return"),
+        "final_100_independent_return_mean": final_mean("independent_baseline_return"),
+        "final_100_cooperation_surplus_return_mean": final_mean("cooperation_surplus_return"),
+        "final_100_shapley_q_sum_mean": final_mean("shapley_q_sum"),
+        "final_100_efficiency_residual_mean": final_mean("efficiency_residual"),
+        "final_100_grand_decomposition_residual_mean": final_mean(
+            "grand_decomposition_residual"
+        ),
+    }
+
+
 def _diagnostic_means(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     scalar_names = (
         "critic_loss", "critic1_loss", "critic2_loss", "actor_loss",
         "q1_mean", "q2_mean", "q1_q2_gap", "target_q_mean",
         "td_error_mean", "td_error_std", "actor_grad_norm", "critic_grad_norm",
         "actor_parameter_count",
+        "shapley_q_mg1", "shapley_q_mg2", "shapley_q_mg3", "shapley_q_sum",
+        "cooperation_surplus_q_target", "efficiency_residual",
+        "grand_decomposition_residual",
         "crossgate_local_gate_mean", "crossgate_local_gate_std",
         "crossgate_local_gate_low_rate", "crossgate_local_gate_high_rate",
         "crossgate_peer_gate_mean", "crossgate_peer_gate_std",
@@ -309,8 +387,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     env = MultiMicrogridEnv(env_config, split="train")
     algorithm = spec.create(env, algorithm_cfg, device=args.device, seed=args.seed)
     settings = algorithm_cfg["algorithm"]
-    warmup = int(settings.get("warmup_steps", 1000))
-    batch_size = int(settings.get("batch_size", 128))
+    warmup, batch_size = _runtime_hyperparameters(args, settings)
     exploration = float(settings.get("exploration_noise", 0.15))
     replay_cap = int(settings.get("replay_capacity", 200_000))
     rng = np.random.default_rng(args.seed)
@@ -348,11 +425,16 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     try:
         for episode_index in range(training_episodes):
             episode_started = time.perf_counter()
-            observations, reset_info = env.reset(seed=args.seed + episode_index)
+            episode_seed = args.seed + episode_index
+            observations, reset_info = env.reset(seed=episode_seed)
+            episode_start = getattr(algorithm, "on_episode_start", None)
+            if episode_start is not None:
+                episode_start(env, seed=episode_seed)
             state = reset_info["global_state"]
             collector = EpisodeMetricsCollector(env, capture_hourly=False)
             diagnostics: list[dict[str, Any]] = []
             done = False
+            episode_step = 0
             while not done:
                 if total_steps < warmup:
                     actions = {
@@ -370,9 +452,13 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                 if not math.isfinite(team_reward):
                     dashboard.set_error("NaN / Inf team reward")
                     raise RuntimeError("NaN / Inf team reward")
+                replay_extras = _algorithm_replay_extras(
+                    algorithm, episode_step, team_reward
+                )
                 algorithm.replay.add(
                     observations, state, actions, team_reward,
                     next_observations, info["global_state_after"], done,
+                    **replay_extras,
                 )
                 update_metrics = algorithm.update(batch_size)
                 if update_metrics:
@@ -380,8 +466,10 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                 collector.record_step(actions, info, rewards)
                 observations, state = next_observations, info["global_state_after"]
                 total_steps += 1
+                episode_step += 1
 
             ep_record = collector.finalize_episode()
+            ep_record.update(_algorithm_episode_metrics(algorithm, ep_record))
             ep_record.update({
                 "episode": episode_index + 1, "total_steps": total_steps, "steps": total_steps,
                 "replay_size": len(algorithm.replay),
@@ -492,6 +580,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "checkpoint_selection": checkpoint_selection,
         "training_seconds": training_seconds,
         "seconds_per_episode_mean": training_seconds / training_episodes,
+        **_training_diagnostic_summary(history),
     }
     write_json(run_dir / "training_summary.json", training_summary)
     metadata["end_time"] = datetime.now().astimezone().isoformat()

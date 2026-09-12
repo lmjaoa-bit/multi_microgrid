@@ -129,6 +129,9 @@ class Matd3ShapleyQ(Matd3Dispatch):
     def get_independent_step_data(self, t):
         return self.baseline_evaluator.get_step_data(t)
 
+    def episode_metrics(self):
+        return self.baseline_evaluator.episode_metrics()
+
     @staticmethod
     def _conservative_shapley_sum(q1, q2, agent_ids):
         return sum(torch.minimum(q1[mg], q2[mg]) for mg in agent_ids)

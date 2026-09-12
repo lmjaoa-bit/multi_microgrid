@@ -178,6 +178,10 @@ class AlgorithmTrainingDashboard:
         avg50 = np.mean(self.profits[-50:]) if self.profits else float("nan")
         best_str = f"{self.best_profit:8.2f}" if self.best_episode > 0 else "N/A"
 
+        def metric(name: str) -> str:
+            value = self.last_metrics.get(name)
+            return "N/A" if value is None else f"{float(value):.4f}"
+
         profit_table.add_row(
             f"Current:  [bold]{cur_profit_str}[/]",
             f"Best:     [bold green]{best_str}[/] (Ep {self.best_episode})",
@@ -190,6 +194,18 @@ class AlgorithmTrainingDashboard:
             f"MA(100): {float(self.last_metrics.get('team_profit_ma_100', avg50)):8.2f}",
             f"Best validation: {self.best_validation_profit:8.2f}"
             if self.best_validation_profit is not None else "Best validation: N/A",
+        )
+        profit_table.add_row(
+            f"Grand Return: {metric('grand_team_return')}",
+            f"Independent: {metric('independent_baseline_return')}",
+        )
+        profit_table.add_row(
+            f"Surplus: {metric('cooperation_surplus_return')}",
+            f"Efficiency residual: {metric('efficiency_residual')}",
+        )
+        profit_table.add_row(
+            f"Shapley sum: {metric('shapley_q_sum')}",
+            f"Grand decomp residual: {metric('grand_decomposition_residual')}",
         )
 
         # MATD3 Algorithm State Table
