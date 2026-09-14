@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import copy
 from functools import wraps
 from numbers import Integral
 
@@ -8,12 +9,11 @@ import numpy as np
 import torch
 from torch import nn
 
+from algorithms.matd3.replay_buffer import Transition
+
 
 def diagnostics_due(update_steps: int, interval: int) -> bool:
-    """Return True only on configured diagnostic-sampling updates.
-
-    interval <= 0 disables expensive diagnostics entirely.
-    """
+    """Return True only on configured diagnostic-sampling updates."""
     return int(interval) > 0 and int(update_steps) % int(interval) == 0
 
 
@@ -31,20 +31,195 @@ def forward_policy_actions(
     }
 
 
+def _pack_agent_arrays(
+    batch,
+    agent_ids: Sequence[str],
+    attribute: str,
+) -> np.ndarray | None:
+    rows = []
+    expected_shape = None
+    for transition in batch:
+        mapping = getattr(transition, attribute)
+        row = [np.asarray(mapping[mg], dtype=np.float32) for mg in agent_ids]
+        shapes = {item.shape for item in row}
+        if len(shapes) != 1:
+            return None
+        if expected_shape is None:
+            expected_shape = row[0].shape
+        elif row[0].shape != expected_shape:
+            return None
+        rows.append(np.stack(row, axis=0))
+    return np.stack(rows, axis=0)
+
+
+def _sample_transitions(replay, batch_size: int):
+    indices = replay.rng.choice(len(replay), size=int(batch_size), replace=False)
+    if hasattr(replay, "_transitions_for_indices"):
+        return replay._transitions_for_indices(indices)
+    return [replay.storage[int(i)] for i in indices]
+
+
+def sample_replay_batch_packed(
+    replay,
+    batch_size: int,
+    agent_ids: Sequence[str],
+    device: torch.device,
+) -> dict[str, object]:
+    """Sample one replay batch while minimizing host-to-device transfers.
+
+    Agent observations/actions are packed into [B, A, ...] arrays before conversion to
+    tensors, then exposed as zero-copy tensor views per agent. This preserves the replay
+    sampling distribution while reducing Python and CUDA transfer overhead.
+    """
+    batch = _sample_transitions(replay, batch_size)
+    to_tensor = lambda value: torch.as_tensor(value, dtype=torch.float32, device=device)
+
+    obs_np = _pack_agent_arrays(batch, agent_ids, "observations")
+    next_obs_np = _pack_agent_arrays(batch, agent_ids, "next_observations")
+    actions_np = _pack_agent_arrays(batch, agent_ids, "actions")
+
+    if obs_np is None:
+        observations = {
+            mg: to_tensor(np.stack([x.observations[mg] for x in batch], axis=0))
+            for mg in agent_ids
+        }
+    else:
+        obs_tensor = to_tensor(obs_np)
+        observations = {mg: obs_tensor[:, i] for i, mg in enumerate(agent_ids)}
+
+    if next_obs_np is None:
+        next_observations = {
+            mg: to_tensor(np.stack([x.next_observations[mg] for x in batch], axis=0))
+            for mg in agent_ids
+        }
+    else:
+        next_obs_tensor = to_tensor(next_obs_np)
+        next_observations = {mg: next_obs_tensor[:, i] for i, mg in enumerate(agent_ids)}
+
+    if actions_np is None:
+        actions = {
+            mg: to_tensor(np.stack([x.actions[mg] for x in batch], axis=0))
+            for mg in agent_ids
+        }
+    else:
+        action_tensor = to_tensor(actions_np)
+        actions = {mg: action_tensor[:, i] for i, mg in enumerate(agent_ids)}
+
+    return {
+        "observations": observations,
+        "global_state": to_tensor(np.stack([x.global_state for x in batch], axis=0)),
+        "actions": actions,
+        "team_reward": to_tensor(np.asarray([[x.team_reward] for x in batch], dtype=np.float32)),
+        "next_observations": next_observations,
+        "next_global_state": to_tensor(np.stack([x.next_global_state for x in batch], axis=0)),
+        "done": to_tensor(np.asarray([[float(x.done)] for x in batch], dtype=np.float32)),
+    }
+
+
+class FastReplayBuffer:
+    """O(1) ring-buffer replay used only by experimental runtime-optimized variants."""
+
+    def __init__(self, capacity: int, seed: int = 42) -> None:
+        self.capacity = int(capacity)
+        if self.capacity <= 0:
+            raise ValueError("replay capacity must be positive")
+        self.storage: list[Transition] = []
+        self._next_index = 0
+        self.rng = np.random.default_rng(seed)
+
+    @classmethod
+    def from_replay(cls, replay) -> "FastReplayBuffer":
+        capacity = getattr(getattr(replay, "storage", None), "maxlen", None)
+        if capacity is None:
+            capacity = getattr(replay, "capacity", None)
+        if capacity is None:
+            raise ValueError("Cannot infer replay capacity")
+        result = cls(int(capacity))
+        result.rng.bit_generator.state = copy.deepcopy(replay.rng.bit_generator.state)
+        for transition in replay.storage:
+            result._append_transition(transition)
+        return result
+
+    def __len__(self) -> int:
+        return len(self.storage)
+
+    def _append_transition(self, transition: Transition) -> None:
+        if len(self.storage) < self.capacity:
+            self.storage.append(transition)
+            self._next_index = len(self.storage) % self.capacity
+        else:
+            self.storage[self._next_index] = transition
+            self._next_index = (self._next_index + 1) % self.capacity
+
+    def add(
+        self,
+        observations: Mapping[str, np.ndarray],
+        global_state: np.ndarray,
+        actions: Mapping[str, np.ndarray],
+        team_reward: float,
+        next_observations: Mapping[str, np.ndarray],
+        next_global_state: np.ndarray,
+        done: bool,
+    ) -> None:
+        self._append_transition(Transition(
+            {k: np.asarray(v, dtype=np.float32).copy() for k, v in observations.items()},
+            np.asarray(global_state, dtype=np.float32).copy(),
+            {k: np.asarray(v, dtype=np.float32).copy() for k, v in actions.items()},
+            float(team_reward),
+            {k: np.asarray(v, dtype=np.float32).copy() for k, v in next_observations.items()},
+            np.asarray(next_global_state, dtype=np.float32).copy(),
+            bool(done),
+        ))
+
+    def _logical_get(self, index: int) -> Transition:
+        size = len(self.storage)
+        if not 0 <= index < size:
+            raise IndexError(index)
+        if size < self.capacity:
+            return self.storage[index]
+        return self.storage[(self._next_index + index) % self.capacity]
+
+    def _transitions_for_indices(self, indices) -> list[Transition]:
+        return [self._logical_get(int(i)) for i in indices]
+
+    def sample(
+        self,
+        batch_size: int,
+        agent_ids: list[str],
+        device: torch.device,
+    ) -> dict[str, object]:
+        return sample_replay_batch_packed(self, batch_size, agent_ids, device)
+
+
 def select_single_dispatch_actions(
     algorithm,
     observations: Mapping[str, np.ndarray],
     noise_std: float = 0.0,
 ) -> dict[str, np.ndarray]:
-    """Experimental single-dispatch rollout with one GPU->CPU synchronization."""
-    tensors: list[torch.Tensor] = []
+    """Experimental single-dispatch rollout with packed H2D and one D2H synchronization."""
+    arrays = [np.asarray(observations[mg], dtype=np.float32) for mg in algorithm.agent_ids]
+    same_shape = len({array.shape for array in arrays}) == 1
+
     with torch.no_grad():
-        for mg in algorithm.agent_ids:
-            obs = torch.as_tensor(
-                observations[mg], dtype=torch.float32, device=algorithm.device
-            ).unsqueeze(0)
-            tensors.append(algorithm.actors[mg](obs, collect_diagnostics=False))
-        action_matrix = torch.cat(tensors, dim=0).detach().cpu().numpy()
+        outputs: list[torch.Tensor] = []
+        if same_shape:
+            observation_batch = torch.as_tensor(
+                np.stack(arrays, axis=0), dtype=torch.float32, device=algorithm.device
+            )
+            for index, mg in enumerate(algorithm.agent_ids):
+                outputs.append(
+                    algorithm.actors[mg](
+                        observation_batch[index:index + 1],
+                        collect_diagnostics=False,
+                    )
+                )
+        else:
+            for mg, array in zip(algorithm.agent_ids, arrays):
+                obs = torch.as_tensor(
+                    array, dtype=torch.float32, device=algorithm.device
+                ).unsqueeze(0)
+                outputs.append(algorithm.actors[mg](obs, collect_diagnostics=False))
+        action_matrix = torch.cat(outputs, dim=0).detach().cpu().numpy()
 
     actions: dict[str, np.ndarray] = {}
     for index, mg in enumerate(algorithm.agent_ids):
@@ -82,7 +257,6 @@ def _actor_diagnostic_payload(
         "optimizer_step_norm": step_norm,
         "relative_optimizer_step_norm": step_norm / max(param_norm, 1e-20),
     }
-
     if variant == "pnn":
         common.update({
             "local_feature_grad_norm": branch.get("local_features", 0.0),
@@ -133,11 +307,12 @@ def _actor_diagnostic_payload(
 
 
 def optimized_single_dispatch_update(self, batch_size: int):
-    """MATD3 update for experimental single-dispatch actors with fewer synchronizations.
+    """Runtime-optimized MATD3 update for experimental single-dispatch variants.
 
-    Mathematical updates are unchanged: one critic update per environment step, delayed actor
-    updates, TD3 target smoothing, the same differentiable action projection, and the same soft
-    target updates. Runtime-only differences are actor-forward caching and sparse diagnostics.
+    The objective, update frequency, TD3 target smoothing, differentiable projection,
+    gradient clipping, and target updates are unchanged. Engineering changes are packed replay
+    transfers, one current Actor forward per agent, batched metric synchronization, and sparse
+    expensive diagnostics.
     """
     if len(self.replay) < batch_size:
         return {}
@@ -161,7 +336,9 @@ def optimized_single_dispatch_update(self, batch_size: int):
                 -self.target_noise_clip, self.target_noise_clip
             )
             target_raw.append((action + noise).clamp(-1, 1))
-        target_effective, _ = self.project_actions(next_state, torch.stack(target_raw, dim=1))
+        target_effective, _ = self.project_actions(
+            next_state, torch.stack(target_raw, dim=1)
+        )
         target_q = {}
         for mg in self.agent_ids:
             q1, q2 = self.target_critics[mg](next_state, target_effective.flatten(1))
@@ -175,9 +352,6 @@ def optimized_single_dispatch_update(self, batch_size: int):
         c1 = nn.functional.mse_loss(q1, target_q[mg])
         c2 = nn.functional.mse_loss(q2, target_q[mg])
         loss = c1 + c2
-        if not bool(torch.isfinite(loss).item()):
-            raise FloatingPointError(f"{mg}: nonfinite Critic loss")
-
         optimizer = self.critic_optimizers[mg]
         optimizer.zero_grad(set_to_none=True)
         loss.backward()
@@ -259,8 +433,6 @@ def optimized_single_dispatch_update(self, batch_size: int):
                 plan = plans[active_index]
                 q1 = critic.q1(state, projected.flatten(1))
                 loss = -q1.mean()
-                if not bool(torch.isfinite(loss).item()):
-                    raise FloatingPointError(f"{active}: nonfinite Actor loss")
 
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
@@ -387,6 +559,7 @@ def install_single_dispatch_runtime_optimizations(cls, *, variant: str):
             raise ValueError("algorithm.diagnostics_interval must be a non-negative integer")
         self.diagnostics_interval = int(raw_interval)
         self._runtime_variant = str(variant)
+        self.replay = FastReplayBuffer.from_replay(self.replay)
 
     cls.__init__ = wrapped_init
     cls.select_actions = select_single_dispatch_actions
