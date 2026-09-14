@@ -77,6 +77,17 @@ def test_diagnostics_due_is_sparse_and_can_be_disabled():
     assert not diagnostics_due(update_steps=100, interval=0)
 
 
+def test_experimental_variants_actually_install_runtime_hot_path():
+    from algorithms.matd3_transformer.algorithm import Matd3Transformer
+    from algorithms.pnn.algorithm import PNN
+    from algorithms.pnn_transformer.algorithm import PnnTransformer
+
+    for cls in (Matd3Transformer, PNN, PnnTransformer):
+        assert getattr(cls, "_runtime_optimizations_installed", False)
+        assert cls.update is optimized_single_dispatch_update
+        assert cls.select_actions is select_single_dispatch_actions
+
+
 class TrainActor(nn.Module):
     def __init__(self) -> None:
         super().__init__()
