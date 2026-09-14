@@ -13,21 +13,7 @@ MARKET_FEATURES = frozenset({
 
 
 class PNNDispatchActor(nn.Module):
-    """Single-dispatch actor with Product-based Neural Network (PNN) feature interactions.
-
-    Decouples observation features into four distinct physical fields:
-      1. local: current-timestep local physical and battery states (PV, load, SOC, bounds)
-      2. temporal: future horizon forecasts of load, renewable, and grid tariff curves
-      3. peer: neighbor microgrid states and demands
-      4. market: grid price signals and historical clearing outcomes
-
-    Embeds features into a unified signed latent space (Linear + LayerNorm), and computes
-    second-order Hadamard pairwise product interactions:
-      - Inter-temporal: local * temporal (current battery value vs future peak price/load)
-      - Spatial: local * peer (inter-microgrid supply-demand complementarity)
-      - Market sensitivity: local * market (clearing responsiveness)
-    Scaled by agent-specific product_scale to prevent over-trading and premature battery depletion.
-    """
+    """Single-dispatch actor with Product-based Neural Network (PNN) feature interactions."""
 
     def __init__(
         self,
@@ -67,8 +53,6 @@ class PNNDispatchActor(nn.Module):
         if not 0 < self.product_scale <= 1:
             raise ValueError("product_scale must be in (0, 1]")
 
-        # Linear + LayerNorm without ReLU ensures embeddings preserve sign and direction,
-        # allowing signed complementarity (e.g. positive surplus * negative deficit < 0)
         def encoder(in_dim: int, out_dim: int) -> nn.Sequential:
             return nn.Sequential(
                 nn.Linear(in_dim, out_dim),
@@ -79,16 +63,9 @@ class PNNDispatchActor(nn.Module):
         self.temporal_encoder = encoder(len(groups["temporal"]), self.feature_dim)
         self.market_encoder = encoder(len(groups["market"]), self.feature_dim)
         self.peer_encoder = encoder(len(groups["peer"]), self.feature_dim)
-
-        # Layer normalization for product signals ensures numeric stability (3 product channels)
         self.product_norm = nn.LayerNorm(self.feature_dim * 3)
 
-        # Input dimension to dispatch backbone:
-        # Linear: local (D) + temporal (D) + market (D) + peer (D) = 4D
-        # Product: local*temporal (D) + local*peer (D) + local*market (D) = 3D
-        # Total = 7D (e.g. 7 * 32 = 224)
         total_width = self.feature_dim * 7
-
         layers: list[nn.Module] = []
         width = total_width
         for hidden in hidden_dims:
@@ -96,7 +73,6 @@ class PNNDispatchActor(nn.Module):
             width = hidden
         self.dispatch_backbone = nn.Sequential(*layers)
 
-        # Initialize output head with small weights to prevent action boundary saturation at step 0
         final_linear = nn.Linear(width, 1)
         nn.init.uniform_(final_linear.weight, -3e-3, 3e-3)
         nn.init.uniform_(final_linear.bias, -3e-3, 3e-3)
@@ -110,7 +86,9 @@ class PNNDispatchActor(nn.Module):
     def parameter_count(self) -> int:
         return self._parameter_count
 
-    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, observation: torch.Tensor, *, collect_diagnostics: bool = True
+    ) -> torch.Tensor:
         if observation.shape[-1] != len(self.schema):
             raise ValueError(f"Observation schema mismatch: expected {len(self.schema)}, got {observation.shape[-1]}")
 
@@ -119,40 +97,33 @@ class PNNDispatchActor(nn.Module):
         e_market = self.market_encoder(observation.index_select(-1, self._market_indices))
         e_peer = self.peer_encoder(observation.index_select(-1, self._peer_indices))
 
-        # 1. First-order linear signals (128-dim: local baseline, future trend, market, peer)
         linear_signals = torch.cat([e_local, e_temporal, e_market, e_peer], dim=-1)
-
-        # 2. Second-order signed pairwise Hadamard product interactions:
-        # - Inter-temporal: local * temporal (evaluates holding value of stored battery energy vs future peak tariffs)
-        # - Spatial: local * peer (inter-microgrid energy complementarity)
-        # - Market sensitivity: local * market (sensitivity to clearing probability and grid prices)
         p_temporal = e_local * e_temporal
         p_spatial = e_local * e_peer
         p_market = e_local * e_market
-
         normed_products = self.product_norm(torch.cat([p_temporal, p_spatial, p_market], dim=-1))
-
-        # Scaled product signals as higher-order residual perturbations
         product_signals = self.product_scale * normed_products
 
-        self._last_product_norms = (
-            linear_signals.detach().norm(dim=-1).mean(),
-            product_signals.detach().norm(dim=-1).mean(),
-            p_temporal.detach().norm(dim=-1).mean(),
-            p_spatial.detach().norm(dim=-1).mean(),
-        )
+        if collect_diagnostics:
+            self._last_product_norms = (
+                linear_signals.detach().norm(dim=-1).mean(),
+                product_signals.detach().norm(dim=-1).mean(),
+                p_temporal.detach().norm(dim=-1).mean(),
+                p_spatial.detach().norm(dim=-1).mean(),
+            )
 
-        # Concatenate linear and residual second-order product representations (total: 224-dim)
         combined = torch.cat([linear_signals, product_signals], dim=-1)
         return self.dispatch_head(self.dispatch_backbone(combined))
 
     def product_diagnostics(self) -> Mapping[str, float]:
         if self._last_product_norms is not None:
             lin_norm, prod_norm, temp_norm, spat_norm = self._last_product_norms
+            lin_value = float(lin_norm)
+            prod_value = float(prod_norm)
             self._product_metrics = {
-                "linear_signal_norm": float(lin_norm),
-                "product_signal_norm": float(prod_norm),
-                "product_to_linear_ratio": float(prod_norm / max(float(lin_norm), 1e-8)),
+                "linear_signal_norm": lin_value,
+                "product_signal_norm": prod_value,
+                "product_to_linear_ratio": float(prod_value / max(lin_value, 1e-8)),
                 "temporal_product_norm": float(temp_norm),
                 "spatial_product_norm": float(spat_norm),
             }
