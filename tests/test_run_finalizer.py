@@ -146,3 +146,38 @@ def test_finalize_keeps_distinct_final_checkpoint(tmp_path: Path) -> None:
     assert (checkpoints / "final_model.pt").exists()
     test_eval = json.loads((run_dir / "test_evaluation.json").read_text(encoding="utf-8"))
     assert test_eval["matd3"] == {"score": 2}
+
+
+def test_run_experiment_finalizes_using_startup_git_provenance(monkeypatch) -> None:
+    from scripts import run_experiment
+
+    parsed_args = object()
+    summary = {"run_directory": "outputs/example/runs/run-1"}
+    provenance = {
+        "git_commit": "abc123",
+        "git_branch": "feature/test",
+        "git_dirty": False,
+    }
+    calls = {}
+
+    class Parser:
+        def parse_args(self, argv):
+            calls["argv"] = argv
+            return parsed_args
+
+    monkeypatch.setattr(run_experiment, "build_parser", lambda: Parser())
+    monkeypatch.setattr(run_experiment, "train", lambda args: summary)
+    monkeypatch.setattr(run_experiment, "collect_git_provenance", lambda root: provenance)
+
+    def fake_finalize(returned_summary, *, project_root, provenance):
+        calls["summary"] = returned_summary
+        calls["project_root"] = project_root
+        calls["provenance"] = provenance
+
+    monkeypatch.setattr(run_experiment, "finalize_completed_run", fake_finalize)
+
+    assert run_experiment.main(["--algorithm", "matd3_shapley_q"]) == 0
+    assert calls["argv"] == ["--algorithm", "matd3_shapley_q"]
+    assert calls["summary"] is summary
+    assert calls["project_root"] == run_experiment.PROJECT_ROOT
+    assert calls["provenance"] is provenance
