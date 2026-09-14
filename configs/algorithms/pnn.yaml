@@ -13,6 +13,7 @@ algorithm:
   replay_capacity: 200000
   warmup_steps: 1000
   exploration_noise: 0.15
+  diagnostics_interval: 100
   network:
     embed_dim: 32
     hidden_dims: [96, 64]
