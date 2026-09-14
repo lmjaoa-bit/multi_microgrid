@@ -88,10 +88,13 @@ def test_experimental_variants_actually_install_runtime_hot_path():
     from algorithms.pnn.algorithm import PNN
     from algorithms.pnn_transformer.algorithm import PnnTransformer
 
+    assert hasattr(runtime_helpers, "optimized_pnn_update")
     for cls in (Matd3Transformer, PNN, PnnTransformer):
         assert getattr(cls, "_runtime_optimizations_installed", False)
-        assert cls.update is optimized_single_dispatch_update
         assert cls.select_actions is select_single_dispatch_actions
+    assert Matd3Transformer.update is optimized_single_dispatch_update
+    assert PnnTransformer.update is optimized_single_dispatch_update
+    assert PNN.update is runtime_helpers.optimized_pnn_update
 
 
 def test_packed_replay_sampler_transfers_agent_fields_as_shared_tensors():
@@ -108,7 +111,10 @@ def test_packed_replay_sampler_transfers_agent_fields_as_shared_tensors():
             next_global_state=np.full(7, step + 1, dtype=np.float32),
             done=False,
         ))
-    replay = SimpleNamespace(storage=storage, rng=np.random.default_rng(11))
+    replay = SimpleNamespace(storage=storage, rng=np.random.default_rng(11), __len__=lambda: 8)
+    replay.__class__ = type("FakeReplay", (), {
+        "__len__": lambda self: len(self.storage),
+    })
 
     batch = runtime_helpers.sample_replay_batch_packed(replay, 4, ids, torch.device("cpu"))
 
