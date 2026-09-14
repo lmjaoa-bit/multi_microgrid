@@ -40,5 +40,4 @@ def configure_torch_runtime(config, device):
     return {
         "cpu_threads": torch.get_num_threads(),
         "interop_threads": torch.get_num_interop_threads(),
-        "device_type": torch.device(device).type,
     }
