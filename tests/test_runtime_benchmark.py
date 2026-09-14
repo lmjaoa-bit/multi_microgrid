@@ -1,4 +1,5 @@
 from utils.runtime_benchmark import (
+    apply_runtime_recommendation,
     cpu_thread_candidates,
     estimate_training_seconds,
     select_best_result,
@@ -26,6 +27,22 @@ def test_select_best_result_keeps_compile_informational_only():
         {"label": "cuda-compile", "status": "ok", "seconds_per_episode": 0.9, "compile_actors": True},
     ]
     assert select_best_result(rows)["label"] == "cuda"
+
+
+def test_runtime_recommendation_only_changes_runtime_section():
+    original = {
+        "algorithm": {"name": "matd3_transformer", "batch_size": 128},
+        "runtime": {"cpu_threads": 12},
+        "training": {"episodes": 5000},
+    }
+    result = apply_runtime_recommendation(
+        original, {"cpu_threads": 4, "interop_threads": 1}
+    )
+
+    assert result["algorithm"] == original["algorithm"]
+    assert result["training"] == original["training"]
+    assert result["runtime"] == {"cpu_threads": 4, "interop_threads": 1}
+    assert original["runtime"] == {"cpu_threads": 12}
 
 
 def test_estimate_training_seconds_scales_measured_episode_time():
