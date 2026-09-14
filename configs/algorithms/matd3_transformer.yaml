@@ -28,6 +28,7 @@ algorithm:
     forecast_horizon: 8
 runtime:
   cpu_threads: 4
+  interop_threads: 2
 training:
   episodes: 5000
   test_episodes: 55
