@@ -79,6 +79,43 @@ def test_test3_horizon_embedding_shape():
         assert components["forecast_tokens"].shape == (8, 4, d_model)
 
 
+def test_invalid_forecast_tokens_do_not_affect_dispatch_representation():
+    """Invalid forecast steps must be excluded from dispatch-token attention."""
+    spec, env, settings, model = build_matd3_transformer()
+    obs, _ = env.reset(seed=42, deterministic=True)
+
+    for mg in env.agent_ids:
+        actor = model.actors[mg]
+        schema_map = {name: i for i, name in enumerate(actor.schema)}
+        base = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0)
+        perturbed = base.clone()
+
+        # Mark the last two forecast steps invalid, then change only their values.
+        # A correct key-padding mask makes the dispatch representation invariant.
+        masked_steps = range(max(1, actor.forecast_horizon - 1), actor.forecast_horizon + 1)
+        for k in masked_steps:
+            valid_name = f"forecast_valid_t+{k}"
+            assert valid_name in schema_map
+            base[:, schema_map[valid_name]] = 0.0
+            perturbed[:, schema_map[valid_name]] = 0.0
+
+            feature_names = [f"load_t+{k}", f"pv_t+{k}", f"wind_t+{k}", f"price_t+{k}"]
+            feature_names.extend(
+                f"{peer}_net_load_t+{k}" for peer in actor.peers
+            )
+            for feature_name in feature_names:
+                perturbed[:, schema_map[feature_name]] += 100.0
+
+        base_components = actor.forward_components(base)
+        perturbed_components = actor.forward_components(perturbed)
+        assert torch.allclose(
+            base_components["dispatch_rep"],
+            perturbed_components["dispatch_rep"],
+            atol=1e-6,
+            rtol=1e-6,
+        ), f"{mg}: invalid forecast tokens leaked into dispatch attention"
+
+
 def test_test4_horizon_embedding_temporal_identity():
     """Test 4: t+1 and t+4 possess distinct temporal embeddings."""
     spec, env, settings, model = build_matd3_transformer()
@@ -241,5 +278,3 @@ def test_token_norm_balance():
         # Token norm ratio (max/min) must be strictly bounded below 2.0 (previously was 2.5x - 7.5 vs 2.9)
         ratio = float((token_norms.max() / token_norms.min()).detach())
         assert ratio < 1.6, f"Token norm ratio too high: {ratio}"
-
-
