@@ -17,74 +17,11 @@ from algorithms.matd3_shapley_q.replay_buffer import ShapleyReplayBuffer
 from algorithms.matd3_shapley_q.stability import (
     clip_module_grad_norm,
     conservative_cooperation_q,
-    lower_soc_discharge_gradient_proxy,
 )
-
-
-class CoalitionAwareProjector:
-    """Keep every local dispatch; only coalition members can exchange offers."""
-
-    def __init__(self, projector, agent_ids):
-        self.projector = projector
-        self.agent_ids = tuple(agent_ids)
-
-    def _membership_mask(self, coalition, batch_size, device):
-        if isinstance(coalition, torch.Tensor):
-            if coalition.ndim != 2 or coalition.shape != (batch_size, len(self.agent_ids)):
-                raise ValueError(
-                    "Coalition mask must have shape [batch, agents]"
-                )
-            if coalition.dtype == torch.bool:
-                return coalition.to(device=device)
-            if not torch.isfinite(coalition).all() or not torch.all(
-                (coalition == 0) | (coalition == 1)
-            ):
-                raise ValueError("Coalition mask values must be finite booleans or 0/1")
-            return coalition.to(device=device, dtype=torch.bool)
-
-        try:
-            coalition_ids = frozenset(coalition)
-        except TypeError as exc:
-            raise ValueError("Coalition must be an agent-id collection or batch mask") from exc
-        if not coalition_ids.issubset(self.agent_ids):
-            raise ValueError("Unknown agent in coalition")
-        row = torch.tensor(
-            [mg in coalition_ids for mg in self.agent_ids],
-            dtype=torch.bool,
-            device=device,
-        )
-        return row.unsqueeze(0).expand(batch_size, -1)
-
-    def __call__(self, state, raw, coalition):
-        effective, plans = self.projector(state, raw)
-        membership = self._membership_mask(coalition, state.shape[0], state.device)
-        channels = []
-        for i, mg in enumerate(self.agent_ids):
-            plan = plans[i]
-            member = membership[:, i]
-            peer_cap = torch.zeros_like(plan["local"])
-            if self.projector.enabled:
-                for j, other in enumerate(plans):
-                    if j != i:
-                        eligible_pair = member & membership[:, j]
-                        peer_cap = peer_cap + torch.where(
-                            eligible_pair & (other["buy"] + 1e-10 >= plan["sell"]),
-                            other["demand"].clamp(max=self.projector.pair_capacity),
-                            torch.zeros_like(peer_cap))
-            cap = torch.where((~member) | plan["charging"] |
-                              (plan["deficit"] - plan["local"] > 1e-7),
-                              torch.zeros_like(peer_cap), torch.minimum(plan["remaining"], peer_cap))
-            offer = torch.minimum(plan["uncapped_offer"], cap)
-            scale = max(self.projector.batteries[mg]["max_charge_kw"],
-                        self.projector.batteries[mg]["max_discharge_kw"])
-            effective_local, proxy_mask = lower_soc_discharge_gradient_proxy(
-                effective[:, i, 0], raw[:, i, 0], plan["dis_max"]
-            )
-            channels.append(torch.stack([effective_local, offer / scale], dim=-1))
-            plan.update(in_coalition=member, cap=cap, offer=offer,
-                        mask=cap > 1e-9, peer_cap=peer_cap,
-                        lower_soc_discharge_proxy=proxy_mask)
-        return torch.stack(channels, dim=1), plans
+from algorithms.matd3_shapley_q.vectorized import (
+    CoalitionAwareProjector,
+    batched_agent_shapley_values,
+)
 
 
 class TwinMarginalCritic(TwinCritic):
@@ -134,6 +71,18 @@ class Matd3ShapleyQ(Matd3Dispatch):
                       for coalition in enumerate_predecessor_coalitions(mg, self.agent_ids))
             for mg in self.agent_ids
         }
+        all_required = {
+            coalition
+            for active in self.agent_ids
+            for predecessor, _ in self.predecessors[active]
+            for coalition in (predecessor, predecessor | {active})
+        }
+        # Stable order keeps the vectorized batch deterministic without changing
+        # any Shapley weights or coalition semantics.
+        self.shapley_coalitions = tuple(sorted(
+            all_required,
+            key=lambda coalition: tuple(mg in coalition for mg in self.agent_ids),
+        ))
 
     def on_episode_start(self, env, **_):
         self.baseline_evaluator.reset_episode(env)
@@ -150,24 +99,27 @@ class Matd3ShapleyQ(Matd3Dispatch):
         return sum(torch.minimum(q1[mg], q2[mg]) for mg in agent_ids)
 
     def _agent_shapley_values(self, state, raw, active, critic, projected=None):
-        projected = {} if projected is None else projected
-        first, second = [], []
-        for predecessor, weight in self.predecessors[active]:
-            joined = predecessor | {active}
-            for coalition in (predecessor, joined):
-                if coalition not in projected:
-                    projected[coalition] = self.coalition_projector(state, raw, coalition)[0]
-            mask = state.new_tensor([mg in predecessor for mg in self.agent_ids]).expand(state.shape[0], -1)
-            q1, q2 = critic(state, projected[predecessor], projected[joined], mask)
-            first.append(weight * q1)
-            second.append(weight * q2)
-        return sum(first), sum(second)
+        if projected is None:
+            projected, _ = self.coalition_projector.project_many(
+                state, raw, self.shapley_coalitions
+            )
+        return batched_agent_shapley_values(
+            state,
+            projected,
+            self.predecessors[active],
+            active,
+            critic,
+            self.agent_ids,
+        )
 
     def _shapley_values(self, state, raw, critics):
-        q1, q2, projected = {}, {}, {}
+        projected, _ = self.coalition_projector.project_many(
+            state, raw, self.shapley_coalitions
+        )
+        q1, q2 = {}, {}
         for active in self.agent_ids:
             q1[active], q2[active] = self._agent_shapley_values(
-                state, raw, active, critics[active], projected)
+                state, raw, active, critics[active], projected=projected)
         return q1, q2
 
     def update(self, batch_size):
@@ -234,8 +186,7 @@ class Matd3ShapleyQ(Matd3Dispatch):
         self.update_steps += 1
         if self.update_steps % self.policy_delay == 0:
             losses, gradients, actor_diagnostics = {}, {}, {}
-            for active_index, active in enumerate(self.agent_ids):
-                critic = self.critics[active]
+            for active, critic in self.critics.items():
                 critic.requires_grad_(False)
                 try:
                     actions = []
@@ -243,12 +194,12 @@ class Matd3ShapleyQ(Matd3Dispatch):
                         with torch.set_grad_enabled(mg == active):
                             actions.append(self.actors[mg](batch["observations"][mg]))
                     joint_actions = torch.stack(actions, dim=1)
-                    with torch.no_grad():
-                        _, physical_plans = self.projector(state, joint_actions)
-                        proxy_mask = ((physical_plans[active_index]["dis_max"] <= 1e-9)
-                                      & (joint_actions[:, active_index, 0] > 0))
-                        proxy_rate = float(proxy_mask.float().mean())
-                    qphi1, _ = self._agent_shapley_values(state, joint_actions, active, critic)
+                    projected, proxy_masks = self.coalition_projector.project_many(
+                        state, joint_actions, self.shapley_coalitions
+                    )
+                    proxy_rate = float(proxy_masks[active].detach().float().mean())
+                    qphi1, _ = self._agent_shapley_values(
+                        state, joint_actions, active, critic, projected=projected)
                     actor_loss = -qphi1.mean()
                     if not torch.isfinite(actor_loss):
                         raise FloatingPointError(f"{active}: non-finite Actor loss")

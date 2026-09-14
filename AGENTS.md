@@ -182,5 +182,11 @@ Before reporting completion:
 6. Confirm figures include 15 PNG files and 15 PDF files unless the user requested PNG-only.
 7. Confirm results were written under the selected algorithm's own `outputs/<slug>/runs/` directory.
 8. Confirm no canonical MATD3 file changed for an experimental algorithm.
+9. For any change on a training hot path, check training speed explicitly. Prefer batching/caching
+   equivalent computations and remove redundant forward/projector calls before accepting a slowdown.
+10. Compare a repeatable throughput measure (for example `seconds_per_episode_mean` under the same
+    smoke command, or an isolated update benchmark) with the previous implementation and report any
+    material regression. Never claim a speedup by silently changing scientific hyperparameters such
+    as batch size, replay behavior, network width, reward, update frequency, or evaluation protocol.
 
 For detailed human-oriented guidance, see `docs/ALGORITHM_DEVELOPMENT.md`.
