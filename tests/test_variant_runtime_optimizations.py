@@ -9,6 +9,7 @@ import torch
 from torch import nn
 
 import algorithms.runtime_helpers as runtime_helpers
+from algorithms.pnn.runtime import optimized_pnn_update
 from algorithms.runtime_helpers import (
     diagnostics_due,
     forward_policy_actions,
@@ -88,17 +89,24 @@ def test_experimental_variants_actually_install_runtime_hot_path():
     from algorithms.pnn.algorithm import PNN
     from algorithms.pnn_transformer.algorithm import PnnTransformer
 
-    assert hasattr(runtime_helpers, "optimized_pnn_update")
     for cls in (Matd3Transformer, PNN, PnnTransformer):
         assert getattr(cls, "_runtime_optimizations_installed", False)
         assert cls.select_actions is select_single_dispatch_actions
     assert Matd3Transformer.update is optimized_single_dispatch_update
     assert PnnTransformer.update is optimized_single_dispatch_update
-    assert PNN.update is runtime_helpers.optimized_pnn_update
+    assert PNN.update is optimized_pnn_update
+
+
+class FakeReplay:
+    def __init__(self, storage) -> None:
+        self.storage = storage
+        self.rng = np.random.default_rng(11)
+
+    def __len__(self) -> int:
+        return len(self.storage)
 
 
 def test_packed_replay_sampler_transfers_agent_fields_as_shared_tensors():
-    assert hasattr(runtime_helpers, "sample_replay_batch_packed")
     ids = ["mg1", "mg2", "mg3"]
     storage = []
     for step in range(8):
@@ -111,10 +119,7 @@ def test_packed_replay_sampler_transfers_agent_fields_as_shared_tensors():
             next_global_state=np.full(7, step + 1, dtype=np.float32),
             done=False,
         ))
-    replay = SimpleNamespace(storage=storage, rng=np.random.default_rng(11), __len__=lambda: 8)
-    replay.__class__ = type("FakeReplay", (), {
-        "__len__": lambda self: len(self.storage),
-    })
+    replay = FakeReplay(storage)
 
     batch = runtime_helpers.sample_replay_batch_packed(replay, 4, ids, torch.device("cpu"))
 
