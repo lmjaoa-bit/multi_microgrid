@@ -20,6 +20,14 @@ def test_select_best_result_ignores_failed_candidates():
     assert select_best_result(rows)["label"] == "cuda"
 
 
+def test_select_best_result_keeps_compile_informational_only():
+    rows = [
+        {"label": "cuda", "status": "ok", "seconds_per_episode": 1.2, "compile_actors": False},
+        {"label": "cuda-compile", "status": "ok", "seconds_per_episode": 0.9, "compile_actors": True},
+    ]
+    assert select_best_result(rows)["label"] == "cuda"
+
+
 def test_estimate_training_seconds_scales_measured_episode_time():
     assert estimate_training_seconds(1.25, 500) == 625.0
     assert estimate_training_seconds(1.25, 5000) == 6250.0
