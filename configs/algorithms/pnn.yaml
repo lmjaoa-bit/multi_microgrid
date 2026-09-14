@@ -23,6 +23,7 @@ algorithm:
       mg3: 0.12
 runtime:
   cpu_threads: 1
+  interop_threads: 1
 training:
   episodes: 5000
   test_episodes: 55
