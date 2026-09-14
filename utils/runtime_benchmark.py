@@ -10,10 +10,17 @@ def cpu_thread_candidates(logical_cpus: int | None) -> list[int]:
 
 
 def select_best_result(results: Sequence[Mapping[str, object]]) -> Mapping[str, object] | None:
-    """Pick the fastest successful benchmark row by steady-state seconds/episode."""
+    """Pick the fastest successful eager candidate by steady-state seconds/episode.
+
+    torch.compile rows stay in the report as an experimental comparison, but are not selected
+    as the production recommendation because the normal training entry point intentionally
+    remains eager/checkpoint-compatible.
+    """
     valid = [
         row for row in results
-        if row.get("status") == "ok" and row.get("seconds_per_episode") is not None
+        if row.get("status") == "ok"
+        and row.get("seconds_per_episode") is not None
+        and not bool(row.get("compile_actors", False))
     ]
     if not valid:
         return None
