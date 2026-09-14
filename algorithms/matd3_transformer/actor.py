@@ -24,7 +24,9 @@ class TransformerDispatchActor(nn.Module):
          Discrete 24h periodic embedding for current hour and absolute clock hours of future forecasts.
       3. Future Forecast Horizon Embedding:
          Explicit, learnable position embedding for horizons t+1 ... t+H (H=forecast_horizon).
-         Preserves bidirectional self-attention (no causal masking) across forecast tokens.
+         Preserves bidirectional self-attention (no causal masking) across valid forecast tokens.
+         Forecast steps marked invalid by forecast_valid_t+k are zeroed and excluded through the
+         Transformer key-padding mask, so end-of-episode padding cannot influence dispatch.
       4. True Local Physical Residual Branch:
          Direct output of local_encoder(local_feats) bypasses the Transformer entirely and is
          concatenated with dispatch_rep (torch.cat([dispatch_rep, local_rep], dim=-1)) without .detach().
@@ -43,7 +45,7 @@ class TransformerDispatchActor(nn.Module):
         num_heads: int = 4,
         num_layers: int = 2,
         hidden_dims: tuple[int, ...] = (64, 32),
-        forecast_horizon: int = 4,
+        forecast_horizon: int = 8,
         attention_scale: float | None = None,  # accepted for backward compatibility only, ignored
     ) -> None:
         super().__init__()
@@ -116,6 +118,15 @@ class TransformerDispatchActor(nn.Module):
                     raise ValueError(f"Missing required forecast feature: {feat}")
                 forecast_indices[step_idx].append(schema_map[feat])
 
+        # Forecast-validity features are optional for compatibility with configs that do not mask
+        # beyond the episode. If any are present, require the complete t+1..t+H set.
+        forecast_valid_names = [f"forecast_valid_t+{k}" for k in range(1, self.forecast_horizon + 1)]
+        present_valid = [name in schema_map for name in forecast_valid_names]
+        if any(present_valid) and not all(present_valid):
+            missing = [name for name, present in zip(forecast_valid_names, present_valid) if not present]
+            raise ValueError(f"Incomplete forecast validity features: missing {missing}")
+        forecast_valid_indices = [schema_map[name] for name in forecast_valid_names] if all(present_valid) else []
+
         # Register index buffers for fast torch.index_select
         self.register_buffer("_hour_indices", torch.tensor(hour_indices, dtype=torch.long), persistent=False)
         self.register_buffer("_local_indices", torch.tensor(local_indices, dtype=torch.long), persistent=False)
@@ -124,9 +135,9 @@ class TransformerDispatchActor(nn.Module):
         self.register_buffer("_market_indices", torch.tensor(market_indices, dtype=torch.long), persistent=False)
         all_forecast_indices = [idx for sub in forecast_indices for idx in sub]
         self.register_buffer("_all_forecast_indices", torch.tensor(all_forecast_indices, dtype=torch.long), persistent=False)
+        self.register_buffer("_forecast_valid_indices", torch.tensor(forecast_valid_indices, dtype=torch.long), persistent=False)
         self.register_buffer("_step_offsets", torch.arange(1, self.forecast_horizon + 1, dtype=torch.long), persistent=False)
 
-        self.embed_dim = int(embed_dim)
         self.embed_dim = int(embed_dim)
         if self.embed_dim % num_heads != 0:
             raise ValueError(f"embed_dim ({self.embed_dim}) must be divisible by num_heads ({num_heads})")
@@ -195,7 +206,6 @@ class TransformerDispatchActor(nn.Module):
         )
 
         # 4. Bilinear Physical Interaction & Dispatch Backbone
-        # Bilinear interaction between attended dispatch representation and signed local physical state
         self.interact_norm = nn.LayerNorm(self.embed_dim)
 
         # Fused representation: dispatch_rep (embed_dim) + local_rep (embed_dim) + interact (embed_dim) = 3 * embed_dim
@@ -241,6 +251,12 @@ class TransformerDispatchActor(nn.Module):
         hour_feats = observation.index_select(-1, self._hour_indices)
         local_feats = observation.index_select(-1, self._local_indices)
         market_feats = observation.index_select(-1, self._market_indices)
+        if self._forecast_valid_indices.numel() > 0:
+            forecast_valid = observation.index_select(-1, self._forecast_valid_indices) > 0.5
+        else:
+            forecast_valid = torch.ones(
+                (batch_size, self.forecast_horizon), dtype=torch.bool, device=observation.device
+            )
 
         # 0. Dispatch decision query token [B, 1, embed_dim] with LayerNorm balancing
         dispatch_token = self.dispatch_norm(self.dispatch_token.expand(batch_size, 1, self.embed_dim))
@@ -264,6 +280,9 @@ class TransformerDispatchActor(nn.Module):
         horizon_ids = torch.arange(self.forecast_horizon, device=observation.device, dtype=torch.long)
         horizon_emb = self.horizon_embedding(horizon_ids)
         forecast_tokens = self.forecast_norm(f_tokens + horizon_emb.unsqueeze(0) + future_hour_emb)
+        # Invalid end-of-episode forecasts are not real observations. Zero them before assembling
+        # the sequence and also exclude them as attention keys at every Transformer layer.
+        forecast_tokens = forecast_tokens.masked_fill((~forecast_valid).unsqueeze(-1), 0.0)
 
         # 4. Disaggregated Peer Tokens with Spatial Identity Embeddings + LayerNorm balancing [B, num_peers, embed_dim]
         peer_all = observation.index_select(-1, self._all_peer_indices).reshape(batch_size, len(self.peers), 2)
@@ -278,8 +297,14 @@ class TransformerDispatchActor(nn.Module):
         # Order: 0: DISPATCH, 1: HOUR, 2: LOCAL, 3..(2+H): FORECASTS, (3+H)..(2+H+P): PEERS, (3+H+P): MARKET
         tokens = torch.cat([dispatch_token, hour_token, local_token, forecast_tokens, peer_tokens, market_token], dim=1)
 
+        # True means that token is excluded as an attention key/value. Non-forecast tokens remain valid.
+        attention_padding_mask = torch.zeros(
+            (batch_size, self.num_tokens), dtype=torch.bool, device=observation.device
+        )
+        attention_padding_mask[:, 3:3 + self.forecast_horizon] = ~forecast_valid
+
         # Multi-Head Self-Attention (2 Layers)
-        attended = self.transformer(tokens)
+        attended = self.transformer(tokens, src_key_padding_mask=attention_padding_mask)
 
         # Pooled dispatch representation from [DISPATCH] query token (Token 0)
         dispatch_rep = attended[:, 0, :]
@@ -298,11 +323,13 @@ class TransformerDispatchActor(nn.Module):
             l_norm = float(local_rep.norm(dim=-1).mean().detach().cpu())
             i_norm = float(interact.norm(dim=-1).mean().detach().cpu())
             ratio = float(d_norm / (l_norm + 1e-8))
+            valid_fraction = float(forecast_valid.float().mean().detach().cpu())
             self.last_diagnostics = {
                 "dispatch_norm": d_norm,
                 "local_norm": l_norm,
                 "interact_norm": i_norm,
                 "norm_ratio": ratio,
+                "forecast_valid_fraction": valid_fraction,
             }
 
         if is_single:
@@ -316,6 +343,8 @@ class TransformerDispatchActor(nn.Module):
                 "tokens": tokens.squeeze(0),
                 "forecast_tokens": forecast_tokens.squeeze(0),
                 "peer_tokens": peer_tokens.squeeze(0),
+                "forecast_valid": forecast_valid.squeeze(0),
+                "attention_padding_mask": attention_padding_mask.squeeze(0),
             }
         return {
             "action": action,
@@ -327,6 +356,8 @@ class TransformerDispatchActor(nn.Module):
             "tokens": tokens,
             "forecast_tokens": forecast_tokens,
             "peer_tokens": peer_tokens,
+            "forecast_valid": forecast_valid,
+            "attention_padding_mask": attention_padding_mask,
         }
 
     def forward(self, observation: torch.Tensor) -> torch.Tensor:
