@@ -43,12 +43,10 @@ def test_test1_actor_output_shape():
     obs, _ = env.reset(seed=42, deterministic=True)
     for mg in env.agent_ids:
         actor = model.actors[mg]
-        # Single sample input: [obs_dim] -> [action_dim]
         single_obs = torch.tensor(obs[mg], dtype=torch.float32)
         single_action = actor(single_obs)
         assert single_action.shape == (model.action_dim,)
 
-        # Batch input: [B, obs_dim] -> [B, action_dim]
         batch_obs = single_obs.unsqueeze(0).repeat(8, 1)
         batch_actions = actor(batch_obs)
         assert batch_actions.shape == (8, model.action_dim)
@@ -66,17 +64,18 @@ def test_test2_output_finite():
 
 
 def test_test3_horizon_embedding_shape():
-    """Test 3: Horizon embedding shape and forecast tokens shape."""
+    """Test 3: Eight-hour horizon embedding and forecast-token shape."""
     spec, env, settings, model = build_matd3_transformer()
     obs, _ = env.reset(seed=42, deterministic=True)
     for mg in env.agent_ids:
         actor = model.actors[mg]
         d_model = actor.embed_dim
-        assert actor.horizon_embedding.weight.shape == (4, d_model)
+        assert actor.forecast_horizon == 8
+        assert actor.horizon_embedding.weight.shape == (8, d_model)
 
         batch_obs = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0).repeat(8, 1)
         components = actor.forward_components(batch_obs)
-        assert components["forecast_tokens"].shape == (8, 4, d_model)
+        assert components["forecast_tokens"].shape == (8, 8, d_model)
 
 
 def test_invalid_forecast_tokens_do_not_affect_dispatch_representation():
@@ -92,7 +91,7 @@ def test_invalid_forecast_tokens_do_not_affect_dispatch_representation():
 
         # Mark the last two forecast steps invalid, then change only their values.
         # A correct key-padding mask makes the dispatch representation invariant.
-        masked_steps = range(max(1, actor.forecast_horizon - 1), actor.forecast_horizon + 1)
+        masked_steps = range(actor.forecast_horizon - 1, actor.forecast_horizon + 1)
         for k in masked_steps:
             valid_name = f"forecast_valid_t+{k}"
             assert valid_name in schema_map
@@ -100,14 +99,19 @@ def test_invalid_forecast_tokens_do_not_affect_dispatch_representation():
             perturbed[:, schema_map[valid_name]] = 0.0
 
             feature_names = [f"load_t+{k}", f"pv_t+{k}", f"wind_t+{k}", f"price_t+{k}"]
-            feature_names.extend(
-                f"{peer}_net_load_t+{k}" for peer in actor.peers
-            )
+            feature_names.extend(f"{peer}_net_load_t+{k}" for peer in actor.peers)
             for feature_name in feature_names:
                 perturbed[:, schema_map[feature_name]] += 100.0
 
         base_components = actor.forward_components(base)
         perturbed_components = actor.forward_components(perturbed)
+
+        for components in (base_components, perturbed_components):
+            padding_mask = components["attention_padding_mask"]
+            assert padding_mask.shape == (1, actor.num_tokens)
+            assert padding_mask[0, 3 + actor.forecast_horizon - 2]
+            assert padding_mask[0, 3 + actor.forecast_horizon - 1]
+
         assert torch.allclose(
             base_components["dispatch_rep"],
             perturbed_components["dispatch_rep"],
@@ -117,13 +121,13 @@ def test_invalid_forecast_tokens_do_not_affect_dispatch_representation():
 
 
 def test_test4_horizon_embedding_temporal_identity():
-    """Test 4: t+1 and t+4 possess distinct temporal embeddings."""
+    """Test 4: t+1 and t+8 possess distinct temporal embeddings."""
     spec, env, settings, model = build_matd3_transformer()
     for mg in env.agent_ids:
         actor = model.actors[mg]
         emb_t1 = actor.horizon_embedding.weight[0]
-        emb_t4 = actor.horizon_embedding.weight[3]
-        assert not torch.equal(emb_t1, emb_t4), "t+1 and t+4 share identical embedding weights"
+        emb_t8 = actor.horizon_embedding.weight[7]
+        assert not torch.equal(emb_t1, emb_t8), "t+1 and t+8 share identical embedding weights"
 
 
 def test_test5_real_local_residual():
@@ -136,22 +140,18 @@ def test_test5_real_local_residual():
         batch_obs = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0).repeat(4, 1)
         components = actor.forward_components(batch_obs)
 
-        # 1. Total fused dim is 3 * d_model (dispatch_rep + local_rep + interact)
         assert components["fused"].shape[-1] == 3 * d_model
 
-        # 2. The residual branch entering fusion must exactly match local_rep
         fused_local_part = components["fused"][:, d_model: 2 * d_model]
         assert torch.allclose(fused_local_part, components["local_rep"]), (
             "Residual branch does not match pre-Transformer local_encoder output"
         )
 
-        # 3. Bilinear interaction branch entering fusion matches interact
         fused_interact_part = components["fused"][:, 2 * d_model:]
         assert torch.allclose(fused_interact_part, components["interact"]), (
             "Interact branch does not match actor interact output"
         )
 
-        # 4. It must NOT equal the attended LOCAL token (attended[:, 2, :])
         attended_local_token = components["attended"][:, 2, :]
         assert not torch.allclose(fused_local_part, attended_local_token), (
             "Residual branch erroneously equals post-Transformer attended token"
@@ -166,11 +166,9 @@ def test_test6_no_attention_scale_dependency():
         actor = model.actors[mg]
         assert not hasattr(actor, "attention_scale"), "Actor still has attention_scale attribute"
 
-        # Check forward output is unaffected by any attention_scale argument
         t_obs = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0)
-        action1 = actor(t_obs)
+        actor(t_obs)
         components = actor.forward_components(t_obs)
-        # dispatch_rep must equal attended[:, 0, :] directly without scaling
         assert torch.allclose(components["dispatch_rep"], components["attended"][:, 0, :])
 
 
@@ -186,7 +184,6 @@ def test_test7_gradient_flow_all_branches():
         model.actor_optimizers[mg].zero_grad()
         loss.backward()
 
-        # Specific P0 modules must have gradients
         assert actor.horizon_embedding.weight.grad is not None
         assert torch.isfinite(actor.horizon_embedding.weight.grad).all()
 
@@ -198,7 +195,7 @@ def test_test7_gradient_flow_all_branches():
 
 
 def test_matd3_transformer_diagnostics():
-    """Verify representation norm diagnostics are recorded."""
+    """Verify representation norm and forecast-validity diagnostics are recorded."""
     spec, env, settings, model = build_matd3_transformer()
     obs, _ = env.reset(seed=42, deterministic=True)
     for mg in env.agent_ids:
@@ -209,9 +206,11 @@ def test_matd3_transformer_diagnostics():
         assert "dispatch_norm" in diag
         assert "local_norm" in diag
         assert "norm_ratio" in diag
+        assert "forecast_valid_fraction" in diag
         assert diag["dispatch_norm"] > 0.0
         assert diag["local_norm"] > 0.0
         assert diag["norm_ratio"] > 0.0
+        assert 0.0 <= diag["forecast_valid_fraction"] <= 1.0
 
 
 def test_matd3_transformer_save_and_load(tmp_path):
@@ -228,7 +227,7 @@ def test_matd3_transformer_save_and_load(tmp_path):
 
 
 def test_disaggregated_peer_tokens_and_layers():
-    """Verify Step 2 structural upgrade: 2-layer Transformer and disaggregated peer tokens."""
+    """Verify 2-layer Transformer, disaggregated peer tokens, and 8h sequence length."""
     spec, env, settings, model = build_matd3_transformer()
     obs, _ = env.reset(seed=42, deterministic=True)
     for mg in env.agent_ids:
@@ -241,15 +240,13 @@ def test_disaggregated_peer_tokens_and_layers():
         components = actor.forward_components(batch_obs)
         num_peers = len(actor.peers)
         assert components["peer_tokens"].shape == (8, num_peers, d_model)
-        # Sequence: 1 dispatch + 1 hour + 1 local + 4 forecast + 2 peers + 1 market = 10 tokens
-        assert components["tokens"].shape == (8, 10, d_model)
+        # Sequence: 1 dispatch + 1 hour + 1 local + 8 forecast + 2 peers + 1 market = 14 tokens
+        assert components["tokens"].shape == (8, 14, d_model)
 
-        # Spatial ID embeddings must be distinct for different microgrids
         p0_emb = actor.peer_id_embedding.weight[actor._peer_agent_indices[0]]
         p1_emb = actor.peer_id_embedding.weight[actor._peer_agent_indices[1]]
         assert not torch.equal(p0_emb, p1_emb), "Peer spatial embeddings must be distinct"
 
-        # Check gradients flow to peer_id_embedding
         loss = components["action"].pow(2).sum()
         model.actor_optimizers[mg].zero_grad()
         loss.backward()
@@ -258,7 +255,7 @@ def test_disaggregated_peer_tokens_and_layers():
 
 
 def test_token_norm_balance():
-    """Verify Token Norm Balancing: all 10 tokens entering self-attention have Euclidean norm ~ sqrt(D)."""
+    """Verify Token Norm Balancing for all 14 valid tokens at episode start."""
     spec, env, settings, model = build_matd3_transformer()
     obs, _ = env.reset(seed=42, deterministic=True)
     expected_norm = float(np.sqrt(32))  # ~5.657
@@ -266,15 +263,12 @@ def test_token_norm_balance():
         actor = model.actors[mg]
         t_obs = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0)
         components = actor.forward_components(t_obs)
-        tokens = components["tokens"][0]  # [10, 32]
+        tokens = components["tokens"][0]  # [14, 32] at t=0, all 8 forecast steps are valid
         token_norms = tokens.norm(dim=-1)
 
-        # Each token norm must be close to sqrt(D) ~ 5.66 (within 20%)
-        # Note: dispatch, hour, forecast, peer, and local all have direct LayerNorm (norm exactly 5.657 at init)
         for i, norm_val in enumerate(token_norms):
             val = float(norm_val.detach())
             assert 3.5 <= val <= 7.0, f"Token {i} norm out of expected range: {val}"
 
-        # Token norm ratio (max/min) must be strictly bounded below 2.0 (previously was 2.5x - 7.5 vs 2.9)
         ratio = float((token_norms.max() / token_norms.min()).detach())
         assert ratio < 1.6, f"Token norm ratio too high: {ratio}"
