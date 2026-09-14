@@ -20,6 +20,7 @@ import yaml
 from algorithms.registry import get_algorithm_spec
 from envs.multi_microgrid_env import MultiMicrogridEnv
 from utils.runtime_benchmark import (
+    apply_runtime_recommendation,
     cpu_thread_candidates,
     estimate_training_seconds,
     select_best_result,
@@ -34,18 +35,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Benchmark steady-state DRL training runtime on CPU and CUDA without changing algorithm math."
     )
-    parser.add_argument("--algorithm", default="matd3_transformer",
-                        choices=("matd3_transformer", "pnn", "pnn_transformer"))
-    parser.add_argument("--config", type=Path, default=PROJECT_ROOT / "configs" / "cooperative.yaml")
+    parser.add_argument(
+        "--algorithm",
+        default="matd3_transformer",
+        choices=("matd3_transformer", "pnn", "pnn_transformer"),
+    )
+    parser.add_argument(
+        "--config", type=Path, default=PROJECT_ROOT / "configs" / "cooperative.yaml"
+    )
     parser.add_argument("--algorithm-config", type=Path)
-    parser.add_argument("--episodes", type=int, default=5,
-                        help="Timed steady-state episodes per candidate after replay/model warmup")
+    parser.add_argument(
+        "--episodes",
+        type=int,
+        default=5,
+        help="Timed steady-state episodes per candidate after replay/model warmup",
+    )
     parser.add_argument("--warmup-updates", type=int, default=8)
     parser.add_argument("--sample-iterations", type=int, default=20)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--output", type=Path)
-    parser.add_argument("--no-compile", action="store_true",
-                        help="Skip the optional CUDA torch.compile candidate")
+    parser.add_argument(
+        "--no-compile",
+        action="store_true",
+        help="Skip the optional informational CUDA torch.compile candidate",
+    )
 
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--device", choices=("cpu", "cuda"), help=argparse.SUPPRESS)
@@ -228,13 +241,21 @@ def _worker(args: argparse.Namespace) -> dict[str, object]:
     return result
 
 
-def _candidate_label(device: str, cpu_threads: int, interop_threads: int, compile_actors: bool) -> str:
+def _candidate_label(
+    device: str, cpu_threads: int, interop_threads: int, compile_actors: bool
+) -> str:
     suffix = "-compile" if compile_actors else ""
     return f"{device}-cpu{cpu_threads}-interop{interop_threads}{suffix}"
 
 
-def _run_candidate(args: argparse.Namespace, *, device: str, cpu_threads: int,
-                   interop_threads: int, compile_actors: bool = False) -> dict[str, object]:
+def _run_candidate(
+    args: argparse.Namespace,
+    *,
+    device: str,
+    cpu_threads: int,
+    interop_threads: int,
+    compile_actors: bool = False,
+) -> dict[str, object]:
     command = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -311,7 +332,10 @@ def _driver(args: argparse.Namespace) -> int:
     cuda_available = torch.cuda.is_available()
     results: list[dict[str, object]] = []
 
-    print(f"Runtime benchmark: {args.algorithm} | logical CPUs={logical_cpus} | CUDA={cuda_available}")
+    print(
+        f"Runtime benchmark: {args.algorithm} | logical CPUs={logical_cpus} | "
+        f"CUDA={cuda_available}"
+    )
     print("Stage 1: CPU-thread sweep (interop=1) on every available device")
     for device in (["cpu", "cuda"] if cuda_available else ["cpu"]):
         for cpu_threads in threads:
@@ -340,13 +364,15 @@ def _driver(args: argparse.Namespace) -> int:
 
     if cuda_available and not args.no_compile:
         successful_cuda = [
-            row for row in results
-            if row.get("status") == "ok" and row.get("device") == "cuda"
+            row
+            for row in results
+            if row.get("status") == "ok"
+            and row.get("device") == "cuda"
             and not row.get("compile_actors")
         ]
         best_cuda = select_best_result(successful_cuda)
         if best_cuda is not None:
-            print("Stage 3: optional CUDA torch.compile Actor candidate")
+            print("Stage 3: informational CUDA torch.compile Actor candidate")
             row = _run_candidate(
                 args,
                 device="cuda",
@@ -361,11 +387,23 @@ def _driver(args: argparse.Namespace) -> int:
     assert best is not None
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     output = args.output or (
-        PROJECT_ROOT / "outputs" / "runtime_benchmarks" /
-        f"{args.algorithm}_{timestamp}.json"
+        PROJECT_ROOT
+        / "outputs"
+        / "runtime_benchmarks"
+        / f"{args.algorithm}_{timestamp}.json"
     )
     output = Path(output)
     output.parent.mkdir(parents=True, exist_ok=True)
+
+    spec = get_algorithm_spec(args.algorithm)
+    source_algorithm_path = Path(args.algorithm_config or spec.default_config_path).resolve()
+    source_algorithm_cfg = yaml.safe_load(source_algorithm_path.read_text(encoding="utf-8"))
+    recommended_cfg = apply_runtime_recommendation(source_algorithm_cfg, best)
+    recommended_config_path = output.with_name(output.stem + "_recommended.yaml")
+    recommended_config_path.write_text(
+        yaml.safe_dump(recommended_cfg, allow_unicode=True, sort_keys=False),
+        encoding="utf-8",
+    )
 
     report = {
         "algorithm": args.algorithm,
@@ -379,34 +417,44 @@ def _driver(args: argparse.Namespace) -> int:
             "cpu_threads": best["cpu_threads"],
             "interop_threads": best["interop_threads"],
         },
-        "recommended_compile_actors": bool(best.get("compile_actors", False)),
+        "recommended_algorithm_config": str(recommended_config_path),
+        "recommended_compile_actors": False,
         "estimated_500_seconds": best["estimated_500_seconds"],
         "estimated_5000_seconds": best["estimated_5000_seconds"],
     }
     output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
 
-    print("\nBEST")
+    training_command = (
+        f'python scripts/run_experiment.py --algorithm {args.algorithm} '
+        f'--device {best["device"]} --algorithm-config "{recommended_config_path}"'
+    )
+
+    print("\nBEST PRODUCTION-EAGER RESULT")
     _print_row(dict(best))
     print(f"Recommended device: {best['device']}")
     print(
         "Recommended runtime: "
         f"cpu_threads={best['cpu_threads']}, interop_threads={best['interop_threads']}"
     )
-    print(f"Actor compile: {bool(best.get('compile_actors', False))}")
     print(f"Estimated 500 episodes: {float(best['estimated_500_seconds']) / 60.0:.2f} min")
     print(f"Estimated 5000 episodes: {float(best['estimated_5000_seconds']) / 3600.0:.2f} h")
     print(f"JSON report: {output}")
+    print(f"Recommended config: {recommended_config_path}")
+    print("Recommended training command:")
+    print(training_command)
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.episodes < 1 or args.warmup_updates < 0 or args.sample_iterations < 1:
-        raise ValueError("episodes/sample-iterations must be positive and warmup-updates non-negative")
+        raise ValueError(
+            "episodes/sample-iterations must be positive and warmup-updates non-negative"
+        )
     if args.worker:
         try:
             result = _worker(args)
-        except Exception as exc:  # worker must return a machine-readable failure to the driver
+        except Exception as exc:
             print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
             return 2
         print(RESULT_PREFIX + json.dumps(result, ensure_ascii=False))
