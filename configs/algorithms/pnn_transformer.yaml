@@ -18,12 +18,13 @@ algorithm:
   replay_capacity: 200000
   warmup_steps: 1000
   exploration_noise: 0.15
+  diagnostics_interval: 100
   network:
     embed_dim: 32
     num_heads: 4
     num_layers: 2
     hidden_dims: [128, 64]
-    forecast_horizon: 4
+    forecast_horizon: 8
     product_scale:
       mg1: 0.08
       mg2: 0.20
@@ -44,4 +45,3 @@ logging:
   dashboard: true
   dashboard_refresh_hz: 4
   rolling_windows: [50, 100, 500]
-
