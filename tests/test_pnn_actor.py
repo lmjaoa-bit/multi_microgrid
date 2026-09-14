@@ -39,7 +39,12 @@ def test_pnn_initialization_and_forward():
         assert actor.feature_dim == 32
         assert -1.0 <= float(actions[mg][0]) <= 1.0
 
-    # Test diagnostics
+        # Rollout deliberately disables diagnostics on the training hot path.
+        # Exercise diagnostics explicitly so this test validates the feature itself
+        # without reintroducing per-step GPU/CPU synchronization overhead.
+        t_obs = torch.tensor(observations[mg], dtype=torch.float32).unsqueeze(0)
+        actor(t_obs, collect_diagnostics=True)
+
     prods = pnn.product_diagnostics()
     for mg in env.agent_ids:
         assert "linear_signal_norm" in prods[mg]
