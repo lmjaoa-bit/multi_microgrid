@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from algorithms.matd3_transformer.algorithm import Matd3Transformer
 from algorithms.registry import AlgorithmSpec, PROJECT_ROOT
+from algorithms.runtime_helpers import install_single_dispatch_runtime_optimizations
 
+
+install_single_dispatch_runtime_optimizations(
+    Matd3Transformer, variant="matd3_transformer"
+)
 
 ALGORITHM_SPEC = AlgorithmSpec(
     slug="matd3_transformer",
