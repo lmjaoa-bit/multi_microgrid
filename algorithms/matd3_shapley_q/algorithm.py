@@ -14,6 +14,11 @@ from algorithms.matd3_dispatch.algorithm import Matd3Dispatch
 from algorithms.matd3_shapley_q.coalition import enumerate_predecessor_coalitions, shapley_weight
 from algorithms.matd3_shapley_q.independent_baseline import IndependentBaselineEvaluator
 from algorithms.matd3_shapley_q.replay_buffer import ShapleyReplayBuffer
+from algorithms.matd3_shapley_q.stability import (
+    clip_module_grad_norm,
+    conservative_cooperation_q,
+    lower_soc_discharge_gradient_proxy,
+)
 
 
 class CoalitionAwareProjector:
@@ -72,9 +77,13 @@ class CoalitionAwareProjector:
             offer = torch.minimum(plan["uncapped_offer"], cap)
             scale = max(self.projector.batteries[mg]["max_charge_kw"],
                         self.projector.batteries[mg]["max_discharge_kw"])
-            channels.append(torch.stack([effective[:, i, 0], offer / scale], dim=-1))
+            effective_local, proxy_mask = lower_soc_discharge_gradient_proxy(
+                effective[:, i, 0], raw[:, i, 0], plan["dis_max"]
+            )
+            channels.append(torch.stack([effective_local, offer / scale], dim=-1))
             plan.update(in_coalition=member, cap=cap, offer=offer,
-                        mask=cap > 1e-9, peer_cap=peer_cap)
+                        mask=cap > 1e-9, peer_cap=peer_cap,
+                        lower_soc_discharge_proxy=proxy_mask)
         return torch.stack(channels, dim=1), plans
 
 
@@ -102,6 +111,9 @@ class Matd3ShapleyQ(Matd3Dispatch):
         if len(self.agent_ids) != 3:
             raise ValueError("MATD3-ShapleyQ requires exactly three agents")
         settings = config.get("algorithm", config)
+        self.critic_max_grad_norm = float(settings.get("critic_max_grad_norm", 10.0))
+        if not np.isfinite(self.critic_max_grad_norm) or self.critic_max_grad_norm <= 0:
+            raise ValueError("critic_max_grad_norm must be positive and finite")
         self.coalition_projector = CoalitionAwareProjector(self.projector, self.agent_ids)
         self.critics = nn.ModuleDict({
             mg: TwinMarginalCritic(env.global_state_dim, len(self.agent_ids),
@@ -134,6 +146,7 @@ class Matd3ShapleyQ(Matd3Dispatch):
 
     @staticmethod
     def _conservative_shapley_sum(q1, q2, agent_ids):
+        """Legacy helper kept for compatibility; production uses complete twin-Q reduction."""
         return sum(torch.minimum(q1[mg], q2[mg]) for mg in agent_ids)
 
     def _agent_shapley_values(self, state, raw, active, critic, projected=None):
@@ -172,31 +185,38 @@ class Matd3ShapleyQ(Matd3Dispatch):
                 target_parts.append((action + noise).clamp(-1, 1))
             tgt_qphi1, tgt_qphi2 = self._shapley_values(
                 next_state, torch.stack(target_parts, dim=1), self.target_critics)
-            tgt_qcoop_min = self._conservative_shapley_sum(tgt_qphi1, tgt_qphi2, self.agent_ids)
+            _, _, tgt_qcoop_min, _ = conservative_cooperation_q(
+                tgt_qphi1, tgt_qphi2, self.agent_ids
+            )
             continuation = (1 - batch["done"]) * self.gamma
             y_coop = batch["cooperation_surplus_reward"] + continuation * tgt_qcoop_min
             grand_target = batch["team_reward"] + continuation * (
                 batch["next_independent_return_to_go"] + tgt_qcoop_min)
         cur_qphi1, cur_qphi2 = self._shapley_values(state, raw, self.critics)
-        qcoop_current = self._conservative_shapley_sum(cur_qphi1, cur_qphi2, self.agent_ids)
+        qcoop1_current, qcoop2_current, qcoop_current, selected_parts = conservative_cooperation_q(
+            cur_qphi1, cur_qphi2, self.agent_ids
+        )
         residual = batch["independent_return_to_go"] + qcoop_current - grand_target
-        loss_q1 = nn.functional.mse_loss(sum(cur_qphi1.values()), y_coop)
-        loss_q2 = nn.functional.mse_loss(sum(cur_qphi2.values()), y_coop)
+        loss_q1 = nn.functional.mse_loss(qcoop1_current, y_coop)
+        loss_q2 = nn.functional.mse_loss(qcoop2_current, y_coop)
         loss = loss_q1 + loss_q2
         if not torch.isfinite(loss) or not torch.isfinite(residual).all():
             raise FloatingPointError("Non-finite Shapley critic loss or grand decomposition diagnostic")
         for optimizer in self.critic_optimizers.values():
             optimizer.zero_grad(set_to_none=True)
         loss.backward()
-        critic_grads = {mg: self._gradient_norm(critic) for mg, critic in self.critics.items()}
-        if not all(np.isfinite(v) for v in critic_grads.values()):
-            raise FloatingPointError("Non-finite Shapley critic gradient")
+        critic_grads, critic_post_grads, critic_clip_flags = {}, {}, {}
+        for mg, critic in self.critics.items():
+            pre, post, clipped = clip_module_grad_norm(critic, self.critic_max_grad_norm)
+            critic_grads[mg] = pre
+            critic_post_grads[mg] = post
+            critic_clip_flags[mg] = clipped
         for optimizer in self.critic_optimizers.values():
             optimizer.step()
         mean = lambda tensor: float(tensor.detach().mean())
         td = y_coop - qcoop_current
         diagnostics = {
-            **{f"shapley_q_{mg}": mean(torch.minimum(cur_qphi1[mg], cur_qphi2[mg])) for mg in self.agent_ids},
+            **{f"shapley_q_{mg}": mean(selected_parts[mg]) for mg in self.agent_ids},
             "shapley_q_sum": mean(qcoop_current),
             "cooperation_surplus_q_target": mean(y_coop),
             "efficiency_residual": mean(qcoop_current - y_coop),
@@ -206,14 +226,15 @@ class Matd3ShapleyQ(Matd3Dispatch):
             raise FloatingPointError("Non-finite Shapley diagnostic")
         metrics = dict(critic_loss=float(loss.detach()), critic1_loss=float(loss_q1.detach()),
             critic2_loss=float(loss_q2.detach()), critic_grad_norm=float(np.mean(list(critic_grads.values()))),
-            critic_grad_norms=critic_grads, q1_mean=mean(sum(cur_qphi1.values())),
-            q2_mean=mean(sum(cur_qphi2.values())), target_q_mean=mean(y_coop),
-            td_error_mean=mean(td), td_error_std=float(td.detach().std(unbiased=False)),
+            critic_grad_norms=critic_grads, q1_mean=mean(qcoop1_current),
+            q2_mean=mean(qcoop2_current), q1_q2_gap=mean((qcoop1_current - qcoop2_current).abs()),
+            target_q_mean=mean(y_coop), td_error_mean=mean(td),
+            td_error_std=float(td.detach().std(unbiased=False)),
             algorithm_diagnostics=diagnostics, **diagnostics)
         self.update_steps += 1
         if self.update_steps % self.policy_delay == 0:
-            losses, gradients = {}, {}
-            for active in self.agent_ids:
+            losses, gradients, actor_diagnostics = {}, {}, {}
+            for active_index, active in enumerate(self.agent_ids):
                 critic = self.critics[active]
                 critic.requires_grad_(False)
                 try:
@@ -221,7 +242,13 @@ class Matd3ShapleyQ(Matd3Dispatch):
                     for mg in self.agent_ids:
                         with torch.set_grad_enabled(mg == active):
                             actions.append(self.actors[mg](batch["observations"][mg]))
-                    qphi1, _ = self._agent_shapley_values(state, torch.stack(actions, dim=1), active, critic)
+                    joint_actions = torch.stack(actions, dim=1)
+                    with torch.no_grad():
+                        _, physical_plans = self.projector(state, joint_actions)
+                        proxy_mask = ((physical_plans[active_index]["dis_max"] <= 1e-9)
+                                      & (joint_actions[:, active_index, 0] > 0))
+                        proxy_rate = float(proxy_mask.float().mean())
+                    qphi1, _ = self._agent_shapley_values(state, joint_actions, active, critic)
                     actor_loss = -qphi1.mean()
                     if not torch.isfinite(actor_loss):
                         raise FloatingPointError(f"{active}: non-finite Actor loss")
@@ -232,18 +259,27 @@ class Matd3ShapleyQ(Matd3Dispatch):
                         self.actor_max_grad_norm, error_if_nonfinite=True)
                     self.actor_optimizers[active].step()
                     losses[active] = float(actor_loss.detach())
+                    actor_diagnostics[active] = {
+                        "lower_soc_discharge_proxy_rate": proxy_rate,
+                        "critic_pre_clip_grad_norm": critic_grads[active],
+                        "critic_post_clip_grad_norm": critic_post_grads[active],
+                        "critic_clip_applied": float(critic_clip_flags[active]),
+                    }
                 finally:
                     critic.requires_grad_(True)
             self._soft_update(self.actors, self.target_actors)
             self._soft_update(self.critics, self.target_critics)
             metrics.update(actor_losses=losses, actor_loss=float(np.mean(list(losses.values()))),
-                actor_grad_norms=gradients, actor_grad_norm=float(np.mean(list(gradients.values()))))
+                actor_grad_norms=gradients, actor_grad_norm=float(np.mean(list(gradients.values()))),
+                actor_diagnostics=actor_diagnostics)
         metrics["actor_parameter_counts"] = self.actor_parameter_counts()
         return metrics
 
     def _checkpoint_metadata(self):
         return dict(algorithm_slug="matd3_shapley_q", shapley_q_version="surplus_q_v2",
             value_definition="cooperation_surplus", action_semantics="single_dispatch_v1",
+            critic_reduction="full_cooperation_q_min_v1",
+            boundary_gradient_proxy="lower_soc_discharge_st_v1",
             projection_signature=self.projection_signature, state_schema=self.state_schema,
             observation_schemas=self.observation_schemas, baseline=self.baseline_config)
 
