@@ -10,6 +10,7 @@ from torch import nn
 
 import algorithms.runtime_helpers as runtime_helpers
 from algorithms.pnn.runtime import optimized_pnn_update
+from algorithms.registry import get_algorithm_spec
 from algorithms.runtime_helpers import (
     diagnostics_due,
     forward_policy_actions,
@@ -84,17 +85,17 @@ def test_diagnostics_due_is_sparse_and_can_be_disabled():
     assert not diagnostics_due(update_steps=100, interval=0)
 
 
-def test_experimental_variants_actually_install_runtime_hot_path():
-    from algorithms.matd3_transformer.algorithm import Matd3Transformer
-    from algorithms.pnn.algorithm import PNN
-    from algorithms.pnn_transformer.algorithm import PnnTransformer
+def test_registered_experimental_variants_install_expected_runtime_hot_path():
+    matd3_transformer = get_algorithm_spec("matd3_transformer").algorithm_class
+    pnn = get_algorithm_spec("pnn").algorithm_class
+    pnn_transformer = get_algorithm_spec("pnn_transformer").algorithm_class
 
-    for cls in (Matd3Transformer, PNN, PnnTransformer):
+    for cls in (matd3_transformer, pnn, pnn_transformer):
         assert getattr(cls, "_runtime_optimizations_installed", False)
         assert cls.select_actions is select_single_dispatch_actions
-    assert Matd3Transformer.update is optimized_single_dispatch_update
-    assert PnnTransformer.update is optimized_single_dispatch_update
-    assert PNN.update is optimized_pnn_update
+    assert matd3_transformer.update is optimized_single_dispatch_update
+    assert pnn_transformer.update is optimized_single_dispatch_update
+    assert pnn.update is optimized_pnn_update
 
 
 class FakeReplay:
