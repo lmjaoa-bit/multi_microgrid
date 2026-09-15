@@ -29,12 +29,27 @@ class DataManager:
             root = Path(self.config.get("_project_root", "."))
             path = root / path
         self.df = pd.read_csv(path)
+        self.data_quality_flags: list[str] = []
+        self.temperature_columns: list[str] = []
         ts_col = data_cfg.get("timestamp_col", "timestamp")
         required = {ts_col, "load_kw", "buy_price_per_kwh", "ghi_w_per_m2", "wind_speed_mps"}
+        allow_temperature_fallback = bool(data_cfg.get("allow_temperature_fallback", False))
         for microgrid in self.config["microgrids"]:
             renewable = microgrid.get("renewables", {})
             required.add(str(renewable.get("ghi_column", "ghi_w_per_m2")))
             required.add(str(renewable.get("wind_speed_column", "wind_speed_mps")))
+            dr = microgrid.get("dr", {})
+            if str(dr.get("type", "")) == "commercial_hvac":
+                temperature_column = str(dr.get("temperature_column", "temperature_c"))
+                self.temperature_columns.append(temperature_column)
+                if temperature_column not in self.df.columns:
+                    if allow_temperature_fallback and "temperature_c" in self.df.columns:
+                        self.df[temperature_column] = self.df["temperature_c"]
+                        self.data_quality_flags.append(
+                            f"legacy_temperature_fallback:{temperature_column}<-temperature_c"
+                        )
+                    else:
+                        required.add(temperature_column)
         missing = required - set(self.df.columns)
         if missing:
             raise ValueError(f"Data split {self.split!r} is missing columns: {sorted(missing)}")
@@ -79,23 +94,28 @@ class DataManager:
             self.df[sell_price_column(microgrid_id)] = sell
 
     def _validate_frame(self) -> None:
-        numeric = ["load_kw", "buy_price_per_kwh", "sell_price_per_kwh", "ghi_w_per_m2", "wind_speed_mps"]
+        nonnegative = [
+            "load_kw", "buy_price_per_kwh", "sell_price_per_kwh",
+            "ghi_w_per_m2", "wind_speed_mps",
+        ]
         for microgrid in self.config["microgrids"]:
             microgrid_id = str(microgrid["id"])
             renewable = microgrid.get("renewables", {})
-            numeric.extend([
+            nonnegative.extend([
                 str(renewable.get("ghi_column", "ghi_w_per_m2")),
                 str(renewable.get("wind_speed_column", "wind_speed_mps")),
                 buy_price_column(microgrid_id),
                 sell_price_column(microgrid_id),
             ])
-        numeric = list(dict.fromkeys(numeric))
+        nonnegative = list(dict.fromkeys(nonnegative))
+        signed_numeric = list(dict.fromkeys(self.temperature_columns))
         if "grid_carbon_factor_kg_per_kwh" in self.df:
-            numeric.append("grid_carbon_factor_kg_per_kwh")
+            nonnegative.append("grid_carbon_factor_kg_per_kwh")
+        numeric = list(dict.fromkeys(nonnegative + signed_numeric))
         values = self.df[numeric].apply(pd.to_numeric, errors="coerce")
         if not np.isfinite(values.to_numpy(dtype=np.float64)).all():
             raise ValueError(f"Data split {self.split!r} contains NaN or infinite physical/price values.")
-        for column in numeric:
+        for column in nonnegative:
             if (values[column] < 0.0).any():
                 raise ValueError(f"Data split {self.split!r} contains negative values in {column}.")
         if (values["sell_price_per_kwh"] > values["buy_price_per_kwh"] + 1e-12).any():
@@ -139,12 +159,7 @@ class DataManager:
         day: str | pd.Timestamp | None = None,
         future_horizon: int = 0,
     ) -> pd.DataFrame:
-        """Return the 24-hour episode plus contiguous next-day forecast context.
-
-        At a discontinuous split boundary the available context may be shorter; the
-        observation builder then applies its explicit last-value fallback.
-        """
-
+        """Return the natural-day episode plus contiguous forecast context."""
         episode = self.get_day(day)
         horizon = max(0, int(future_horizon))
         if horizon == 0:
