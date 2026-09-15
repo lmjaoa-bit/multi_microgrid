@@ -12,6 +12,8 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 
+from core.tariffs import prices_from_row
+
 
 EPSILON = 1e-9
 DEFAULT_TOLERANCE = 1e-7
@@ -171,6 +173,19 @@ class EpisodeMetricsCollector:
         }
         self.p2p_prices: list[float] = []
         self.p2p_total = 0.0
+        self.p2p_unconstrained_total = 0.0
+        self.p2p_blocked_by_capacity = 0.0
+        self.physical_pairs = {
+            f"{ids[i]}_{ids[j]}": (ids[i], ids[j])
+            for i in range(len(ids)) for j in range(i + 1, len(ids))
+        }
+        self.pair_saturation_steps = {key: 0 for key in self.physical_pairs}
+        self._last_p2p_capacity_diag: dict[str, Any] = {
+            "unconstrained_total_energy_kwh": 0.0,
+            "blocked_by_pair_capacity_kwh": 0.0,
+            "pair_usage_kw": {key: 0.0 for key in self.physical_pairs},
+            "pair_saturated": {key: False for key in self.physical_pairs},
+        }
         self.p2p_payment = {mg: 0.0 for mg in ids}
         self.sharing_action_masked_steps = {mg: 0 for mg in ids}
         self.ess_offer_steps = {mg: 0 for mg in ids}
@@ -280,6 +295,71 @@ class EpisodeMetricsCollector:
         self.dr_last[mg] = {key: float(value) for key, value in state_after.items()
                             if isinstance(value, (int, float, np.number, bool))}
 
+    def _p2p_capacity_diagnostics(self, info: Mapping[str, Any]) -> dict[str, Any]:
+        """Re-clear the same DR offers without pair limits for diagnostics only."""
+        p2p = info["p2p"]
+        actual_total = float(p2p.get("total_p2p_kwh", 0.0))
+        pair_capacity = float(getattr(self.env.energy_pool, "pair_capacity_kw", float("inf")))
+        pair_usage = {key: 0.0 for key in self.physical_pairs}
+        flows = p2p.get("pair_flows_kwh", {})
+        dt = max(float(self.env.delta_t), EPSILON)
+        for key, (first, second) in self.physical_pairs.items():
+            energy = float(flows.get(f"{first}->{second}", 0.0)) + float(
+                flows.get(f"{second}->{first}", 0.0)
+            )
+            pair_usage[key] = energy / dt
+        pair_saturated = {
+            key: bool(
+                math.isfinite(pair_capacity)
+                and pair_usage[key] >= pair_capacity - self.tolerance
+            )
+            for key in self.physical_pairs
+        }
+
+        if not self.dr_enabled or not hasattr(
+            self.env.energy_pool, "allocate_structured_unconstrained"
+        ):
+            return {
+                "unconstrained_total_energy_kwh": actual_total,
+                "blocked_by_pair_capacity_kwh": 0.0,
+                "pair_usage_kw": pair_usage,
+                "pair_saturated": pair_saturated,
+            }
+
+        plans = info["plans"]
+        required = (
+            "renewable_p2p_offer_kw", "ess_p2p_offer_kw",
+            "p2p_load_demand_kw", "p2p_charge_demand_kw",
+        )
+        if any(any(field not in plans[mg] for field in required) for mg in self.agent_ids):
+            return {
+                "unconstrained_total_energy_kwh": actual_total,
+                "blocked_by_pair_capacity_kwh": 0.0,
+                "pair_usage_kw": pair_usage,
+                "pair_saturated": pair_saturated,
+            }
+
+        if self.env.episode_df is None:
+            raise RuntimeError("P2P capacity diagnostics require an active episode")
+        row_index = min(max(self.steps - 1, 0), len(self.env.episode_df) - 1)
+        row = self.env.episode_df.iloc[row_index]
+        prices = {mg: prices_from_row(row, mg) for mg in self.agent_ids}
+        unconstrained = self.env.energy_pool.allocate_structured_unconstrained(
+            {mg: float(plans[mg]["renewable_p2p_offer_kw"]) for mg in self.agent_ids},
+            {mg: float(plans[mg]["ess_p2p_offer_kw"]) for mg in self.agent_ids},
+            {mg: float(plans[mg]["p2p_load_demand_kw"]) for mg in self.agent_ids},
+            {mg: float(plans[mg]["p2p_charge_demand_kw"]) for mg in self.agent_ids},
+            {mg: prices[mg][1] for mg in self.agent_ids},
+            {mg: prices[mg][0] for mg in self.agent_ids},
+        )
+        unconstrained_total = float(unconstrained.total_p2p_kwh)
+        return {
+            "unconstrained_total_energy_kwh": unconstrained_total,
+            "blocked_by_pair_capacity_kwh": max(0.0, unconstrained_total - actual_total),
+            "pair_usage_kw": pair_usage,
+            "pair_saturated": pair_saturated,
+        }
+
     def _constraint_step(self, info: Mapping[str, Any]) -> dict[str, Any]:
         soc_by_mg: dict[str, float] = {}
         battery_by_mg: dict[str, float] = {}
@@ -362,6 +442,16 @@ class EpisodeMetricsCollector:
 
         p2p = info["p2p"]
         self.p2p_total += float(p2p.get("total_p2p_kwh", 0.0))
+        capacity_diag = self._p2p_capacity_diagnostics(info)
+        self._last_p2p_capacity_diag = capacity_diag
+        self.p2p_unconstrained_total += float(
+            capacity_diag["unconstrained_total_energy_kwh"]
+        )
+        self.p2p_blocked_by_capacity += float(
+            capacity_diag["blocked_by_pair_capacity_kwh"]
+        )
+        for key, saturated in capacity_diag["pair_saturated"].items():
+            self.pair_saturation_steps[key] += int(bool(saturated))
         for key, energy in p2p.get("pair_flows_kwh", {}).items():
             seller, buyer = str(key).split("->", 1)
             self.pair_energy[f"{seller}_to_{buyer}"] += float(energy)
@@ -401,7 +491,18 @@ class EpisodeMetricsCollector:
             hour = self.steps - 1
         row: dict[str, Any] = {
             "date": timestamp[:10], "hour": hour, "timestep": self.steps - 1,
+            "p2p_unconstrained_total_energy_kwh": float(
+                self._last_p2p_capacity_diag["unconstrained_total_energy_kwh"]
+            ),
+            "p2p_blocked_by_pair_capacity_kwh": float(
+                self._last_p2p_capacity_diag["blocked_by_pair_capacity_kwh"]
+            ),
         }
+        for pair, usage in self._last_p2p_capacity_diag["pair_usage_kw"].items():
+            row[f"p2p_{pair}_usage_kw"] = float(usage)
+            row[f"p2p_{pair}_saturated"] = int(bool(
+                self._last_p2p_capacity_diag["pair_saturated"][pair]
+            ))
         for mg in self.agent_ids:
             plan = info["plans"][mg]
             settlement = info["settlements"][mg]
@@ -637,8 +738,22 @@ class EpisodeMetricsCollector:
 
         p2p_buy = {mg: energy[mg]["p2p_buy_kwh"] for mg in self.agent_ids}
         p2p_sell = {mg: energy[mg]["p2p_sell_kwh"] for mg in self.agent_ids}
+        pair_capacity = float(
+            getattr(self.env.energy_pool, "pair_capacity_kw", float("inf"))
+        )
         p2p_stats = {
             "total_energy_kwh": float(self.p2p_total),
+            "pair_capacity_kw": pair_capacity,
+            "unconstrained_total_energy_kwh": float(self.p2p_unconstrained_total),
+            "blocked_by_pair_capacity_kwh": float(self.p2p_blocked_by_capacity),
+            "blocked_energy_rate": safe_ratio(
+                self.p2p_blocked_by_capacity, self.p2p_unconstrained_total
+            ),
+            "pair_saturation_rate_by_pair": {
+                pair: safe_ratio(count, self.steps)
+                for pair, count in self.pair_saturation_steps.items()
+            },
+            "pair_saturation_step_count_by_pair": dict(self.pair_saturation_steps),
             "pair_energy_kwh": dict(self.pair_energy),
             "buy_energy_by_microgrid_kwh": p2p_buy,
             "sell_energy_by_microgrid_kwh": p2p_sell,
