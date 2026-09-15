@@ -76,11 +76,13 @@ def test_feasible_ess_charge_is_not_projection_just_because_p2p_is_masked():
     _, _, _, info = env.step(actions)
     plan = info["plans"]["mg1"]
     max_charge_kw = float(env.cfg_by_id["mg1"]["battery"]["max_charge_kw"])
+    expected_power_kw = raw_ess * max_charge_kw
 
-    assert plan["dispatch_requested_power_kw"] == pytest.approx(
-        raw_ess * max_charge_kw, abs=1e-7
-    )
+    assert plan["raw_ess_requested_power_kw"] == pytest.approx(expected_power_kw, abs=1e-7)
+    assert plan["projected_ess_requested_power_kw"] == pytest.approx(expected_power_kw, abs=1e-7)
+    assert plan["dispatch_requested_power_kw"] == pytest.approx(expected_power_kw, abs=1e-7)
     assert plan["sharing_action_masked"]
+    assert plan["ess_projection_delta_kw"] == pytest.approx(0.0, abs=1e-7)
     assert plan["ess_projection_delta"] == pytest.approx(0.0, abs=1e-7)
     assert not plan["ess_projected"]
 
