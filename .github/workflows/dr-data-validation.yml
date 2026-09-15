@@ -53,4 +53,4 @@ jobs:
           print('regional-data smoke passed')
           PY
       - name: Calibrate MG2 annual reference HVAC load
-        run: python scripts/calibrate_hvac_load.py --output /tmp/mg2_hvac_calibration.json
+        run: python scripts/calibrate_hvac_load.py --solve --desired-total-kw 80 --output /tmp/mg2_hvac_calibration.json
