@@ -26,7 +26,7 @@ algorithms/<algorithm_slug>/
 └── actor.py / critic.py / replay_buffer.py   # only when the variant needs local replacements
 
 configs/algorithms/<algorithm_slug>.yaml
-outputs/<algorithm_slug>/runs/<run_id>/
+outputs/working_runs/<algorithm_slug>/runs/<run_id>/
 ```
 
 Create the initial isolated scaffold with:
@@ -90,6 +90,8 @@ shared implementation is:
 
 - `experiments/training_pipeline.py` — training, validation, best-checkpoint selection, formal test
 - `experiments/layout.py` — result directory layout
+- `experiments/result_lifecycle.py` — working-run Git identity and retained-release promotion
+- `scripts/manage_results.py` — explicit promotion of accepted runs into releases
 - `evaluation/evaluate_algorithm.py` — algorithm-neutral evaluation entry
 - `evaluation/coalition_evaluator.py` — seven daily coalition MILP values
 - `evaluation/settlement.py` and `evaluation/shapley_allocator.py` — Equal/Shapley settlement
@@ -127,14 +129,13 @@ If an experiment requires an environment or reward change, treat it as a separat
 study. Do not silently change shared physics or rewards while presenting the result as only an
 algorithm improvement.
 
-## 6. Standard result layout
+## 6. Standard result lifecycle and layout
 
-Every run must use:
+Every normal training run is a working result by default:
 
 ```text
-outputs/<algorithm_slug>/
+outputs/working_runs/<algorithm_slug>/
 ├── latest_run.json
-├── legacy/                         # migrated historical loose artifacts only
 └── runs/
     └── <ALGORITHM>_<timestamp>_seed<seed>/
         ├── checkpoints/
@@ -152,8 +153,33 @@ outputs/<algorithm_slug>/
         └── summary.json
 ```
 
-Do not write new checkpoints, histories, summaries, or figures directly into
-`outputs/<algorithm_slug>/`. Do not mix runs from different algorithms.
+Do not write new checkpoints, histories, summaries, or figures directly into `outputs/` or
+`outputs/releases/` during training. Do not mix runs from different algorithms.
+
+When a run has been reviewed and accepted for long-term retention, promote it explicitly:
+
+```powershell
+python scripts/manage_results.py promote `
+  --run outputs/working_runs/<algorithm_slug>/runs/<run_id> `
+  --release <release_name>
+```
+
+Retained results live under:
+
+```text
+outputs/releases/
+├── registry.csv
+└── <release_name>/
+    └── <run_id>/
+        ├── release_manifest.json
+        ├── README.md
+        └── complete copied run artifacts
+```
+
+Release promotion copies and verifies the run; it must never delete the working source. Existing
+release runs must never be overwritten. A dirty or unknown Git state is rejected by default; use
+`--allow-dirty` only when the user explicitly accepts that reproducibility risk. Retained release
+artifacts are treated as immutable research evidence.
 
 Figures must read saved result files. Plotting must never rerun the environment, policy test, or MILP.
 
@@ -164,11 +190,12 @@ A failed experiment must remain removable without editing another algorithm:
 ```text
 algorithms/<failed_algorithm>/
 configs/algorithms/<failed_algorithm>.yaml
-outputs/<failed_algorithm>/          # optional; delete only if its results are no longer needed
+outputs/working_runs/<failed_algorithm>/     # optional; delete only if its results are no longer needed
 ```
 
 Never delete canonical MATD3 or shared pipeline files while removing an experiment. Result deletion
-is separate from code deletion and must respect the user's retention request.
+is separate from code deletion and must respect the user's retention request. Never delete a retained
+`outputs/releases/...` result as part of routine working-run cleanup.
 
 ## 8. Required verification for algorithm or pipeline changes
 
@@ -180,7 +207,8 @@ Before reporting completion:
 4. Confirm `best_model.pt` is the formal-test checkpoint.
 5. Confirm test, Equal/Shapley settlement, summary, and plotting completed.
 6. Confirm figures include 15 PNG files and 15 PDF files unless the user requested PNG-only.
-7. Confirm results were written under the selected algorithm's own `outputs/<slug>/runs/` directory.
-8. Confirm no canonical MATD3 file changed for an experimental algorithm.
+7. Confirm normal results were written under `outputs/working_runs/<slug>/runs/`.
+8. If testing promotion, confirm the source working run remains and the retained run contains a manifest, README, and registry entry.
+9. Confirm no canonical MATD3 file changed for an experimental algorithm.
 
 For detailed human-oriented guidance, see `docs/ALGORITHM_DEVELOPMENT.md`.
