@@ -64,6 +64,27 @@ def test_dr_step_uses_base_plus_flexible_load_before_ess_and_preserves_balance()
         assert "ess_projected" in plan and "dr_projected" in plan
 
 
+def test_feasible_ess_charge_is_not_projection_just_because_p2p_is_masked():
+    env = MultiMicrogridEnv(CONFIG, split="test")
+    env.reset(seed=45, deterministic=True)
+    raw_ess = -0.10
+    actions = {
+        "mg1": np.asarray([raw_ess, 0.0], dtype=np.float64),
+        "mg2": np.asarray([0.0, 0.0], dtype=np.float64),
+        "mg3": np.asarray([0.0, 0.0], dtype=np.float64),
+    }
+    _, _, _, info = env.step(actions)
+    plan = info["plans"]["mg1"]
+    max_charge_kw = float(env.cfg_by_id["mg1"]["battery"]["max_charge_kw"])
+
+    assert plan["dispatch_requested_power_kw"] == pytest.approx(
+        raw_ess * max_charge_kw, abs=1e-7
+    )
+    assert plan["sharing_action_masked"]
+    assert plan["ess_projection_delta"] == pytest.approx(0.0, abs=1e-7)
+    assert not plan["ess_projected"]
+
+
 def test_grid_capacity_reduces_optional_ess_charging_before_actual_load():
     env = MultiMicrogridEnv(CONFIG, split="test")
     env.reset(seed=44, deterministic=True)
