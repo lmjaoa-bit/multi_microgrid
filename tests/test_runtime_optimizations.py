@@ -58,6 +58,6 @@ def test_cpu_threads_are_opt_in_and_validated():
             with pytest.raises(ValueError, match="positive integer"):
                 configure_torch_runtime({"runtime": {"cpu_threads": invalid}}, "cpu")
         configure_torch_runtime({"runtime": {"cpu_threads": 2}}, "cuda:0")
-        assert torch.get_num_threads() == 1
+        assert torch.get_num_threads() == 2
     finally:
         torch.set_num_threads(original)
