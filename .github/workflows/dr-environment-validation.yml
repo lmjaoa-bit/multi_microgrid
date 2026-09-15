@@ -12,6 +12,7 @@ on:
       - 'configs/**'
       - 'experiments/**'
       - 'evaluation/**'
+      - 'optimization/**'
       - 'utils/**'
       - 'tests/**'
   workflow_dispatch:
@@ -44,5 +45,6 @@ jobs:
           tests/test_daily_soc_and_future_prices.py
           tests/test_milp_mpc.py
           tests/test_metrics_recording.py
+          tests/test_optimization_and_allocation.py
       - name: Run full regression suite
         run: python -m pytest -q
