@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -10,6 +11,8 @@ import pandas as pd
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from components.commercial_hvac import CommercialHVACDR
 from core.data_manager import DataManager
@@ -26,9 +29,9 @@ def _reference_raw_action(
 ) -> float:
     """Greedy no-price thermostat request before hard feasibility projection.
 
-    Internal gains and weather are taken from interval ``t``.  The thermostat
+    Internal gains and weather are taken from interval ``t``. The thermostat
     request targets the band that applies to the state at the next clock-time
-    boundary, matching the environment's state-timing convention.  The device's
+    boundary, matching the environment's state-timing convention. The device's
     own ``plan`` then projects this request onto hard comfort and daily terminal
     reachability constraints.
     """
