@@ -2,4 +2,10 @@ single_dispatch:
   id: single_dispatch
   version: single_dispatch_v1
   raw_actions: [signed_dispatch_intent]
-  description: Local-first signed dispatch; only accepted optional ESS offers discharge.
+  description: Legacy local-first signed ESS dispatch; only accepted optional ESS offers discharge.
+
+single_dispatch_dr:
+  id: single_dispatch_dr
+  version: single_dispatch_dr_v1
+  raw_actions: [signed_dispatch_intent, dr_intent]
+  description: Local-first ESS dispatch plus one heterogeneous controllable-load intent per microgrid.
