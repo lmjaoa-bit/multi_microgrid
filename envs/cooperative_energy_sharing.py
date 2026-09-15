@@ -59,6 +59,10 @@ class CooperativeEnergySharing:
             raise RuntimeError("Cooperative P2P transfer payments are not budget balanced.")
         return CooperativeSharingResult(by, flows, float(total), float(price))
 
+    @staticmethod
+    def _pair_key(first: str, second: str) -> tuple[str, str]:
+        return tuple(sorted((str(first), str(second))))
+
     def allocate_structured(
         self,
         renewable_offers_kw: Mapping[str, float],
@@ -68,12 +72,61 @@ class CooperativeEnergySharing:
         grid_sell_price: float | Mapping[str, float],
         grid_buy_price: float | Mapping[str, float],
     ) -> CooperativeSharingResult:
-        """Clear source- and use-aware offers without microgrid-id priority.
+        """Clear structured offers with one physical capacity per unordered pair."""
+        return self._allocate_structured_with_capacity(
+            renewable_offers_kw,
+            ess_offers_kw,
+            load_demands_kw,
+            charge_demands_kw,
+            grid_sell_price,
+            grid_buy_price,
+            pair_capacity_kw=self.pair_capacity_kw,
+        )
 
-        Load demand is cleared before battery charging demand. Within each stage,
-        renewable offers clear before ESS offers. A proportional iterative matcher
-        removes the fixed-id preference of the legacy residual pool while enforcing
-        the cumulative capacity of every directed pair.
+    def allocate_structured_unconstrained(
+        self,
+        renewable_offers_kw: Mapping[str, float],
+        ess_offers_kw: Mapping[str, float],
+        load_demands_kw: Mapping[str, float],
+        charge_demands_kw: Mapping[str, float],
+        grid_sell_price: float | Mapping[str, float],
+        grid_buy_price: float | Mapping[str, float],
+    ) -> CooperativeSharingResult:
+        """Same clearing rules with only the physical pair limit removed.
+
+        The difference between this result and :meth:`allocate_structured` is an
+        exact counterfactual measure of energy blocked by pair-capacity limits for
+        the *same* offers, demands and price eligibility. It is not an estimate
+        based on unmatched offers.
+        """
+        return self._allocate_structured_with_capacity(
+            renewable_offers_kw,
+            ess_offers_kw,
+            load_demands_kw,
+            charge_demands_kw,
+            grid_sell_price,
+            grid_buy_price,
+            pair_capacity_kw=float("inf"),
+        )
+
+    def _allocate_structured_with_capacity(
+        self,
+        renewable_offers_kw: Mapping[str, float],
+        ess_offers_kw: Mapping[str, float],
+        load_demands_kw: Mapping[str, float],
+        charge_demands_kw: Mapping[str, float],
+        grid_sell_price: float | Mapping[str, float],
+        grid_buy_price: float | Mapping[str, float],
+        *,
+        pair_capacity_kw: float,
+    ) -> CooperativeSharingResult:
+        """Internal source/use-aware proportional matcher.
+
+        Load demand clears before battery charging. Renewable offers clear before
+        ESS offers within each demand stage. Each unordered physical pair owns one
+        cumulative capacity budget shared by both directions and all stages.
+        Reciprocal proposals are scaled proportionally before execution, avoiding
+        microgrid-ID priority when a synthetic input asks for both directions.
         """
         ids = sorted(str(key) for key in renewable_offers_kw)
         expected = set(ids)
@@ -82,10 +135,14 @@ class CooperativeEnergySharing:
                 raise ValueError("Structured P2P inputs must contain the same microgrid ids")
         by = {
             mg: {
-                "p2p_buy_kw": 0.0, "p2p_sell_kw": 0.0,
-                "p2p_net_kw": 0.0, "p2p_transfer_payment": 0.0,
-                "renewable_p2p_sell_kw": 0.0, "ess_p2p_sell_kw": 0.0,
-                "p2p_to_load_kw": 0.0, "p2p_to_battery_kw": 0.0,
+                "p2p_buy_kw": 0.0,
+                "p2p_sell_kw": 0.0,
+                "p2p_net_kw": 0.0,
+                "p2p_transfer_payment": 0.0,
+                "renewable_p2p_sell_kw": 0.0,
+                "ess_p2p_sell_kw": 0.0,
+                "p2p_to_load_kw": 0.0,
+                "p2p_to_battery_kw": 0.0,
                 "renewable_p2p_offer_kw": max(0.0, float(renewable_offers_kw[mg])),
                 "ess_p2p_offer_kw": max(0.0, float(ess_offers_kw[mg])),
                 "ess_p2p_unmatched_kw": 0.0,
@@ -93,8 +150,8 @@ class CooperativeEnergySharing:
             for mg in ids
         }
         pair_remaining = {
-            (seller, buyer): self.pair_capacity_kw
-            for seller in ids for buyer in ids if seller != buyer
+            self._pair_key(ids[i], ids[j]): float(pair_capacity_kw)
+            for i in range(len(ids)) for j in range(i + 1, len(ids))
         }
         flows_kw: dict[str, float] = {}
         tolerance = 1e-10
@@ -126,20 +183,26 @@ class CooperativeEnergySharing:
                         continue
                     buyers = [
                         buyer for buyer in ids
-                        if buyer != seller and demands[buyer] > tolerance
-                        and pair_remaining[(seller, buyer)] > tolerance
+                        if buyer != seller
+                        and demands[buyer] > tolerance
+                        and pair_remaining[self._pair_key(seller, buyer)] > tolerance
                         and buy_prices[buyer] + tolerance >= sell_prices[seller]
                     ]
                     demand_total = sum(demands[buyer] for buyer in buyers)
                     if demand_total <= tolerance:
                         continue
                     for buyer in buyers:
+                        pair_key = self._pair_key(seller, buyer)
                         proportional = supplies[seller] * demands[buyer] / demand_total
                         proposals[(seller, buyer)] = min(
-                            proportional, demands[buyer], pair_remaining[(seller, buyer)]
+                            proportional,
+                            demands[buyer],
+                            pair_remaining[pair_key],
                         )
                 if not proposals:
                     break
+
+                # No buyer may receive more than its remaining demand.
                 for buyer in ids:
                     keys = [key for key in proposals if key[1] == buyer]
                     offered = sum(proposals[key] for key in keys)
@@ -147,14 +210,35 @@ class CooperativeEnergySharing:
                         scale = demands[buyer] / offered
                         for key in keys:
                             proposals[key] *= scale
+
+                # Opposite directions share one physical line budget. Scaling
+                # reciprocal proposals together prevents seller iteration order
+                # from deciding which direction receives the capacity.
+                for pair, remaining in pair_remaining.items():
+                    keys = [
+                        key for key in proposals
+                        if self._pair_key(key[0], key[1]) == pair
+                    ]
+                    proposed = sum(proposals[key] for key in keys)
+                    if proposed > remaining + tolerance:
+                        scale = remaining / proposed
+                        for key in keys:
+                            proposals[key] *= scale
+
                 progress = 0.0
-                for (seller, buyer), power in proposals.items():
-                    power = min(power, supplies[seller], demands[buyer], pair_remaining[(seller, buyer)])
+                for (seller, buyer), proposed_power in proposals.items():
+                    pair_key = self._pair_key(seller, buyer)
+                    power = min(
+                        proposed_power,
+                        supplies[seller],
+                        demands[buyer],
+                        pair_remaining[pair_key],
+                    )
                     if power <= tolerance:
                         continue
                     supplies[seller] -= power
                     demands[buyer] -= power
-                    pair_remaining[(seller, buyer)] -= power
+                    pair_remaining[pair_key] -= power
                     by[seller][supply_field] += power
                     by[seller]["p2p_sell_kw"] += power
                     by[buyer][demand_field] += power
