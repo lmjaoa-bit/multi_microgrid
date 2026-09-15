@@ -132,6 +132,16 @@ def test_hvac_initial_state_is_weather_dependent_but_buffered():
     assert hvac.initial_t_mass == pytest.approx(21.2)
 
 
+def test_hvac_next_state_uses_next_clock_comfort_band():
+    hvac = CommercialHVACDR(MG2, delta_t=1.0, episode_length=24)
+    hvac.reset(day_frame(tout=20.0), np.full(24, 75.0))
+    # The state reached after interval 06:00-07:00 must already satisfy the
+    # occupied band at 07:00; the state reached at 19:00 is unoccupied.
+    assert hvac._state_comfort_bounds(7) == pytest.approx((21.0, 25.0))
+    assert hvac._state_comfort_bounds(19) == pytest.approx((16.0, 30.0))
+    assert hvac._state_comfort_bounds(24) == pytest.approx((16.0, 30.0))
+
+
 def test_hvac_signed_control_stays_within_physical_cap_and_comfort_projection():
     hvac = CommercialHVACDR(MG2, delta_t=1.0, episode_length=24)
     hvac.reset(day_frame(tout=5.0), np.full(24, 75.0))
@@ -143,6 +153,27 @@ def test_hvac_signed_control_stays_within_physical_cap_and_comfort_projection():
     old_air = hvac.t_air
     hvac.commit(heating)
     assert hvac.t_air >= old_air - 1e-9
+
+
+def test_hvac_feasible_bound_cache_avoids_duplicate_highs_solves():
+    hvac = CommercialHVACDR(MG2, delta_t=1.0, episode_length=24)
+    hvac.reset(day_frame(tout=18.0), np.full(24, 75.0))
+    calls = 0
+    original = hvac._solve_terminal_q
+
+    def counted(t, *, maximize):
+        nonlocal calls
+        calls += 1
+        return original(t, maximize=maximize)
+
+    hvac._solve_terminal_q = counted
+    first = hvac.feasible_bounds(0)
+    second = hvac.feasible_bounds(0)
+    assert first == pytest.approx(second)
+    assert calls == 2
+    hvac.commit(hvac.plan(0.0, 0))
+    hvac.feasible_bounds(1)
+    assert calls == 4
 
 
 def test_hvac_terminal_reachability_keeps_end_state_in_daily_band():
