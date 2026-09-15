@@ -5,7 +5,10 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
-from components.controllable_load import delivered_fraction, raw_to_unit_interval
+from components.controllable_load import (
+    delivered_fraction as clamp_delivered_fraction,
+    raw_to_unit_interval,
+)
 
 
 class IndustrialMillDR:
@@ -109,7 +112,7 @@ class IndustrialMillDR:
         plan: Mapping[str, Any],
         delivered_fraction: float = 1.0,
     ) -> dict[str, float]:
-        served = delivered_fraction_fn = globals()["delivered_fraction"](delivered_fraction)
+        served = clamp_delivered_fraction(delivered_fraction)
         effective = float(plan["effective_duty"]) * served
         self.silo_t += (
             self.production_tph * effective - self.downstream_tph
