@@ -1,0 +1,93 @@
+name: MATD3 DR 1000-episode production-profile validation
+
+on:
+  push:
+    branches: [codex/controllable-devices]
+    paths:
+      - '.github/workflows/matd3-dr-1000-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  production-profile-train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Regenerate Yancheng-area data
+        run: python scripts/build_spatial_market_data.py
+      - name: Run 1000-episode plain MATD3 validation with production hyperparameters
+        run: >-
+          python scripts/run_experiment.py
+          --algorithm matd3_dispatch
+          --config configs/cooperative.yaml
+          --algorithm-config configs/algorithms/matd3_dispatch.yaml
+          --episodes 1000
+          --test-episodes 55
+          --validation-interval 100
+          --validation-days 20
+          --device cpu
+          --seed 42
+          --no-dashboard
+          --no-milp
+      - name: Print learning and physical diagnostics
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path('outputs/working_runs/matd3_dispatch')
+          latest = json.loads((root / 'latest_run.json').read_text(encoding='utf-8'))
+          run = Path(latest['run_directory'])
+          summary = json.loads((run / 'summary.json').read_text(encoding='utf-8'))
+          training = json.loads((run / 'training_summary.json').read_text(encoding='utf-8'))
+          validation = json.loads((run / 'validation_history.json').read_text(encoding='utf-8'))
+          test = json.loads((run / 'test_evaluation.json').read_text(encoding='utf-8'))
+          history_path = run / 'training_history.json'
+          history = json.loads(history_path.read_text(encoding='utf-8'))
+          tail = history[-100:]
+
+          def mean_field(field, default=0.0):
+              vals = [float(x.get(field, default) or 0.0) for x in tail]
+              return sum(vals) / len(vals) if vals else 0.0
+
+          print('=== 1000-EPISODE DIAGNOSTIC SUMMARY ===')
+          print('run_id:', summary['run_id'])
+          print('best_validation_episode:', training['best_episode'])
+          print('best_validation_profit_mean:', training['best_validation_profit_mean'])
+          print('final_100_profit_mean:', training['final_100_profit_mean'])
+          print('validation_history:', validation)
+          print('test_team_profit_statistics:', test.get('team_profit_statistics'))
+          print('idle_team_profit_statistics:', test.get('idle', {}).get('team_profit_statistics'))
+          print('comparisons_vs_idle:', test.get('comparisons', {}).get('vs_idle'))
+          print('test_feasible_rate:', test.get('feasible_rate'))
+          print('tail100_mean_p2p_kwh:', mean_field('p2p_total_energy_kwh'))
+          print('tail100_mean_renewable_utilization:', mean_field('renewable_utilization_rate'))
+          print('tail100_mean_critic_loss:', mean_field('critic_loss'))
+          print('tail100_mean_actor_loss:', mean_field('actor_loss'))
+          print('tail100_mean_reward:', mean_field('team_reward'))
+
+          for mg in ('mg1', 'mg2', 'mg3'):
+              dr_proj = []
+              ess_proj = []
+              curtailed = []
+              for item in tail:
+                  dr = item.get('dr_metrics_by_microgrid', {}).get(mg, {})
+                  energy = item.get('energy_breakdown_by_microgrid', {}).get(mg, {})
+                  dr_proj.append(float(dr.get('projection_rate', 0.0) or 0.0))
+                  ess_proj.append(float(dr.get('ess_projection_rate', 0.0) or 0.0))
+                  curtailed.append(float(energy.get('battery_charge_curtailed_kwh', 0.0) or 0.0))
+              avg = lambda xs: sum(xs)/len(xs) if xs else 0.0
+              print(f'{mg}_tail100_dr_projection_rate:', avg(dr_proj))
+              print(f'{mg}_tail100_ess_projection_rate:', avg(ess_proj))
+              print(f'{mg}_tail100_charge_curtailed_kwh:', avg(curtailed))
+          PY
