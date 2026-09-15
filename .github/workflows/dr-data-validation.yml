@@ -1,0 +1,50 @@
+name: DR regional data validation
+
+on:
+  push:
+    branches: [codex/controllable-devices]
+    paths:
+      - '.github/workflows/dr-data-validation.yml'
+      - 'scripts/build_spatial_market_data.py'
+      - 'configs/cooperative.yaml'
+      - 'core/data_manager.py'
+      - 'core/forecast.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regenerate-and-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install lightweight environment dependencies
+        run: python -m pip install numpy pandas PyYAML highspy
+      - name: Regenerate Yancheng-area NASA POWER data
+        run: python scripts/build_spatial_market_data.py
+      - name: Verify local temperature data and one deterministic episode
+        run: |
+          python - <<'PY'
+          import numpy as np
+          from envs.multi_microgrid_env import MultiMicrogridEnv
+
+          env = MultiMicrogridEnv('configs/cooperative.yaml', split='test')
+          obs, info = env.reset(day=str(env.data.valid_days[0].date()), deterministic=True)
+          assert not info['data_quality_flags'], info['data_quality_flags']
+          assert 'mg2_temperature_c' in env.episode_context_df.columns
+          assert np.isfinite(env.episode_context_df['mg2_temperature_c']).all()
+          done = False
+          while not done:
+              actions = {mg: np.zeros(env.action_dim, dtype=np.float32) for mg in env.agent_ids}
+              obs, rewards, done, step_info = env.step(actions)
+              assert all(np.isfinite(v).all() for v in obs.values())
+              assert all(np.isfinite(v) for v in rewards.values())
+              assert all(abs(x['power_balance_residual_kw']) < 1e-7 for x in step_info['settlements'].values())
+          assert not any(step_info['terminal_soc_infeasible'].values())
+          print('regional-data smoke passed')
+          PY
