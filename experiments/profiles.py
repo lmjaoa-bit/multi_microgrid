@@ -77,13 +77,22 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
     """Record resolved settings, never infer historical settings from current defaults."""
     cfg_path = Path(config_path).resolve()
     mode = env_config.get("ess_sharing", {}).get("control_mode", "single_dispatch")
+    action_design_id = str(env_config.get("action_design", mode))
     designs = catalog("action_designs", root)
-    design = deepcopy(designs.get(mode, {"id": "custom", "version": mode, "raw_actions": []}))
+    design = deepcopy(designs.get(
+        action_design_id,
+        {"id": "custom", "version": action_design_id, "raw_actions": []},
+    ))
     chosen = profile(selected_experiment, root) if selected_experiment else None
-    if chosen and (chosen["algorithm"] != spec.slug or chosen["action_design"] != mode):
+    if chosen and (
+        chosen["algorithm"] != spec.slug
+        or chosen["action_design"] != action_design_id
+    ):
         raise ValueError("Experiment profile disagrees with the plugin's actual action contract")
-    candidates = [item for item in catalog("experiment_profiles", root).values()
-                  if item["algorithm"] == spec.slug and item["action_design"] == mode]
+    candidates = [
+        item for item in catalog("experiment_profiles", root).values()
+        if item["algorithm"] == spec.slug and item["action_design"] == action_design_id
+    ]
     policy = chosen["policy"] if chosen else candidates[0]["policy"] if candidates else "unregistered"
     environment_name = "custom"
     for name, item in catalog("environment_profiles", root).items():
@@ -93,8 +102,8 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
     resolved = deepcopy(env_config)
     resolved.pop("_project_root", None)
     physics = deepcopy(resolved)
-    # Only controller interface fields are removed. Market enablement, resale,
-    # terminal SOC, observations/forecasts, reward and data paths remain hashed.
+    # Controller-interface fields are excluded from the physical fingerprint.
+    physics.pop("action_design", None)
     for key in ("control_mode", "observation_mode", "offer_projection"):
         physics.get("ess_sharing", {}).pop(key, None)
     if not physics.get("ess_sharing"):
@@ -102,16 +111,22 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
     design["control_mode"] = mode
     design["raw_action_dim"] = len(design["raw_actions"]) or None
     return {
-        "schema_version": 1, "experiment_profile": selected_experiment,
-        "algorithm_slug": spec.slug, "policy": policy, "action_design": design,
+        "schema_version": 1,
+        "experiment_profile": selected_experiment,
+        "algorithm_slug": spec.slug,
+        "policy": policy,
+        "action_design": design,
         "observation_mode": env_config.get("ess_sharing", {}).get("observation_mode", "local"),
         "offer_projection": env_config.get("ess_sharing", {}).get("offer_projection", "none"),
-        "environment_profile": environment_name, "environment_config": str(cfg_path),
+        "environment_profile": environment_name,
+        "environment_config": str(cfg_path),
         "environment_overrides": deepcopy(dict(spec.environment_overrides)),
         "resolved_environment_hash": _fingerprint(resolved),
         "physical_config_hash": _fingerprint(physics),
-        "physical_settings": {key: deepcopy(env_config.get(key)) for key in
-                              ("env", "p2p", "terminal_soc", "cost", "time", "data", "price")},
+        "physical_settings": {
+            key: deepcopy(env_config.get(key))
+            for key in ("env", "p2p", "terminal_soc", "cost", "time", "data", "price")
+        },
         "ess_p2p_enabled": env_config.get("ess_sharing", {}).get("ess_p2p_enabled", True),
     }
 
@@ -123,8 +138,13 @@ def set_default(name: str | None, root: Path = ROOT):
         from algorithms.registry import get_algorithm_spec
         spec = get_algorithm_spec(selected["algorithm"])
         cfg = yaml.safe_load(selected["config"].read_text(encoding="utf-8"))
-        experiment_contract(spec, spec.build_environment_config(cfg), selected["config"],
-                            selected_experiment=name, root=root)
+        experiment_contract(
+            spec,
+            spec.build_environment_config(cfg),
+            selected["config"],
+            selected_experiment=name,
+            root=root,
+        )
         algorithm_cfg = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
         if algorithm_cfg.get("algorithm", {}).get("name") != spec.slug:
             raise ValueError("Selected plugin YAML name does not match")
