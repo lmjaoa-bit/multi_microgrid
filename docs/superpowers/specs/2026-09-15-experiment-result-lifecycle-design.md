@@ -49,12 +49,19 @@ outputs/
 └── releases/
     ├── registry.csv
     ├── <release_name>/
-    │   ├── release_manifest.json
-    │   ├── README.md
-    │   └── <run_id>/
-    │       └── complete run artifacts
+    │   ├── <run_id_seed42>/
+    │   │   ├── release_manifest.json
+    │   │   ├── README.md
+    │   │   └── complete run artifacts
+    │   ├── <run_id_seed43>/
+    │   │   ├── release_manifest.json
+    │   │   ├── README.md
+    │   │   └── complete run artifacts
+    │   └── ...
     └── ...
 ```
+
+A release group may contain multiple independently promoted runs, for example multiple seeds of the same accepted experiment. Each retained run owns its own manifest and README, so adding another seed never rewrites the evidence for an existing seed.
 
 The internal structure of a working run remains compatible with the current pipeline:
 
@@ -132,10 +139,10 @@ The command must:
 3. Validate required artifacts.
 4. Read run metadata and summary data.
 5. Reject dirty-code runs by default.
-6. Reject destination collisions instead of overwriting an existing retained result.
+6. Reject destination collisions instead of overwriting an existing retained run.
 7. Copy the complete run into the release directory using a temporary destination first.
 8. Verify the copied release before finalizing it.
-9. Generate `release_manifest.json` and a concise `README.md`.
+9. Generate a per-run `release_manifest.json` and concise `README.md` inside the retained run directory.
 10. Append one row to `outputs/releases/registry.csv` only after successful finalization.
 
 Promotion uses copy-then-verify rather than move. The working run remains in place until the user later chooses to clean working results. This avoids losing the only copy if a filesystem or cloud-sync operation is interrupted.
@@ -163,26 +170,30 @@ The promotion check must verify that:
 - formal testing completed;
 - the recorded source Git commit exists in metadata;
 - the release name is safe as a filesystem component;
-- the destination does not already exist.
+- the destination `<release_name>/<run_id>` does not already exist.
 
-If `git_dirty` is true, promotion fails unless the user explicitly passes `--allow-dirty`. The release manifest must record that override when used.
+If `git_dirty` is true, promotion fails unless the user explicitly passes `--allow-dirty`. The per-run release manifest must record that override when used.
 
 ## 8. Release Immutability
 
-A release is treated as immutable research evidence.
+A promoted run is treated as immutable research evidence.
 
-The promotion command must never overwrite an existing release run. If the same scientific idea changes, create a new release name such as:
+The promotion command must never overwrite an existing retained run. If the same scientific idea changes, create a new release group such as:
 
 ```text
 flexible_load_v1
 flexible_load_v2
 ```
 
+Multiple seeds of the same accepted design may coexist under the same release group because their `run_id` values differ.
+
 If figures or derived analyses need to be regenerated later, raw release artifacts remain unchanged. New analysis outputs should live in a separate analysis/report directory rather than replacing source result files.
 
-## 9. Release Manifest
+The global registry is append-only bookkeeping and may gain new rows as additional seeds are promoted; previously promoted run directories remain untouched.
 
-Each release group receives a machine-readable manifest containing at least:
+## 9. Per-Run Release Manifest
+
+Each promoted run receives a machine-readable `release_manifest.json` inside its retained run directory containing at least:
 
 ```text
 release_name
@@ -206,13 +217,13 @@ best_validation_episode
 best_validation_score
 ```
 
-The manifest is the authoritative bridge between a retained result and the exact code/configuration that produced it.
+The manifest is the authoritative bridge between a retained run and the exact code/configuration that produced it.
 
-## 10. Human-Readable README
+## 10. Per-Run Human-Readable README
 
-Each release group also contains `README.md` summarizing:
+Each promoted run also contains `README.md` summarizing:
 
-- release purpose;
+- release purpose/name;
 - algorithm and run ID;
 - seed and training/test episode counts;
 - Git branch/commit/dirty status;
@@ -247,7 +258,7 @@ release_run_directory
 
 This registry is append-only under normal operation. A promotion is not considered successful until its registry row has been written.
 
-The registry makes later comparison and paper-result lookup possible without inspecting timestamped directories manually.
+The registry makes later comparison and paper-result lookup possible without inspecting timestamped directories manually, and naturally supports several seeds under one release name.
 
 ## 12. Failure Safety
 
@@ -256,9 +267,9 @@ Promotion must be conservative because Google Drive or another sync client may b
 Rules:
 
 - Never delete the source working run during promotion.
-- Copy into a temporary release directory first.
-- Validate the copied files before renaming/finalizing the release directory.
-- Never overwrite an existing release directory.
+- Copy into a temporary run directory under the target release group first.
+- Validate the copied files before renaming/finalizing the retained run directory.
+- Never overwrite an existing retained run directory.
 - Do not write a registry row until promotion is complete.
 - A failed promotion leaves the working run untouched and must not create a valid-looking partial release.
 
@@ -293,9 +304,10 @@ Add focused tests covering at least:
 6. `--allow-dirty` permits promotion and records the override.
 7. Missing required artifacts reject promotion without modifying the source.
 8. An existing destination rejects promotion rather than overwriting it.
-9. A successful promotion writes manifest, README, and exactly one registry row.
+9. A successful promotion writes a per-run manifest, per-run README, and exactly one registry row.
 10. Promotion preserves the source working run.
-11. Existing shared training/evaluation behavior remains unchanged.
+11. Two distinct run IDs can be promoted under the same release name without rewriting either retained run.
+12. Existing shared training/evaluation behavior remains unchanged.
 
 Before completion, run the repository's required test suite and a short shared-pipeline smoke test.
 
@@ -325,7 +337,8 @@ The intended workflow for the upcoming flexible-load work is:
 5. When a version is accepted, commit the code and ensure the tree is clean.
 6. Run/re-run the retained experiment from that clean commit.
 7. Promote the accepted run into a named release.
-8. Keep the release immutable and use its manifest/registry for later paper analysis.
+8. Promote additional seeds into the same release group when appropriate.
+9. Keep each retained run immutable and use its manifest plus the global registry for later paper analysis.
 ```
 
 This makes the code repository the source of truth for code and Google Drive/synced `outputs` the source of truth for experiment artifacts, with explicit metadata linking the two.
