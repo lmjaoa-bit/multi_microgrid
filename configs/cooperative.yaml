@@ -2,12 +2,14 @@ env:
   name: MultiMicrogridEnv
   seed: 42
   mode: cooperative
-
 data:
   train_path: data/spatial_market_2018_train.csv
   val_path: data/spatial_market_2018_val.csv
   test_path: data/spatial_market_2018_test.csv
   timestamp_col: timestamp
+  # Temporary migration aid for existing checked-in CSVs. New research runs
+  # should regenerate spatial data so mg2_temperature_c is present directly.
+  allow_temperature_fallback: true
 
 time:
   delta_t: 1.0
