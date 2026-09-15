@@ -57,7 +57,7 @@ The three microgrids belong to one regional distribution-level energy community 
 
 The current Nanjing-Yancheng-Suzhou interpretation must not be used for final local-P2P experiments because those locations are too geographically separated for the simplified no-network-flow model.
 
-The regenerated spatial weather dataset shall use three nearby but distinct sites inside one regional distribution area. The data sites should be separated enough to retain correlated-but-nonidentical weather, while remaining credible as nodes of one local distribution-level energy community. Exact coordinates are data-generation configuration rather than an RL interface, but all three must belong to the same declared regional scenario.
+The regenerated spatial weather dataset shall use three nearby but distinct sites inside one regional distribution area. The sites must remain geographically credible as nodes of one local distribution-level energy community while preserving correlated-but-nonidentical weather. Exact coordinates are data-generation configuration rather than an RL interface; all three must belong to the same declared regional scenario and must be documented in the regenerated dataset metadata.
 
 Topology:
 
@@ -94,7 +94,7 @@ The P2P pair-capacity baseline is changed from 50 kW to:
 pair_capacity_kw = 75.0
 ```
 
-Rationale: representative-day optimization showed 50 kW frequently saturates and blocks material cooperation value, while 75 kW captures most of the benefit available at 100 kW without making the network effectively unconstrained.
+Rationale: representative-day optimization screening showed 50 kW frequently saturates and blocks material cooperation value, while 75 kW captures most of the benefit available at 100 kW without making the network effectively unconstrained.
 
 P2P loss remains zero in the first version, and same-hour grid resale remains prohibited.
 
@@ -345,13 +345,15 @@ If the 35 kW physical limit cannot satisfy comfort, apply the physical maximum a
 
 ### 9.3 Internal and solar gains
 
-Solar gain:
+With GHI expressed in W/m2, total solar heat gain is:
 
 ```text
-Q_solar = 0.025 * GHI_kW_equivalent
+Q_solar_kw = 0.025 * GHI_w_per_m2
 ```
 
-Using the agreed implementation convention based on GHI in W/m2, with:
+For example, 500 W/m2 produces 12.5 kW of modeled total solar gain.
+
+Split the total solar heat gain as:
 
 ```text
 20% -> air node
@@ -367,14 +369,16 @@ unoccupied: Q_internal = 0.20 * P_nonHVAC
 
 ### 9.4 Load calibration
 
-The MG2 non-HVAC base profile is calibrated to approximately:
+The first implementation target is:
 
 ```text
 non_hvac_target_mean_kw = 75.0
 weekend_multiplier = 0.57
 ```
 
-The calibrated thermostat reference should produce approximately 5 kW annual-average HVAC electrical consumption so that total mean load remains near 80 kW.
+The calibration objective is to keep final annual-average MG2 actual load near the original 80 kW scale, with baseline-thermostat HVAC contributing approximately 5 kW on average.
+
+Because the final environment adds local `T2M`, weather-dependent initial thermal state, and terminal thermal constraints, this calibration must be rerun on the regenerated dataset. The implementation must not silently alter thermal physics to hit the target. If the final baseline annual-average actual load falls outside 79-81 kW, treat that as a calibration failure and explicitly revisit the non-HVAC target rather than hiding the discrepancy.
 
 The baseline calibration thermostat uses tighter bands:
 
@@ -413,7 +417,7 @@ To prevent the policy from exploiting the daily reset by leaving the building he
 
 The mass-state bound is intentionally tighter because `T_mass` represents the dominant stored thermal energy.
 
-The implementation should enforce terminal reachability rather than add a routine terminal-temperature reward penalty.
+The implementation should enforce terminal reachability by tightening the feasible HVAC action interval near the episode end rather than adding a routine terminal-temperature reward penalty. If the terminal band becomes physically unreachable even at the 35 kW device limit, execute the closest physically feasible action and record an explicit terminal-thermal infeasibility diagnostic.
 
 ### 9.7 MG2 DR observation fields
 
@@ -513,11 +517,13 @@ At minimum:
 - feasible maximum charging power;
 - deadline pressure.
 
-Deadline pressure is defined as:
+While the EV is available and time remains, deadline pressure is:
 
 ```text
 remaining_energy / (eta * P_EV_max * remaining_time)
 ```
+
+When the EV is unavailable or `remaining_time <= 0`, deadline pressure is defined as zero; target failure, if any, is represented by the explicit departure diagnostics rather than a division-by-zero sentinel.
 
 ## 11. ESS Daily Boundary Condition
 
@@ -771,7 +777,8 @@ Record at least:
 - occupancy/weekend state;
 - feasible HVAC bounds;
 - comfort violation;
-- comfort infeasibility.
+- comfort infeasibility;
+- terminal thermal infeasibility.
 
 Episode summaries include heating/cooling energy, comfort violation hours, HVAC projection rate, terminal thermal gap, and boundary-hit rates.
 
@@ -895,7 +902,8 @@ The environment design is considered successfully implemented only if all of the
 17. MG2 receives local outdoor temperature and future temperature forecasts.
 18. Train/validation/test remain natural-day separated and reproducible.
 19. Output diagnostics are sufficient to identify projection abuse, boundary saturation, P2P congestion, unmet load, curtailment, and terminal reset exploitation.
-20. Plain MATD3 can train and evaluate on the new environment before Transformer/PNN/Shapley variants are migrated.
+20. MG2 baseline recalibration on regenerated `T2M` data produces an annual-average actual load within 79-81 kW, or the calibration is explicitly reopened before long training.
+21. Plain MATD3 can train and evaluate on the new environment before Transformer/PNN/Shapley variants are migrated.
 
 ## 24. Validation Strategy Before Long Training
 
