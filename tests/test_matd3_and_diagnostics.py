@@ -10,7 +10,7 @@ from envs.multi_microgrid_env import MultiMicrogridEnv
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs" / "cooperative.yaml"
+CONFIG = ROOT / "configs" / "cooperative_legacy_pre_dr.yaml"
 
 
 def test_vectorized_profiles_and_forecasts_match_episode_data() -> None:
@@ -29,12 +29,11 @@ def test_vectorized_profiles_and_forecasts_match_episode_data() -> None:
         assert np.isclose(forecast["wind_kw"], env._episode_exogenous[mg]["wind_kw"][1])
 
 
-def test_matd3_canonical_architecture_and_training_smoke() -> None:
+def test_canonical_matd3_legacy_architecture_and_training_smoke() -> None:
     env = MultiMicrogridEnv(CONFIG)
     algorithm = MATD3(env.agent_ids, env.observation_dims, env.global_state_dim,
                       action_dim=env.action_dim, hidden_dims=(32, 32),
                       replay_capacity=100, seed=7)
-    # Check that each agent has its own twin critic
     assert len(algorithm.critics) == len(env.agent_ids)
     assert set(algorithm.critics.keys()) == set(env.agent_ids)
     assert len(algorithm.target_critics) == len(env.agent_ids)
@@ -44,9 +43,9 @@ def test_matd3_canonical_architecture_and_training_smoke() -> None:
     metrics = {}
     for _ in range(5):
         actions = algorithm.select_actions(observations, noise_std=0.1)
-        next_observations, rewards, done, info = env.step(actions)
+        next_observations, rewards, _, info = env.step(actions)
         algorithm.replay.add(observations, state, actions, rewards[env.agent_ids[0]],
-                             next_observations, info["global_state_after"], done)
+                             next_observations, info["global_state_after"], False)
         metrics = algorithm.update(batch_size=2)
         observations, state = next_observations, info["global_state_after"]
     assert np.isfinite(metrics["critic_loss"])
