@@ -52,25 +52,44 @@ def resolve_training_args(args, root: Path = ROOT):
         raise ValueError("--algorithm cannot be combined with --experiment/--policy/--action-design")
     if experiment and (policy or action):
         raise ValueError("--experiment is a complete bundle; do not combine it with --policy/--action-design")
+
     selected = None
     if not explicit_algorithm:
-        selected = profile(experiment or default_profile(root) or "matd3", root)
-        if policy or action:
-            desired = (policy or selected["policy"], action or selected["action_design"], selected["environment"])
-            matches = [name for name, item in catalog("experiment_profiles", root).items()
-                       if (item["policy"], item["action_design"], item["environment"]) == desired]
+        if experiment:
+            selected = profile(experiment, root)
+        elif policy or action:
+            # A public selector chooses among complete registered bundles. Do not
+            # inherit the default MATD3 environment/action and accidentally force
+            # another policy onto an incompatible physical generation.
+            matches = []
+            for name, item in catalog("experiment_profiles", root).items():
+                if policy is not None and item["policy"] != policy:
+                    continue
+                if action is not None and item["action_design"] != action:
+                    continue
+                matches.append(name)
             if len(matches) != 1:
-                raise ValueError(f"No unique experiment for policy/action/environment {desired}; select --experiment")
+                requested = {"policy": policy, "action_design": action}
+                raise ValueError(
+                    f"No unique experiment for selectors {requested}; select --experiment"
+                )
             selected = profile(matches[0], root)
+        else:
+            selected = profile(default_profile(root) or "matd3", root)
         args.algorithm = selected["algorithm"]
-    args.config = Path(getattr(args, "config", None) or
-                       (selected["config"] if selected else root / "configs/cooperative.yaml")).resolve()
+
+    args.config = Path(
+        getattr(args, "config", None)
+        or (selected["config"] if selected else root / "configs/cooperative.yaml")
+    ).resolve()
     args.selected_experiment = selected["name"] if selected else None
     return args
 
 
 def _fingerprint(value: Any) -> str:
-    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()).hexdigest()
+    return hashlib.sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+    ).hexdigest()
 
 
 def experiment_contract(spec, env_config, config_path, *, selected_experiment=None, root: Path = ROOT):
@@ -150,5 +169,8 @@ def set_default(name: str | None, root: Path = ROOT):
             raise ValueError("Selected plugin YAML name does not match")
     destination = root / "configs/experiment_defaults.yaml"
     temporary = destination.with_suffix(".yaml.tmp")
-    temporary.write_text(yaml.safe_dump({"default_experiment": name}, sort_keys=False), encoding="utf-8")
+    temporary.write_text(
+        yaml.safe_dump({"default_experiment": name}, sort_keys=False),
+        encoding="utf-8",
+    )
     temporary.replace(destination)
