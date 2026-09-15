@@ -8,13 +8,16 @@ from core.types import DecodedAction
 
 
 class ActionCodec:
-    """Decode the single signed battery dispatch intent."""
+    """Decode the selected raw actor action contract."""
 
-    def __init__(self, control_mode: str = "single_dispatch") -> None:
-        self.control_mode = str(control_mode)
-        if self.control_mode != "single_dispatch":
-            raise ValueError(f"Unsupported ESS sharing control mode: {self.control_mode}")
-        self.action_dim = 1
+    def __init__(self, action_design: str = "single_dispatch") -> None:
+        self.action_design = str(action_design)
+        if self.action_design == "single_dispatch":
+            self.action_dim = 1
+        elif self.action_design == "single_dispatch_dr":
+            self.action_dim = 2
+        else:
+            raise ValueError(f"Unsupported action design: {self.action_design}")
 
     def decode(self, raw_action: Sequence[float]) -> DecodedAction:
         a = np.asarray(raw_action, dtype=np.float64).reshape(-1)
@@ -22,4 +25,7 @@ class ActionCodec:
             raise ValueError(f"Expected {self.action_dim} actions, got {a.size}.")
         if not np.isfinite(a).all():
             raise ValueError("Actions must contain only finite values.")
-        return {"battery": float(np.clip(a[0], -1.0, 1.0))}
+        decoded: DecodedAction = {"battery": float(np.clip(a[0], -1.0, 1.0))}
+        if self.action_design == "single_dispatch_dr":
+            decoded["dr"] = float(np.clip(a[1], -1.0, 1.0))
+        return decoded
