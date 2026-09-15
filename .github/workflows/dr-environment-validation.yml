@@ -8,28 +8,21 @@ on:
       - 'components/**'
       - 'core/**'
       - 'envs/**'
-      - 'algorithms/matd3_dispatch/**'
+      - 'algorithms/**'
       - 'configs/**'
-      - 'experiments/profiles.py'
-      - 'utils/metrics_collector.py'
-      - 'tests/test_controllable_loads.py'
-      - 'tests/test_joint_action_projection.py'
-      - 'tests/test_dr_environment.py'
-      - 'tests/test_experiment_profiles.py'
-      - 'tests/test_plain_single_dispatch.py'
-      - 'tests/test_cooperative_physics.py'
-      - 'tests/test_daily_soc_and_future_prices.py'
-      - 'tests/test_milp_mpc.py'
-      - 'tests/test_metrics_recording.py'
+      - 'experiments/**'
+      - 'evaluation/**'
+      - 'utils/**'
+      - 'tests/**'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  targeted-tests:
+  regression-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -50,3 +43,5 @@ jobs:
           tests/test_daily_soc_and_future_prices.py
           tests/test_milp_mpc.py
           tests/test_metrics_recording.py
+      - name: Run full regression suite
+        run: python -m pytest -q
