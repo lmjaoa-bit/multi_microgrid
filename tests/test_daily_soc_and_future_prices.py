@@ -8,7 +8,8 @@ from envs.multi_microgrid_env import MultiMicrogridEnv
 from optimization.common_constraints import DispatchData, solve_dispatch
 
 
-CONFIG = Path(__file__).resolve().parents[1] / "configs/cooperative.yaml"
+ROOT = Path(__file__).resolve().parents[1]
+CONFIG = ROOT / "configs" / "cooperative_legacy_pre_dr.yaml"
 
 
 def test_milp_none_allows_retaining_terminal_energy():
@@ -32,7 +33,6 @@ def test_empty_start_no_terminal_target_or_shaping():
     for core in env.cores.values():
         assert core.battery.soc == core.battery.soc_min
         assert core.battery.available_discharge_kw() == pytest.approx(0)
-    # Late charging must remain allowed even though it leaves energy at midnight.
     env.t = 23
     for core in env.cores.values():
         core.battery.soc = .6
@@ -55,7 +55,7 @@ def test_empty_start_no_terminal_target_or_shaping():
 @pytest.mark.parametrize("deterministic", [True, False])
 def test_critic_prices_match_actor_forecasts(deterministic):
     env = MultiMicrogridEnv(CONFIG)
-    observations, info = env.reset(seed=42, deterministic=deterministic)
+    observations, _ = env.reset(seed=42, deterministic=deterministic)
     for _ in range(24):
         state = env.global_state()
         schema = env.global_state_builder.schema()
@@ -64,7 +64,7 @@ def test_critic_prices_match_actor_forecasts(deterministic):
             for k in range(1, env.obs_builder.future_h + 1):
                 assert state[schema.index(f"{mg}_price_t+{k}")] == pytest.approx(
                     observations[mg][obs_schema.index(f"price_t+{k}")])
-        observations, _, done, info = env.step({mg: np.zeros(1) for mg in env.agent_ids})
+        observations, _, done, _ = env.step({mg: np.zeros(1) for mg in env.agent_ids})
         if done:
             break
 
