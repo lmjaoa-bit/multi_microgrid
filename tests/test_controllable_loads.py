@@ -3,6 +3,7 @@ import pandas as pd
 import pytest
 
 from components.commercial_hvac import CommercialHVACDR
+from components.controllable_load import build_controllable_load
 from components.ev_charging import EVChargingDR
 from components.industrial_mill import IndustrialMillDR
 
@@ -17,6 +18,7 @@ def day_frame(*, tout=20.0, ghi=0.0):
 
 
 MG1 = {
+    "type": "industrial_mill",
     "rated_power_kw": 28.5,
     "rated_production_tph": 1.186,
     "downstream_consumption_tph": 0.975,
@@ -28,6 +30,7 @@ MG1 = {
 }
 
 MG2 = {
+    "type": "commercial_hvac",
     "r_out_air_c_per_kw": 0.22,
     "r_air_mass_c_per_kw": 0.08,
     "c_air_kwh_per_c": 15.0,
@@ -50,6 +53,7 @@ MG2 = {
 }
 
 MG3 = {
+    "type": "ev_charging",
     "fleet_capacity_kwh": 780.0,
     "initial_soc": 0.50,
     "target_soc": 0.80,
@@ -59,6 +63,14 @@ MG3 = {
     "available_start_hour": 0,
     "departure_hour": 7,
 }
+
+
+def test_controllable_load_factory_builds_heterogeneous_devices():
+    assert isinstance(build_controllable_load(MG1, delta_t=1.0, episode_length=24), IndustrialMillDR)
+    assert isinstance(build_controllable_load(MG2, delta_t=1.0, episode_length=24), CommercialHVACDR)
+    assert isinstance(build_controllable_load(MG3, delta_t=1.0, episode_length=24), EVChargingDR)
+    with pytest.raises(ValueError, match="Unsupported controllable load"):
+        build_controllable_load({"type": "unknown"}, delta_t=1.0, episode_length=24)
 
 
 def test_mill_full_duty_updates_inventory_and_power():
