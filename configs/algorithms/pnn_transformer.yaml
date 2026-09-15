@@ -30,6 +30,7 @@ algorithm:
       mg2: 0.20
       mg3: 0.12
 runtime:
+  device: cuda
   cpu_threads: 2
   interop_threads: 1
 training:
