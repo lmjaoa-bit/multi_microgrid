@@ -5,6 +5,8 @@ from typing import Dict, TypedDict
 
 class DecodedAction(TypedDict, total=False):
     battery: float
+    dr: float
+    # Legacy field retained in the type only for old environment/config readers.
     sharing_offer_ratio: float
 
 
