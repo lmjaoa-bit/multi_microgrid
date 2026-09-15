@@ -15,7 +15,6 @@ ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs" / "cooperative.yaml"
 
 
-
 def test_shifted_weather_series_is_cached_and_matches_deterministic_forecast() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     config["_project_root"] = str(ROOT)
@@ -39,7 +38,7 @@ def test_shifted_weather_series_is_cached_and_matches_deterministic_forecast() -
     assert np.isclose(forecast["wind_kw"], env._episode_exogenous["mg2"]["wind_kw"][1])
 
 
-def test_global_config_uses_local_weather_generation_and_tariffs() -> None:
+def test_global_config_uses_local_weather_generation_tariffs_and_dr_state() -> None:
     env = MultiMicrogridEnv(CONFIG, split="test")
     day = str(env.data.valid_days[0].date())
     env.reset(day=day, seed=42, deterministic=True)
@@ -47,10 +46,14 @@ def test_global_config_uses_local_weather_generation_and_tariffs() -> None:
     assert np.allclose(env._episode_exogenous["mg1"]["wind_kw"], 0.0)
     assert np.allclose(env._episode_exogenous["mg2"]["pv_kw"], 0.0)
     assert np.allclose(env._episode_exogenous["mg3"]["wind_kw"], 0.0)
-    assert not np.allclose(
-        env.episode_context_df["mg1_ghi_w_per_m2"],
-        env.episode_context_df["mg3_ghi_w_per_m2"],
-    )
+
+    # Nearby Yancheng-area NASA POWER points are allowed to resolve to the same
+    # source grid cell. Distinct coordinates must never be tested by demanding
+    # numerically different weather series.
+    for mg in env.agent_ids:
+        renewable = env.cfg_by_id[mg]["renewables"]
+        assert renewable["ghi_column"] in env.episode_context_df
+        assert renewable["wind_speed_column"] in env.episode_context_df
 
     hour_16 = env.episode_context_df[env.episode_context_df["timestamp"].dt.hour == 16].iloc[0]
     assert env.data.prices_at(hour_16, "mg1") == (0.60, 0.18)
@@ -61,18 +64,37 @@ def test_global_config_uses_local_weather_generation_and_tariffs() -> None:
     expected_buy, expected_sell = env.data.prices_at(env.episode_context_df.iloc[1], "mg3")
     assert np.isclose(forecast["grid_price_per_kwh"], expected_buy)
     assert np.isclose(forecast["grid_sell_price_per_kwh"], expected_sell)
-    horizon = env.obs_builder.future_h
-    assert env.global_state_dim == 54 + 7 * horizon
-    assert "mg1_feasible_charge_max" in env.global_state_builder.schema()
+
+    schema = env.global_state_builder.schema()
+    assert env.global_state_dim == len(schema)
+    for mg in env.agent_ids:
+        assert f"{mg}_feasible_charge_max" in schema
+        assert f"{mg}_dr_min" in schema
+        assert f"{mg}_dr_max" in schema
+    assert "mg1_silo_ratio" in schema
+    assert "mg2_t_air" in schema
+    assert "mg2_t_mass" in schema
+    assert "mg3_ev_soc" in schema
 
 
-def test_global_config_is_the_selected_lossless_crossgrid_setting() -> None:
+def test_global_config_is_selected_yancheng_dr_setting() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    assert config["action_design"] == "single_dispatch_dr"
     assert config["p2p"]["loss_rate"] == 0.0
-    assert config["p2p"]["pair_capacity_kw"] == 50.0
+    assert config["p2p"]["pair_capacity_kw"] == 75.0
     assert config["p2p"]["allow_grid_resale"] is False
     assert [item["type"] for item in config["microgrids"]] == [
-        "pv_only_day_industrial",
-        "wind_only_continuous_industrial",
-        "pv_only_evening_industrial",
+        "industrial_pv_raw_mill",
+        "commercial_wind_hvac",
+        "residential_pv_ev",
+    ]
+    assert [item["dr"]["type"] for item in config["microgrids"]] == [
+        "industrial_mill",
+        "commercial_hvac",
+        "ev_charging",
+    ]
+    assert [item["battery"]["initial_soc"] for item in config["microgrids"]] == [
+        0.50,
+        0.50,
+        0.50,
     ]
