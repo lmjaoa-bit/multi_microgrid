@@ -37,9 +37,19 @@ python -m scripts.run_cooperative_milp
 python scripts/run_experiment.py
 python scripts/run_experiment.py --algorithm matd3
 python scripts/run_experiment.py --algorithm crossgate
-python scripts/plot_results.py --run-dir outputs/matd3_dispatch/runs/MATD3_YYYY-MM-DD_HH-MM-SS_seed42
+python scripts/plot_results.py --run-dir outputs/working_runs/matd3_dispatch/runs/MATD3_YYYY-MM-DD_HH-MM-SS_seed42
 pytest -q
 ```
+
+普通训练默认写入 `outputs/working_runs/`。当某次训练经过检查并决定长期保留后，再显式晋升为正式结果：
+
+```powershell
+python scripts/manage_results.py promote `
+  --run outputs/working_runs/pnn_transformer/runs/<run_id> `
+  --release baseline_v1
+```
+
+正式结果保存在 `outputs/releases/<release_name>/<run_id>/`，并在 `outputs/releases/registry.csv` 中建立全局索引。默认禁止晋升 Git dirty 状态的运行；仅在明确接受风险时使用 `--allow-dirty`。
 
 全局默认采用普通 MATD3 的单调度方案。CrossGate 使用相同动作和物理环境。
 `--algorithm matd3` 对应实现 `algorithms/matd3_dispatch/`，参数位于 `configs/algorithms/matd3_dispatch.yaml`；
@@ -62,7 +72,7 @@ python scripts/run_experiment.py --algorithm matd3_attention
 - `algorithms/matd3/`：永久保留的标准 Actor、Twin Critic、Replay Buffer、目标网络和 TD3 更新。
 - `algorithms/<new_algorithm>/`：独立实验算法及按需加载的 `plugin.py`。
 - `configs/algorithms/`：每个算法独立的超参数，不与其他算法共享修改。
-- `experiments/`：所有算法共用的实验输出布局。
+- `experiments/`：所有算法共用的实验输出布局与正式结果生命周期管理。
 - `optimization/`：公共约束、独立基准与合作社会规划 MILP。
 - `allocation/`：Nash Bargaining 收益分配。
 - `diagnostics/`：异构场景与合作机会诊断。
@@ -71,7 +81,13 @@ python scripts/run_experiment.py --algorithm matd3_attention
 训练结果统一写入：
 
 ```text
-outputs/<algorithm>/runs/<run_id>/
+outputs/working_runs/<algorithm>/runs/<run_id>/
 ```
 
-`outputs/<algorithm>/latest_run.json` 指向最近一次运行；历史散落文件保存在 `legacy/`，不会与新 run 混在一起。
+确定长期保留的结果通过 `scripts/manage_results.py promote` 复制到：
+
+```text
+outputs/releases/<release_name>/<run_id>/
+```
+
+`working_runs` 中的结果属于调试/候选区，可以后续清理；`releases` 中的结果视为冻结的科研证据，不应覆盖或随意修改。
