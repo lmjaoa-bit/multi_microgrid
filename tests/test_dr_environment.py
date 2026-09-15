@@ -5,7 +5,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
+import yaml
 
+from algorithms.registry import get_algorithm_spec
 from envs.multi_microgrid_env import MultiMicrogridEnv
 
 
@@ -65,7 +67,6 @@ def test_dr_step_uses_base_plus_flexible_load_before_ess_and_preserves_balance()
 def test_grid_capacity_reduces_optional_ess_charging_before_actual_load():
     env = MultiMicrogridEnv(CONFIG, split="test")
     env.reset(seed=44, deterministic=True)
-    # Force a small grid import cap to exercise load-before-storage settlement.
     env.grids["mg3"] = type(env.grids["mg3"])(import_limit_kw=5.0, export_limit_kw=200.0)
     actions = {
         "mg1": np.asarray([0.0, 0.0]),
@@ -74,8 +75,38 @@ def test_grid_capacity_reduces_optional_ess_charging_before_actual_load():
     }
     _, _, _, info = env.step(actions)
     plan = info["plans"]["mg3"]
-    # Any curtailed import-backed storage demand is explicitly accounted for;
-    # actual load remains ahead of optional ESS charging in grid allocation.
     assert plan["grid_to_load_kw"] <= 5.0 + 1e-9
     assert plan["grid_to_battery_kw"] <= max(0.0, 5.0 - plan["grid_to_load_kw"]) + 1e-9
     assert plan["battery_charge_curtailed_kw"] >= 0.0
+
+
+def test_matd3_dispatch_dr_replay_and_update_use_projected_three_channel_actions():
+    spec = get_algorithm_spec("matd3_dispatch")
+    cfg = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    cfg["_project_root"] = str(ROOT)
+    env = MultiMicrogridEnv(spec.build_environment_config(cfg), split="test")
+    settings = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
+    settings = dict(settings)
+    settings["algorithm"] = dict(settings.get("algorithm", {}))
+    settings["algorithm"]["hidden_dims"] = [32, 32]
+    settings["algorithm"]["replay_capacity"] = 100
+    model = spec.create(env, settings, seed=7)
+
+    observations, reset_info = env.reset(seed=7, deterministic=True)
+    state = reset_info["global_state"]
+    metrics = {}
+    for _ in range(4):
+        actions = model.select_actions(observations, noise_std=0.05)
+        assert all(value.shape == (2,) for value in actions.values())
+        next_obs, rewards, done, info = env.step(actions)
+        model.replay.add(
+            observations, state, actions, rewards[env.agent_ids[0]],
+            next_obs, info["global_state_after"], done,
+        )
+        metrics = model.update(batch_size=2)
+        observations, state = next_obs, info["global_state_after"]
+
+    assert model.raw_action_dim == 2
+    assert model.effective_action_dim == 3
+    assert np.isfinite(metrics["critic_loss"])
+    assert model.update_steps > 0
