@@ -58,6 +58,8 @@ class CommercialHVACDR:
         self.comfort_infeasible = False
         self.terminal_thermal_infeasible = False
         self.last_projection = False
+        self._bounds_cache_key: tuple[int, float, float] | None = None
+        self._bounds_cache_value: tuple[float, float] | None = None
 
     @property
     def q_min_kw(self) -> float:
@@ -66,6 +68,10 @@ class CommercialHVACDR:
     @property
     def q_max_kw(self) -> float:
         return self.heat_max_kw * self.cop_heat
+
+    def _invalidate_bounds_cache(self) -> None:
+        self._bounds_cache_key = None
+        self._bounds_cache_value = None
 
     def reset(self, episode_frame: pd.DataFrame, base_load_kw: np.ndarray) -> None:
         if len(episode_frame) < self.episode_length:
@@ -84,6 +90,7 @@ class CommercialHVACDR:
         self.comfort_infeasible = False
         self.terminal_thermal_infeasible = False
         self.last_projection = False
+        self._invalidate_bounds_cache()
 
     def _timestamp(self, t: int) -> pd.Timestamp:
         if self._frame is None:
@@ -96,6 +103,19 @@ class CommercialHVACDR:
 
     def _comfort_bounds(self, t: int) -> tuple[float, float]:
         return self.occupied_comfort if self._occupied(t) else self.unoccupied_comfort
+
+    def _state_comfort_bounds(self, state_index: int) -> tuple[float, float]:
+        """Comfort band applying to the thermal state at a clock-time boundary.
+
+        Action ``t`` evolves the state from timestamp ``t`` to ``t+1``. Internal
+        gains therefore use occupancy during interval ``t``, while the resulting
+        air temperature must already satisfy the band in force at timestamp
+        ``t+1``. The 24:00 terminal boundary is treated as unoccupied.
+        """
+        index = int(state_index)
+        if 0 <= index < self.episode_length:
+            return self._comfort_bounds(index)
+        return self.unoccupied_comfort
 
     def _exogenous(self, t: int) -> tuple[float, float, float]:
         if self._frame is None or self._base_load_kw is None:
@@ -139,7 +159,7 @@ class CommercialHVACDR:
 
     def _one_step_bounds_q(self, t: int) -> tuple[float, float]:
         base_air, _ = self._next_state(self.t_air, self.t_mass, 0.0, t)
-        comfort_low, comfort_high = self._comfort_bounds(t)
+        comfort_low, comfort_high = self._state_comfort_bounds(int(t) + 1)
         q_required_low = (comfort_low - base_air) * self.c_air / self.delta_t
         q_required_high = (comfort_high - base_air) * self.c_air / self.delta_t
         low = max(self.q_min_kw, q_required_low)
@@ -170,12 +190,24 @@ class CommercialHVACDR:
         mass: dict[int, Any] = {}
         q: dict[int, Any] = {}
         start = int(t)
-        air[start] = model.addVariable(lb=self.t_air, ub=self.t_air, type=continuous, name=f"t_air[{start}]")
-        mass[start] = model.addVariable(lb=self.t_mass, ub=self.t_mass, type=continuous, name=f"t_mass[{start}]")
+        air[start] = model.addVariable(
+            lb=self.t_air, ub=self.t_air, type=continuous, name=f"t_air[{start}]"
+        )
+        mass[start] = model.addVariable(
+            lb=self.t_mass, ub=self.t_mass, type=continuous, name=f"t_mass[{start}]"
+        )
         for k in range(start, self.episode_length):
-            air[k + 1] = model.addVariable(lb=-100.0, ub=100.0, type=continuous, name=f"t_air[{k+1}]")
-            mass[k + 1] = model.addVariable(lb=-100.0, ub=100.0, type=continuous, name=f"t_mass[{k+1}]")
-            objective = -1.0 if maximize and k == start else 1.0 if (not maximize and k == start) else 0.0
+            air[k + 1] = model.addVariable(
+                lb=-100.0, ub=100.0, type=continuous, name=f"t_air[{k+1}]"
+            )
+            mass[k + 1] = model.addVariable(
+                lb=-100.0, ub=100.0, type=continuous, name=f"t_mass[{k+1}]"
+            )
+            objective = (
+                -1.0 if maximize and k == start
+                else 1.0 if (not maximize and k == start)
+                else 0.0
+            )
             q[k] = model.addVariable(
                 lb=self.q_min_kw,
                 ub=self.q_max_kw,
@@ -186,9 +218,13 @@ class CommercialHVACDR:
             t_out, q_solar, q_internal = self._exogenous(k)
             q_air = self.solar_air_fraction * q_solar
             q_mass = (1.0 - self.solar_air_fraction) * q_solar
-            a_air = 1.0 - self.delta_t / self.c_air * (1.0 / self.r_oa + 1.0 / self.r_am)
+            a_air = 1.0 - self.delta_t / self.c_air * (
+                1.0 / self.r_oa + 1.0 / self.r_am
+            )
             b_mass = self.delta_t / self.c_air * (1.0 / self.r_am)
-            constant_air = self.delta_t / self.c_air * (t_out / self.r_oa + q_internal + q_air)
+            constant_air = self.delta_t / self.c_air * (
+                t_out / self.r_oa + q_internal + q_air
+            )
             mass_from_air = self.delta_t / self.c_mass * (1.0 / self.r_am)
             mass_self = 1.0 - self.delta_t / self.c_mass * (1.0 / self.r_am)
             constant_mass = self.delta_t / self.c_mass * q_mass
@@ -205,14 +241,22 @@ class CommercialHVACDR:
                 + mass_self * mass[k]
                 + constant_mass
             )
-            comfort_low, comfort_high = self._comfort_bounds(k)
+            comfort_low, comfort_high = self._state_comfort_bounds(k + 1)
             model.addConstr(air[k + 1] >= comfort_low)
             model.addConstr(air[k + 1] <= comfort_high)
         terminal = self.episode_length
-        model.addConstr(air[terminal] >= self.initial_t_air - self.terminal_air_tolerance)
-        model.addConstr(air[terminal] <= self.initial_t_air + self.terminal_air_tolerance)
-        model.addConstr(mass[terminal] >= self.initial_t_mass - self.terminal_mass_tolerance)
-        model.addConstr(mass[terminal] <= self.initial_t_mass + self.terminal_mass_tolerance)
+        model.addConstr(
+            air[terminal] >= self.initial_t_air - self.terminal_air_tolerance
+        )
+        model.addConstr(
+            air[terminal] <= self.initial_t_air + self.terminal_air_tolerance
+        )
+        model.addConstr(
+            mass[terminal] >= self.initial_t_mass - self.terminal_mass_tolerance
+        )
+        model.addConstr(
+            mass[terminal] <= self.initial_t_mass + self.terminal_mass_tolerance
+        )
         model.minimize()
         solution = model.getSolution()
         if not solution.value_valid:
@@ -222,6 +266,10 @@ class CommercialHVACDR:
     def feasible_bounds(self, t: int) -> tuple[float, float]:
         if not 0 <= int(t) < self.episode_length:
             return (0.0, 0.0)
+        key = (int(t), round(float(self.t_air), 10), round(float(self.t_mass), 10))
+        if self._bounds_cache_key == key and self._bounds_cache_value is not None:
+            return self._bounds_cache_value
+
         one_low, one_high = self._one_step_bounds_q(t)
         terminal_low = self._solve_terminal_q(t, maximize=False)
         terminal_high = self._solve_terminal_q(t, maximize=True)
@@ -234,10 +282,21 @@ class CommercialHVACDR:
             if q_low > q_high + 1e-7:
                 self.terminal_thermal_infeasible = True
                 q_low, q_high = one_low, one_high
-        return (
-            float(np.clip(self._q_to_signed_electric(q_low), -self.cool_max_kw, self.heat_max_kw)),
-            float(np.clip(self._q_to_signed_electric(q_high), -self.cool_max_kw, self.heat_max_kw)),
+        result = (
+            float(np.clip(
+                self._q_to_signed_electric(q_low),
+                -self.cool_max_kw,
+                self.heat_max_kw,
+            )),
+            float(np.clip(
+                self._q_to_signed_electric(q_high),
+                -self.cool_max_kw,
+                self.heat_max_kw,
+            )),
         )
+        self._bounds_cache_key = key
+        self._bounds_cache_value = result
+        return result
 
     def plan(self, raw_action: float, t: int) -> dict[str, Any]:
         raw = clipped_raw(raw_action)
@@ -254,7 +313,9 @@ class CommercialHVACDR:
             "raw_action": raw,
             "requested_signed_power_kw": proposed,
             "effective_signed_power_kw": effective,
-            "effective_normalized": effective / (self.heat_max_kw if effective >= 0.0 else self.cool_max_kw),
+            "effective_normalized": effective / (
+                self.heat_max_kw if effective >= 0.0 else self.cool_max_kw
+            ),
             "flexible_load_kw": abs(effective),
             "thermal_power_kw": q_hvac,
             "heating_power_kw": max(effective, 0.0),
@@ -280,7 +341,10 @@ class CommercialHVACDR:
         signed_power = float(plan["effective_signed_power_kw"]) * served
         q_hvac = self._signed_electric_to_q(signed_power)
         t = int(plan["t"])
-        self.t_air, self.t_mass = self._next_state(self.t_air, self.t_mass, q_hvac, t)
+        self.t_air, self.t_mass = self._next_state(
+            self.t_air, self.t_mass, q_hvac, t
+        )
+        self._invalidate_bounds_cache()
         if served < 1.0 - 1e-10:
             self.terminal_thermal_infeasible = True
         return {
@@ -298,7 +362,10 @@ class CommercialHVACDR:
             occupied = float(self._occupied(t))
             weekend = float(self._timestamp(t).dayofweek >= 5)
         else:
-            t_out = float(self._frame.iloc[-1][self.temperature_column]) if self._frame is not None else 0.0
+            t_out = (
+                float(self._frame.iloc[-1][self.temperature_column])
+                if self._frame is not None else 0.0
+            )
             comfort_low, comfort_high = self.unoccupied_comfort
             occupied = 0.0
             weekend = 0.0
