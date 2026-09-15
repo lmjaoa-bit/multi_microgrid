@@ -7,10 +7,16 @@ on:
       - '.github/workflows/dr-data-validation.yml'
       - 'scripts/build_spatial_market_data.py'
       - 'scripts/calibrate_hvac_load.py'
+      - 'scripts/audit_dr_physics.py'
+      - 'tests/test_dr_physics_audit.py'
       - 'configs/cooperative.yaml'
       - 'core/data_manager.py'
       - 'core/forecast.py'
       - 'components/commercial_hvac.py'
+      - 'components/industrial_mill.py'
+      - 'components/ev_charging.py'
+      - 'envs/multi_microgrid_env.py'
+      - 'envs/cooperative_energy_sharing.py'
   workflow_dispatch:
 
 permissions:
@@ -19,7 +25,7 @@ permissions:
 jobs:
   regenerate-and-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -52,5 +58,12 @@ jobs:
           assert not any(step_info['terminal_soc_infeasible'].values())
           print('regional-data smoke passed')
           PY
+      - name: Audit 12-month heterogeneous DR physics
+        run: >-
+          python scripts/audit_dr_physics.py
+          --config configs/cooperative.yaml
+          --year 2018
+          --seed 20260915
+          --output /tmp/dr_physics_audit.json
       - name: Calibrate MG2 annual reference HVAC load
         run: python scripts/calibrate_hvac_load.py --solve --desired-total-kw 80 --output /tmp/mg2_hvac_calibration.json
