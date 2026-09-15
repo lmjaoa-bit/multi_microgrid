@@ -14,6 +14,7 @@ on:
       - 'evaluation/**'
       - 'optimization/**'
       - 'utils/**'
+      - 'scripts/audit_dr_physics.py'
       - 'tests/**'
   workflow_dispatch:
 
@@ -39,6 +40,7 @@ jobs:
           tests/test_controllable_loads.py
           tests/test_joint_action_projection.py
           tests/test_dr_environment.py
+          tests/test_dr_physics_audit.py
           tests/test_experiment_profiles.py
           tests/test_plain_single_dispatch.py
           tests/test_cooperative_physics.py
