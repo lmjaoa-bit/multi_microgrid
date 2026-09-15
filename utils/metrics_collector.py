@@ -47,10 +47,13 @@ def distribution_statistics(values: Iterable[float]) -> dict[str, float | int | 
 
 def _native(value: Any, path: str, invalid: list[str]) -> Any:
     if isinstance(value, Mapping):
-        return {str(key): _native(item, f"{path}.{key}" if path else str(key), invalid)
-                for key, item in value.items()}
+        return {
+            str(key): _native(item, f"{path}.{key}" if path else str(key), invalid)
+            for key, item in value.items()
+        }
     if isinstance(value, (list, tuple, set)):
-        return [_native(item, f"{path}[{index}]", invalid) for index, item in enumerate(value)]
+        return [_native(item, f"{path}[{index}]", invalid)
+                for index, item in enumerate(value)]
     if isinstance(value, np.ndarray):
         return _native(value.tolist(), path, invalid)
     if isinstance(value, np.generic):
@@ -70,8 +73,7 @@ def _native(value: Any, path: str, invalid: list[str]) -> Any:
 
 def json_ready(value: Any) -> tuple[Any, list[str]]:
     invalid: list[str] = []
-    result = _native(value, "", invalid)
-    return result, invalid
+    return _native(value, "", invalid), invalid
 
 
 def write_json(path: str | Path, value: Any) -> list[str]:
@@ -86,7 +88,8 @@ def write_json(path: str | Path, value: Any) -> list[str]:
         )
         if isinstance(clean, dict):
             clean.setdefault("serialization_warnings", []).extend(
-                {"field": field, "reason": "non_finite_replaced_with_null"} for field in invalid
+                {"field": field, "reason": "non_finite_replaced_with_null"}
+                for field in invalid
             )
     payload = json.dumps(clean, ensure_ascii=False, indent=2, allow_nan=False)
     temporary = target.with_suffix(target.suffix + ".tmp")
@@ -115,7 +118,7 @@ def write_csv(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> None:
     columns: list[str] = []
     for row in rows:
         for key in row:
-            if key not in columns:
+            if str(key) not in columns:
                 columns.append(str(key))
     with target.open("w", encoding="utf-8", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=columns, extrasaction="ignore")
@@ -128,11 +131,12 @@ def write_csv(path: str | Path, rows: Sequence[Mapping[str, Any]]) -> None:
                     RuntimeWarning,
                     stacklevel=2,
                 )
-            writer.writerow({key: "" if clean.get(key) is None else clean.get(key) for key in columns})
+            writer.writerow({key: "" if clean.get(key) is None else clean.get(key)
+                             for key in columns})
 
 
 class EpisodeMetricsCollector:
-    """One source of truth for train, validation, and test episode metrics."""
+    """Shared train/validation/test episode metrics with DR-aware diagnostics."""
 
     def __init__(self, env: Any, capture_hourly: bool = False,
                  tolerance: float = DEFAULT_TOLERANCE) -> None:
@@ -140,6 +144,8 @@ class EpisodeMetricsCollector:
         self.agent_ids = list(env.agent_ids)
         self.capture_hourly = bool(capture_hourly)
         self.tolerance = float(tolerance)
+        self.action_design = str(getattr(env, "action_design", "single_dispatch"))
+        self.dr_enabled = self.action_design == "single_dispatch_dr"
         self.reset()
 
     def reset(self) -> None:
@@ -152,6 +158,8 @@ class EpisodeMetricsCollector:
         self.rewards = {mg: 0.0 for mg in ids}
         self.economics = {mg: defaultdict(float) for mg in ids}
         self.energy = {mg: defaultdict(float) for mg in ids}
+        self.dr_totals = {mg: defaultdict(float) for mg in ids}
+        self.dr_last: dict[str, dict[str, float]] = {mg: {} for mg in ids}
         self.soc = {mg: [float(self.env.cores[mg].battery.soc)] for mg in ids}
         self.action_values = {mg: defaultdict(list) for mg in ids}
         self.action_clip_count = {mg: 0 for mg in ids}
@@ -177,19 +185,18 @@ class EpisodeMetricsCollector:
     def _economic_step(self, mg: str, info: Mapping[str, Any]) -> dict[str, float]:
         cost = info["costs"][mg]
         payment = float(info["p2p"]["by_microgrid"][mg].get("p2p_transfer_payment", 0.0))
-        purchase = max(0.0, -payment)
-        sale = max(0.0, payment)
         result = {
             "grid_import_cost": float(cost.get("grid_import_cost", 0.0)),
             "grid_export_revenue": float(cost.get("grid_export_revenue", 0.0)),
-            "p2p_purchase_cost": purchase,
-            "p2p_sale_revenue": sale,
+            "p2p_purchase_cost": max(0.0, -payment),
+            "p2p_sale_revenue": max(0.0, payment),
             "p2p_net_revenue": payment,
             "battery_degradation_cost": float(cost.get("battery_degradation_cost", 0.0)),
             "unmet_load_cost": float(cost.get("unmet_load_cost", 0.0)),
             "renewable_curtailment_cost": float(cost.get("curtailment_cost", 0.0)),
             "terminal_soc_penalty": float(cost.get("terminal_soc_penalty", 0.0)),
-            # P2P is an internal transfer: it changes MG allocation but sums to zero for the team.
+            # Individual accounting includes the internal P2P transfer. Transfers
+            # sum to zero, so the sum still equals team physical profit.
             "physical_profit": float(cost.get("physical_profit", 0.0)) + payment,
         }
         for key, value in result.items():
@@ -204,8 +211,14 @@ class EpisodeMetricsCollector:
         dt = float(self.env.delta_t)
         renewable_available = float(plan.get("renewable_kw", 0.0)) * dt
         curtailed = float(settlement.get("renewable_curtailment_kw", 0.0)) * dt
+        actual_load = float(plan.get("actual_load_kw", plan.get("load_kw", 0.0)))
+        base_load = float(plan.get("base_load_kw", actual_load))
+        flexible_load = float(plan.get("flexible_load_kw", max(0.0, actual_load - base_load)))
         result = {
-            "load_kwh": float(plan.get("load_kw", 0.0)) * dt,
+            "load_kwh": actual_load * dt,
+            "base_load_kwh": base_load * dt,
+            "flexible_load_kwh": flexible_load * dt,
+            "actual_load_kwh": actual_load * dt,
             "renewable_available_kwh": renewable_available,
             "renewable_used_kwh": max(0.0, renewable_available - curtailed),
             "renewable_curtailment_kwh": curtailed,
@@ -230,25 +243,57 @@ class EpisodeMetricsCollector:
             "battery_charge_kwh": float(device.get("charge_kw", 0.0)) * dt,
             "battery_discharge_kwh": float(device.get("discharge_kw", 0.0)) * dt,
             "battery_throughput_kwh": float(device.get("throughput_kwh", 0.0)),
+            "battery_charge_curtailed_kwh": float(plan.get("battery_charge_curtailed_kw", 0.0)) * dt,
             "unmet_load_kwh": float(settlement.get("unmet_load_kw", 0.0)) * dt,
         }
         for key, value in result.items():
             self.energy[mg][key] += value
         return result
 
+    def _record_dr_step(self, mg: str, info: Mapping[str, Any]) -> None:
+        if not self.dr_enabled:
+            return
+        plan = info["plans"][mg]
+        dr_plan = info.get("dr_plans", {}).get(mg, {})
+        state_after = info.get("dr_state_after", {}).get(mg, {})
+        dt = float(self.env.delta_t)
+        totals = self.dr_totals[mg]
+        totals["flexible_load_energy_kwh"] += float(plan.get("flexible_load_kw", 0.0)) * dt
+        totals["projection_steps"] += float(bool(plan.get("dr_projected", False)))
+        totals["ess_projection_steps"] += float(bool(plan.get("ess_projected", False)))
+        totals["supply_infeasible_steps"] += float(bool(plan.get("dr_supply_infeasible", False)))
+        kind = str(self.env.cfg_by_id[mg]["dr"]["type"])
+        if kind == "industrial_mill":
+            totals["mill_energy_kwh"] += float(dr_plan.get("flexible_load_kw", 0.0)) * dt
+            totals["mill_effective_duty_sum"] += float(dr_plan.get("effective_duty", 0.0))
+            totals["mill_production_t"] += float(dr_plan.get("production_tph", 0.0)) * dt
+            totals["terminal_infeasible_steps"] += float(bool(dr_plan.get("terminal_infeasible", False)))
+        elif kind == "commercial_hvac":
+            totals["hvac_energy_kwh"] += float(dr_plan.get("flexible_load_kw", 0.0)) * dt
+            totals["heating_energy_kwh"] += float(dr_plan.get("heating_power_kw", 0.0)) * dt
+            totals["cooling_energy_kwh"] += float(dr_plan.get("cooling_power_kw", 0.0)) * dt
+            totals["comfort_infeasible_steps"] += float(bool(dr_plan.get("comfort_infeasible", False)))
+            totals["terminal_infeasible_steps"] += float(bool(dr_plan.get("terminal_thermal_infeasible", False)))
+        elif kind == "ev_charging":
+            totals["ev_charge_energy_kwh"] += float(dr_plan.get("effective_power_kw", 0.0)) * dt
+            totals["target_missed_steps"] += float(bool(dr_plan.get("target_missed", False)))
+        self.dr_last[mg] = {key: float(value) for key, value in state_after.items()
+                            if isinstance(value, (int, float, np.number, bool))}
+
     def _constraint_step(self, info: Mapping[str, Any]) -> dict[str, Any]:
-        ids = self.agent_ids
         soc_by_mg: dict[str, float] = {}
         battery_by_mg: dict[str, float] = {}
         grid_by_mg: dict[str, float] = {}
-        for mg in ids:
+        for mg in self.agent_ids:
             battery = self.env.cores[mg].battery
             soc = float(info["devices"][mg]["soc"])
             soc_violation = max(0.0, battery.soc_min - soc, soc - battery.soc_max)
             charge = float(info["devices"][mg]["charge_kw"])
             discharge = float(info["devices"][mg]["discharge_kw"])
             battery_violation = max(
-                0.0, charge - battery.max_charge_kw, discharge - battery.max_discharge_kw,
+                0.0,
+                charge - battery.max_charge_kw,
+                discharge - battery.max_discharge_kw,
                 min(charge, discharge),
             )
             settlement = info["settlements"][mg]
@@ -265,9 +310,14 @@ class EpisodeMetricsCollector:
             self.violations["battery_power"].append(battery_violation)
             self.violations["grid_power"].append(grid_violation)
 
-        power_balance = sum(abs(float(info["settlements"][mg]["power_balance_residual_kw"])) for mg in ids)
-        p2p_sell = sum(float(info["p2p"]["by_microgrid"][mg]["p2p_sell_kw"]) for mg in ids)
-        p2p_buy = sum(float(info["p2p"]["by_microgrid"][mg]["p2p_buy_kw"]) for mg in ids)
+        power_balance = sum(
+            abs(float(info["settlements"][mg]["power_balance_residual_kw"]))
+            for mg in self.agent_ids
+        )
+        p2p_sell = sum(float(info["p2p"]["by_microgrid"][mg]["p2p_sell_kw"])
+                       for mg in self.agent_ids)
+        p2p_buy = sum(float(info["p2p"]["by_microgrid"][mg]["p2p_buy_kw"])
+                      for mg in self.agent_ids)
         p2p_balance = abs(p2p_sell - p2p_buy)
         self.violations["power_balance"].append(power_balance)
         self.violations["p2p_balance"].append(p2p_balance)
@@ -286,11 +336,11 @@ class EpisodeMetricsCollector:
         self.team_reward += float(info.get("team_reward", 0.0))
         self.shaping_reward += float(info.get("shaping_reward", 0.0))
         economics: dict[str, dict[str, float]] = {}
-        energies: dict[str, dict[str, float]] = {}
 
         for mg in self.agent_ids:
             economics[mg] = self._economic_step(mg, info)
-            energies[mg] = self._energy_step(mg, info)
+            self._energy_step(mg, info)
+            self._record_dr_step(mg, info)
             self.profit[mg] += economics[mg]["physical_profit"]
             self.rewards[mg] += float((rewards or {}).get(mg, info.get("team_reward", 0.0)))
             self.soc[mg].append(float(info["devices"][mg]["soc"]))
@@ -298,7 +348,9 @@ class EpisodeMetricsCollector:
             action = np.asarray(raw_actions[mg], dtype=np.float64).reshape(-1)
             action_names = ["battery"]
             if action.size >= 2:
-                action_names.append("sharing_offer_ratio_raw")
+                action_names.append(
+                    "dr_raw" if self.dr_enabled else "sharing_offer_ratio_raw"
+                )
             action_names.extend(f"action_{i}" for i in range(2, action.size))
             for index, value in enumerate(action):
                 self.action_values[mg][action_names[index]].append(float(value))
@@ -317,11 +369,12 @@ class EpisodeMetricsCollector:
         if price is not None and math.isfinite(float(price)):
             self.p2p_prices.append(float(price))
         for mg in self.agent_ids:
-            payment = float(p2p["by_microgrid"][mg].get("p2p_transfer_payment", 0.0))
+            peer = p2p["by_microgrid"][mg]
+            payment = float(peer.get("p2p_transfer_payment", 0.0))
             self.p2p_payment[mg] += payment
             plan = info["plans"][mg]
-            offer = float(p2p["by_microgrid"][mg].get("ess_p2p_offer_kw", 0.0))
-            accepted = float(p2p["by_microgrid"][mg].get("ess_p2p_sell_kw", 0.0))
+            offer = float(peer.get("ess_p2p_offer_kw", 0.0))
+            accepted = float(peer.get("ess_p2p_sell_kw", 0.0))
             self.sharing_action_masked_steps[mg] += int(
                 bool(plan.get("sharing_action_masked", False))
             )
@@ -334,60 +387,67 @@ class EpisodeMetricsCollector:
 
         constraints = self._constraint_step(info)
         if self.capture_hourly:
-            self.hourly_rows.append(self._hourly_row(raw_actions, info, economics, constraints))
+            self.hourly_rows.append(
+                self._hourly_row(raw_actions, info, economics, constraints)
+            )
 
     def _hourly_row(self, raw_actions: Mapping[str, Sequence[float]], info: Mapping[str, Any],
-                    economics: Mapping[str, Mapping[str, float]], constraints: Mapping[str, Any]) -> dict[str, Any]:
+                    economics: Mapping[str, Mapping[str, float]],
+                    constraints: Mapping[str, Any]) -> dict[str, Any]:
         timestamp = str(info["timestamp"])
-        date = timestamp[:10]
         try:
             hour = int(timestamp[11:13])
         except (TypeError, ValueError):
             hour = self.steps - 1
-        row: dict[str, Any] = {"date": date, "hour": hour, "timestep": self.steps - 1}
+        row: dict[str, Any] = {
+            "date": timestamp[:10], "hour": hour, "timestep": self.steps - 1,
+        }
         for mg in self.agent_ids:
             plan = info["plans"][mg]
             settlement = info["settlements"][mg]
             device = info["devices"][mg]
-            p2p = info["p2p"]["by_microgrid"][mg]
+            peer = info["p2p"]["by_microgrid"][mg]
             available = float(plan.get("renewable_kw", 0.0))
             curtailment = float(settlement.get("renewable_curtailment_kw", 0.0))
+            actual_load = float(plan.get("actual_load_kw", plan.get("load_kw", 0.0)))
             row.update({
-                f"{mg}_load_kw": float(plan.get("load_kw", 0.0)),
+                f"{mg}_load_kw": actual_load,
+                f"{mg}_base_load_kw": float(plan.get("base_load_kw", actual_load)),
+                f"{mg}_flexible_load_kw": float(plan.get("flexible_load_kw", 0.0)),
+                f"{mg}_actual_load_kw": actual_load,
                 f"{mg}_renewable_available_kw": available,
                 f"{mg}_renewable_used_kw": max(0.0, available - curtailment),
                 f"{mg}_renewable_curtailment_kw": curtailment,
                 f"{mg}_grid_import_kw": float(settlement["grid_import_kw"]),
                 f"{mg}_grid_export_kw": float(settlement["grid_export_kw"]),
+                f"{mg}_unmet_load_kw": float(settlement.get("unmet_load_kw", 0.0)),
+                f"{mg}_power_balance_residual_kw": float(settlement["power_balance_residual_kw"]),
                 f"{mg}_battery_charge_kw": float(device["charge_kw"]),
                 f"{mg}_battery_discharge_kw": float(device["discharge_kw"]),
+                f"{mg}_battery_charge_curtailed_kw": float(plan.get("battery_charge_curtailed_kw", 0.0)),
                 f"{mg}_soc": float(device["soc"]),
-                f"{mg}_p2p_buy_kw": float(p2p["p2p_buy_kw"]),
-                f"{mg}_p2p_sell_kw": float(p2p["p2p_sell_kw"]),
-                f"{mg}_renewable_p2p_sell_kw": float(p2p.get("renewable_p2p_sell_kw", 0.0)),
-                f"{mg}_ess_p2p_sell_kw": float(p2p.get("ess_p2p_sell_kw", 0.0)),
-                f"{mg}_p2p_to_load_kw": float(p2p.get("p2p_to_load_kw", 0.0)),
-                f"{mg}_p2p_to_battery_kw": float(p2p.get("p2p_to_battery_kw", 0.0)),
-                f"{mg}_ess_p2p_offer_kw": float(p2p.get("ess_p2p_offer_kw", 0.0)),
-                f"{mg}_ess_p2p_unmatched_kw": float(p2p.get("ess_p2p_unmatched_kw", 0.0)),
+                f"{mg}_p2p_buy_kw": float(peer["p2p_buy_kw"]),
+                f"{mg}_p2p_sell_kw": float(peer["p2p_sell_kw"]),
+                f"{mg}_renewable_p2p_sell_kw": float(peer.get("renewable_p2p_sell_kw", 0.0)),
+                f"{mg}_ess_p2p_sell_kw": float(peer.get("ess_p2p_sell_kw", 0.0)),
+                f"{mg}_p2p_to_load_kw": float(peer.get("p2p_to_load_kw", 0.0)),
+                f"{mg}_p2p_to_battery_kw": float(peer.get("p2p_to_battery_kw", 0.0)),
+                f"{mg}_ess_p2p_offer_kw": float(peer.get("ess_p2p_offer_kw", 0.0)),
+                f"{mg}_ess_p2p_unmatched_kw": float(peer.get("ess_p2p_unmatched_kw", 0.0)),
                 f"{mg}_ess_p2p_offer_uncapped_kw": float(
-                    plan.get("ess_p2p_offer_uncapped_kw", p2p.get("ess_p2p_offer_kw", 0.0))
+                    plan.get("ess_p2p_offer_uncapped_kw", peer.get("ess_p2p_offer_kw", 0.0))
                 ),
-                f"{mg}_ess_p2p_offer_cap_kw": float(
-                    plan.get("ess_p2p_offer_cap_kw", plan.get("ess_flexible_discharge_kw", 0.0))
-                ),
+                f"{mg}_ess_p2p_offer_cap_kw": float(plan.get("ess_p2p_offer_cap_kw", 0.0)),
                 f"{mg}_ess_p2p_offer_projection_reduction_kw": float(
                     plan.get("ess_p2p_offer_projection_reduction_kw", 0.0)
                 ),
                 f"{mg}_ess_to_local_load_kw": float(plan.get("ess_to_local_kw", 0.0)),
                 f"{mg}_requested_sharing_offer_ratio": float(
-                    plan.get("requested_sharing_offer_ratio", plan.get("sharing_offer_ratio", 1.0))
+                    plan.get("requested_sharing_offer_ratio", 0.0)
                 ),
-                f"{mg}_sharing_offer_ratio": float(plan.get("sharing_offer_ratio", 1.0)),
+                f"{mg}_sharing_offer_ratio": float(plan.get("sharing_offer_ratio", 0.0)),
                 f"{mg}_sharing_action_masked": int(bool(plan.get("sharing_action_masked", False))),
-                f"{mg}_ess_offer_projection_active": int(
-                    bool(plan.get("ess_offer_projection_active", False))
-                ),
+                f"{mg}_ess_offer_projection_active": int(bool(plan.get("ess_offer_projection_active", False))),
                 f"{mg}_grid_import_cost": economics[mg]["grid_import_cost"],
                 f"{mg}_grid_export_revenue": economics[mg]["grid_export_revenue"],
                 f"{mg}_p2p_purchase_cost": economics[mg]["p2p_purchase_cost"],
@@ -397,18 +457,71 @@ class EpisodeMetricsCollector:
                 f"{mg}_soc_violation": constraints["soc_by_microgrid"][mg],
                 f"{mg}_battery_power_violation": constraints["battery_by_microgrid"][mg],
             })
+
             raw = np.asarray(raw_actions[mg], dtype=np.float64).reshape(-1)
-            for field in ("direct_local_discharge_kw", "direct_local_priority_reserve_kw", "direct_remaining_discharge_kw",
-                          "direct_trade_capacity_kw", "effective_local_action",
-                          "effective_trade_action", "mandatory_export_kw", "battery_discharge_requested_kw",
-                          "dispatch_requested_power_kw", "dispatch_forced"):
-                if field in plan:
-                    row[f"{mg}_{field}"] = float(plan[field])
             for index, value in enumerate(raw):
                 row[f"{mg}_raw_action_{index}"] = float(value)
-            # Executed action fields are physical execution, after scaling/projection/clipping.
             row[f"{mg}_executed_action_0"] = float(device["discharge_kw"] - device["charge_kw"])
-            if raw.size >= 2:
+
+            for field in (
+                "direct_local_discharge_kw", "direct_local_priority_reserve_kw",
+                "direct_remaining_discharge_kw", "direct_trade_capacity_kw",
+                "effective_local_action", "effective_trade_action",
+                "mandatory_export_kw", "battery_discharge_requested_kw",
+                "dispatch_requested_power_kw", "dispatch_forced",
+            ):
+                if field in plan:
+                    row[f"{mg}_{field}"] = float(plan[field])
+
+            if self.dr_enabled:
+                row.update({
+                    f"{mg}_raw_ess_action": float(plan.get("raw_ess_action", raw[0])),
+                    f"{mg}_raw_dr_action": float(plan.get("raw_dr_action", raw[1])),
+                    f"{mg}_effective_ess_dispatch": float(plan.get("effective_ess_dispatch", 0.0)),
+                    f"{mg}_effective_dr_action": float(plan.get("effective_dr_action", 0.0)),
+                    f"{mg}_ess_projection_delta": float(plan.get("ess_projection_delta", 0.0)),
+                    f"{mg}_dr_projection_delta": float(plan.get("dr_projection_delta", 0.0)),
+                    f"{mg}_ess_projected": int(bool(plan.get("ess_projected", False))),
+                    f"{mg}_dr_projected": int(bool(plan.get("dr_projected", False))),
+                    f"{mg}_dr_supply_infeasible": int(bool(plan.get("dr_supply_infeasible", False))),
+                })
+                row[f"{mg}_executed_action_1"] = float(plan.get("effective_dr_action", 0.0))
+                dr_plan = info.get("dr_plans", {}).get(mg, {})
+                dr_state = info.get("dr_state_after", {}).get(mg, {})
+                kind = str(self.env.cfg_by_id[mg]["dr"]["type"])
+                if kind == "industrial_mill":
+                    row.update({
+                        f"{mg}_mill_requested_duty": float(dr_plan.get("requested_duty", 0.0)),
+                        f"{mg}_mill_effective_duty": float(dr_plan.get("effective_duty", 0.0)),
+                        f"{mg}_mill_power_kw": float(dr_plan.get("flexible_load_kw", 0.0)),
+                        f"{mg}_mill_production_tph": float(dr_plan.get("production_tph", 0.0)),
+                        f"{mg}_silo_level_t": float(dr_state.get("silo_level_t", dr_plan.get("silo_after_t", 0.0))),
+                        f"{mg}_silo_ratio": float(dr_state.get("silo_ratio", 0.0)),
+                        f"{mg}_mill_feasible_min": float(dr_plan.get("feasible_min", 0.0)),
+                        f"{mg}_mill_feasible_max": float(dr_plan.get("feasible_max", 0.0)),
+                    })
+                elif kind == "commercial_hvac":
+                    row.update({
+                        f"{mg}_hvac_effective_signed_power_kw": float(dr_plan.get("effective_signed_power_kw", 0.0)),
+                        f"{mg}_hvac_heating_power_kw": float(dr_plan.get("heating_power_kw", 0.0)),
+                        f"{mg}_hvac_cooling_power_kw": float(dr_plan.get("cooling_power_kw", 0.0)),
+                        f"{mg}_t_air_c": float(dr_state.get("t_air_c", dr_plan.get("t_air_after_c", 0.0))),
+                        f"{mg}_t_mass_c": float(dr_state.get("t_mass_c", dr_plan.get("t_mass_after_c", 0.0))),
+                        f"{mg}_t_out_c": float(dr_state.get("t_out_c", 0.0)),
+                        f"{mg}_occupied": float(dr_state.get("occupied", 0.0)),
+                        f"{mg}_comfort_infeasible": int(bool(dr_plan.get("comfort_infeasible", False))),
+                        f"{mg}_terminal_thermal_infeasible": int(bool(dr_plan.get("terminal_thermal_infeasible", False))),
+                    })
+                elif kind == "ev_charging":
+                    row.update({
+                        f"{mg}_ev_effective_power_kw": float(dr_plan.get("effective_power_kw", 0.0)),
+                        f"{mg}_ev_soc": float(dr_state.get("ev_soc", dr_plan.get("soc_after", 0.0))),
+                        f"{mg}_ev_soc_gap": float(dr_state.get("ev_soc_gap", 0.0)),
+                        f"{mg}_ev_hours_to_departure": float(dr_state.get("ev_hours_to_departure", 0.0)),
+                        f"{mg}_deadline_pressure": float(dr_state.get("deadline_pressure", 0.0)),
+                        f"{mg}_ev_target_missed": int(bool(dr_plan.get("target_missed", False))),
+                    })
+            elif raw.size >= 2:
                 row[f"{mg}_executed_action_1"] = float(plan.get("sharing_offer_ratio", 0.0))
 
         for seller in self.agent_ids:
@@ -417,7 +530,9 @@ class EpisodeMetricsCollector:
                     continue
                 key = f"{seller}->{buyer}"
                 energy = float(info["p2p"].get("pair_flows_kwh", {}).get(key, 0.0))
-                row[f"p2p_{seller}_to_{buyer}_kw"] = energy / max(float(self.env.delta_t), EPSILON)
+                row[f"p2p_{seller}_to_{buyer}_kw"] = (
+                    energy / max(float(self.env.delta_t), EPSILON)
+                )
         row.update({
             "p2p_price": info["p2p"].get("transfer_price_per_kwh"),
             "p2p_total_energy_kwh": float(info["p2p"]["total_p2p_kwh"]),
@@ -441,31 +556,79 @@ class EpisodeMetricsCollector:
             "max": float(np.max(array)) if array.size else 0.0,
         }
 
+    def _dr_summary(self, mg: str) -> dict[str, Any]:
+        if not self.dr_enabled:
+            return {}
+        totals = self.dr_totals[mg]
+        kind = str(self.env.cfg_by_id[mg]["dr"]["type"])
+        summary: dict[str, Any] = {
+            "type": kind,
+            "flexible_load_energy_kwh": float(totals["flexible_load_energy_kwh"]),
+            "projection_rate": safe_ratio(totals["projection_steps"], self.steps),
+            "ess_projection_rate": safe_ratio(totals["ess_projection_steps"], self.steps),
+            "supply_infeasible_rate": safe_ratio(totals["supply_infeasible_steps"], self.steps),
+        }
+        if kind == "industrial_mill":
+            cfg = self.env.cfg_by_id[mg]["dr"]
+            summary.update({
+                "mill_energy_kwh": float(totals["mill_energy_kwh"]),
+                "mean_effective_duty": safe_ratio(totals["mill_effective_duty_sum"], self.steps),
+                "production_t": float(totals["mill_production_t"]),
+                "terminal_silo_level_t": self.dr_last[mg].get("silo_level_t"),
+                "terminal_silo_gap_t": (
+                    self.dr_last[mg].get("silo_level_t", float(cfg["silo_initial_t"]))
+                    - float(cfg["silo_initial_t"])
+                ),
+                "terminal_infeasible_rate": safe_ratio(totals["terminal_infeasible_steps"], self.steps),
+            })
+        elif kind == "commercial_hvac":
+            summary.update({
+                "hvac_energy_kwh": float(totals["hvac_energy_kwh"]),
+                "heating_energy_kwh": float(totals["heating_energy_kwh"]),
+                "cooling_energy_kwh": float(totals["cooling_energy_kwh"]),
+                "comfort_infeasible_rate": safe_ratio(totals["comfort_infeasible_steps"], self.steps),
+                "terminal_thermal_infeasible_rate": safe_ratio(totals["terminal_infeasible_steps"], self.steps),
+                "terminal_t_air_c": self.dr_last[mg].get("t_air_c"),
+                "terminal_t_mass_c": self.dr_last[mg].get("t_mass_c"),
+            })
+        elif kind == "ev_charging":
+            cfg = self.env.cfg_by_id[mg]["dr"]
+            departure_soc = self.dr_last[mg].get("ev_soc")
+            summary.update({
+                "ev_charge_energy_kwh": float(totals["ev_charge_energy_kwh"]),
+                "departure_soc": departure_soc,
+                "target_soc": float(cfg["target_soc"]),
+                "target_met": bool(
+                    departure_soc is not None and departure_soc >= float(cfg["target_soc"]) - 1e-7
+                ),
+                "target_missed_rate": safe_ratio(totals["target_missed_steps"], self.steps),
+            })
+        return summary
+
     def finalize_episode(self) -> dict[str, Any]:
-        energy = {}
-        economics = {}
+        energy: dict[str, dict[str, float]] = {}
+        economics: dict[str, dict[str, float]] = {}
         for mg in self.agent_ids:
             economics[mg] = {key: float(value) for key, value in self.economics[mg].items()}
-            # Preserve the complete cross-algorithm schema even when the environment has no term.
             for key in (
                 "grid_import_cost", "grid_export_revenue", "p2p_purchase_cost",
-                "p2p_sale_revenue", "p2p_net_revenue",
-                "battery_degradation_cost", "unmet_load_cost",
-                "renewable_curtailment_cost",
+                "p2p_sale_revenue", "p2p_net_revenue", "battery_degradation_cost",
+                "unmet_load_cost", "renewable_curtailment_cost",
                 "terminal_soc_penalty", "physical_profit",
             ):
                 economics[mg].setdefault(key, 0.0)
             energy[mg] = {key: float(value) for key, value in self.energy[mg].items()}
             for key in (
-                "load_kwh", "renewable_available_kwh", "renewable_used_kwh",
+                "load_kwh", "base_load_kwh", "flexible_load_kwh", "actual_load_kwh",
+                "renewable_available_kwh", "renewable_used_kwh",
                 "renewable_curtailment_kwh", "grid_import_kwh", "grid_export_kwh",
                 "p2p_buy_kwh", "p2p_sell_kwh", "renewable_p2p_sell_kwh",
                 "ess_p2p_sell_kwh", "p2p_to_load_kwh", "p2p_to_battery_kwh",
                 "renewable_p2p_offer_kwh", "ess_p2p_offer_kwh",
                 "ess_p2p_unmatched_kwh", "ess_p2p_offer_uncapped_kwh",
-                "ess_p2p_offer_projection_reduction_kwh",
-                "ess_to_local_load_kwh", "battery_charge_kwh",
-                "battery_discharge_kwh", "battery_throughput_kwh", "unmet_load_kwh",
+                "ess_p2p_offer_projection_reduction_kwh", "ess_to_local_load_kwh",
+                "battery_charge_kwh", "battery_discharge_kwh", "battery_throughput_kwh",
+                "battery_charge_curtailed_kwh", "unmet_load_kwh",
             ):
                 energy[mg].setdefault(key, 0.0)
             energy[mg]["renewable_utilization_rate"] = safe_ratio(
@@ -503,9 +666,8 @@ class EpisodeMetricsCollector:
                 mg: energy[mg]["ess_p2p_unmatched_kwh"] for mg in self.agent_ids
             },
             "ess_offer_acceptance_rate_by_microgrid": {
-                mg: safe_ratio(
-                    energy[mg]["ess_p2p_sell_kwh"], energy[mg]["ess_p2p_offer_kwh"]
-                ) for mg in self.agent_ids
+                mg: safe_ratio(energy[mg]["ess_p2p_sell_kwh"], energy[mg]["ess_p2p_offer_kwh"])
+                for mg in self.agent_ids
             },
             "ess_offer_any_fill_rate_by_microgrid": {
                 mg: safe_ratio(self.ess_offer_any_fill_steps[mg], self.ess_offer_steps[mg])
@@ -516,12 +678,8 @@ class EpisodeMetricsCollector:
                 for mg in self.agent_ids
             },
             "ess_offer_step_count_by_microgrid": dict(self.ess_offer_steps),
-            "ess_offer_any_fill_step_count_by_microgrid": dict(
-                self.ess_offer_any_fill_steps
-            ),
-            "ess_offer_full_fill_step_count_by_microgrid": dict(
-                self.ess_offer_full_fill_steps
-            ),
+            "ess_offer_any_fill_step_count_by_microgrid": dict(self.ess_offer_any_fill_steps),
+            "ess_offer_full_fill_step_count_by_microgrid": dict(self.ess_offer_full_fill_steps),
             "sharing_action_mask_rate_by_microgrid": {
                 mg: safe_ratio(self.sharing_action_masked_steps[mg], self.steps)
                 for mg in self.agent_ids
@@ -535,16 +693,15 @@ class EpisodeMetricsCollector:
             },
             "ess_offer_projection_retention_rate_by_microgrid": {
                 mg: safe_ratio(
-                    energy[mg]["ess_p2p_offer_kwh"],
-                    energy[mg]["ess_p2p_offer_uncapped_kwh"],
+                    energy[mg]["ess_p2p_offer_kwh"], energy[mg]["ess_p2p_offer_uncapped_kwh"]
                 ) for mg in self.agent_ids
             },
         }
-        total_ess_offer = sum(energy[mg]["ess_p2p_offer_kwh"] for mg in self.agent_ids)
-        total_ess_accepted = sum(energy[mg]["ess_p2p_sell_kwh"] for mg in self.agent_ids)
         p2p_stats["ess_offer_acceptance_rate"] = safe_ratio(
-            total_ess_accepted, total_ess_offer,
+            sum(energy[mg]["ess_p2p_sell_kwh"] for mg in self.agent_ids),
+            sum(energy[mg]["ess_p2p_offer_kwh"] for mg in self.agent_ids),
         )
+
         soc_stats = {}
         for mg in self.agent_ids:
             battery = self.env.cores[mg].battery
@@ -583,17 +740,18 @@ class EpisodeMetricsCollector:
         soc_v = self._violation_summary(self.violations["soc"], "sum")
         power_v = self._violation_summary(self.violations["power_balance"], "mean_abs")
         p2p_v = self._violation_summary(self.violations["p2p_balance"], "mean_abs")
-        grid_v_raw = self._violation_summary(self.violations["grid_power"], "sum")
-        battery_v_raw = self._violation_summary(self.violations["battery_power"], "sum")
+        grid_v = self._violation_summary(self.violations["grid_power"], "sum")
+        battery_v = self._violation_summary(self.violations["battery_power"], "sum")
         constraints = {
             "feasible_episode": all(
-                max(values, default=0.0) <= self.tolerance for values in self.violations.values()
+                max(values, default=0.0) <= self.tolerance
+                for values in self.violations.values()
             ),
             "soc_violation": soc_v,
             "power_balance_violation": power_v,
             "p2p_balance_violation": p2p_v,
-            "grid_power_violation": {"count": grid_v_raw["count"], "max": grid_v_raw["max"]},
-            "battery_power_violation": {"count": battery_v_raw["count"], "max": battery_v_raw["max"]},
+            "grid_power_violation": {"count": grid_v["count"], "max": grid_v["max"]},
+            "battery_power_violation": {"count": battery_v["count"], "max": battery_v["max"]},
         }
 
         total_available = sum(x["renewable_available_kwh"] for x in energy.values())
@@ -614,9 +772,13 @@ class EpisodeMetricsCollector:
             )),
         }
         if not checks["passed"]:
-            warnings.warn(f"Episode metric consistency check failed: {checks}", RuntimeWarning, stacklevel=2)
+            warnings.warn(
+                f"Episode metric consistency check failed: {checks}",
+                RuntimeWarning,
+                stacklevel=2,
+            )
 
-        return {
+        result = {
             "team_profit": float(self.team_profit),
             "team_reward": float(self.team_reward),
             "shaping_reward": float(self.shaping_reward),
@@ -648,12 +810,17 @@ class EpisodeMetricsCollector:
             },
             "sanity_checks": checks,
         }
+        if self.dr_enabled:
+            result["dr_statistics_by_microgrid"] = {
+                mg: self._dr_summary(mg) for mg in self.agent_ids
+            }
+        return result
 
 
 def aggregate_episode_metrics(episodes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     profits = [float(item["team_profit"]) for item in episodes]
     ids = list(episodes[0]["profit_by_microgrid"]) if episodes else []
-    return {
+    result = {
         "days_count": len(episodes),
         "team_profit_statistics": distribution_statistics(profits),
         "team_profit_mean": float(np.mean(profits)) if profits else 0.0,
@@ -672,3 +839,18 @@ def aggregate_episode_metrics(episodes: Sequence[Mapping[str, Any]]) -> dict[str
             bool(day["constraint_statistics"]["feasible_episode"]) for day in episodes
         ])) if episodes else 0.0,
     }
+    if episodes and "dr_statistics_by_microgrid" in episodes[0]:
+        result["dr_statistics_by_microgrid"] = {
+            mg: {
+                "flexible_load_energy_kwh_mean": float(np.mean([
+                    day["dr_statistics_by_microgrid"][mg]["flexible_load_energy_kwh"]
+                    for day in episodes
+                ])),
+                "projection_rate_mean": float(np.mean([
+                    day["dr_statistics_by_microgrid"][mg]["projection_rate"]
+                    for day in episodes
+                ])),
+            }
+            for mg in ids
+        }
+    return result
