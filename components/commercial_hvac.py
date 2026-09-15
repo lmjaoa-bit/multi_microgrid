@@ -170,25 +170,16 @@ class CommercialHVACDR:
         mass: dict[int, Any] = {}
         q: dict[int, Any] = {}
         start = int(t)
-        air[start] = model.addVariable(
-            lb=self.t_air,
-            ub=self.t_air,
-            type=continuous,
-            name=f"t_air[{start}]",
-        )
-        mass[start] = model.addVariable(
-            lb=self.t_mass,
-            ub=self.t_mass,
-            type=continuous,
-            name=f"t_mass[{start}]",
-        )
+        air[start] = model.addVariable(lb=self.t_air, ub=self.t_air, type=continuous, name=f"t_air[{start}]")
+        mass[start] = model.addVariable(lb=self.t_mass, ub=self.t_mass, type=continuous, name=f"t_mass[{start}]")
         for k in range(start, self.episode_length):
             air[k + 1] = model.addVariable(lb=-100.0, ub=100.0, type=continuous, name=f"t_air[{k+1}]")
             mass[k + 1] = model.addVariable(lb=-100.0, ub=100.0, type=continuous, name=f"t_mass[{k+1}]")
+            objective = -1.0 if maximize and k == start else 1.0 if (not maximize and k == start) else 0.0
             q[k] = model.addVariable(
                 lb=self.q_min_kw,
                 ub=self.q_max_kw,
-                obj=(-1.0 if maximize and k == start else 1.0 if (not maximize and k == start) else 0.0),
+                obj=objective,
                 type=continuous,
                 name=f"q_hvac[{k}]",
             )
@@ -197,9 +188,7 @@ class CommercialHVACDR:
             q_mass = (1.0 - self.solar_air_fraction) * q_solar
             a_air = 1.0 - self.delta_t / self.c_air * (1.0 / self.r_oa + 1.0 / self.r_am)
             b_mass = self.delta_t / self.c_air * (1.0 / self.r_am)
-            constant_air = self.delta_t / self.c_air * (
-                t_out / self.r_oa + q_internal + q_air
-            )
+            constant_air = self.delta_t / self.c_air * (t_out / self.r_oa + q_internal + q_air)
             mass_from_air = self.delta_t / self.c_mass * (1.0 / self.r_am)
             mass_self = 1.0 - self.delta_t / self.c_mass * (1.0 / self.r_am)
             constant_mass = self.delta_t / self.c_mass * q_mass
@@ -251,9 +240,8 @@ class CommercialHVACDR:
         )
 
     def plan(self, raw_action: float, t: int) -> dict[str, Any]:
-        proposed = clipped_raw(raw_action) * (
-            self.heat_max_kw if raw_action >= 0.0 else self.cool_max_kw
-        )
+        raw = clipped_raw(raw_action)
+        proposed = raw * (self.heat_max_kw if raw >= 0.0 else self.cool_max_kw)
         low, high = self.feasible_bounds(t)
         effective = float(np.clip(proposed, low, high))
         q_hvac = self._signed_electric_to_q(effective)
@@ -262,7 +250,8 @@ class CommercialHVACDR:
         self.last_projection = projected
         return {
             "kind": "commercial_hvac",
-            "raw_action": clipped_raw(raw_action),
+            "t": int(t),
+            "raw_action": raw,
             "requested_signed_power_kw": proposed,
             "effective_signed_power_kw": effective,
             "effective_normalized": effective / (self.heat_max_kw if effective >= 0.0 else self.cool_max_kw),
@@ -290,14 +279,7 @@ class CommercialHVACDR:
         served = clamp_delivered_fraction(delivered_fraction)
         signed_power = float(plan["effective_signed_power_kw"]) * served
         q_hvac = self._signed_electric_to_q(signed_power)
-        t = int(plan.get("t", -1))
-        if t < 0:
-            # Plans intentionally carry no hidden object references. Infer the step
-            # by matching the pre-state only for direct component use; the environment
-            # should set `t` before commit.
-            if self._frame is None:
-                raise RuntimeError("HVAC must be reset before commit")
-            t = int(plan.get("hour_index", 0))
+        t = int(plan["t"])
         self.t_air, self.t_mass = self._next_state(self.t_air, self.t_mass, q_hvac, t)
         if served < 1.0 - 1e-10:
             self.terminal_thermal_infeasible = True
