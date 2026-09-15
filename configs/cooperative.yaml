@@ -96,7 +96,9 @@ microgrids:
   - id: mg2
     type: commercial_wind_hvac
     load_profile:
-      target_mean_kw: 75.0
+      # Real 2018 Yancheng-area T2M calibration: 71.87 kW base +
+      # approximately 8.40 kW annual-mean HVAC = approximately 80 kW total.
+      target_mean_kw: 71.87
       weekend_multiplier: 0.57
       variability_clip: [0.65, 1.45]
       hourly_shape: [0.90,0.89,0.88,0.88,0.90,0.94,0.98,1.02,1.06,1.10,1.12,1.13,1.13,1.12,1.10,1.08,1.06,1.05,1.05,1.04,1.02,0.98,0.95,0.92]
