@@ -40,3 +40,23 @@ def delivered_fraction(value: float) -> float:
     if not np.isfinite(result):
         raise ValueError("delivered_fraction must be finite")
     return float(np.clip(result, 0.0, 1.0))
+
+
+def build_controllable_load(
+    config: Mapping[str, Any],
+    *,
+    delta_t: float,
+    episode_length: int,
+) -> ControllableLoad:
+    """Build one physical DR model from a microgrid ``dr`` configuration."""
+    kind = str(config.get("type", ""))
+    if kind == "industrial_mill":
+        from components.industrial_mill import IndustrialMillDR
+        return IndustrialMillDR(config, delta_t=delta_t, episode_length=episode_length)
+    if kind == "commercial_hvac":
+        from components.commercial_hvac import CommercialHVACDR
+        return CommercialHVACDR(config, delta_t=delta_t, episode_length=episode_length)
+    if kind == "ev_charging":
+        from components.ev_charging import EVChargingDR
+        return EVChargingDR(config, delta_t=delta_t, episode_length=episode_length)
+    raise ValueError(f"Unsupported controllable load type: {kind!r}")
