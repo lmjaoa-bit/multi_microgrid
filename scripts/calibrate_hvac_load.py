@@ -20,6 +20,9 @@ from core.data_manager import DataManager
 from core.profiles import HeterogeneousProfileModel
 
 
+REFERENCE_SLACK_PENALTY = 1000.0
+
+
 def _state_is_occupied(timestamp: pd.Timestamp, occupied_hours: set[int]) -> bool:
     return timestamp.dayofweek < 5 and timestamp.hour in occupied_hours
 
@@ -34,13 +37,14 @@ def _solve_reference_day(
 ) -> dict[str, Any]:
     """Solve one no-price reference thermostat day as a linear program.
 
-    The calibration controller uses the approved narrow reference bands
-    (22--24 C occupied, 18--28 C unoccupied), the same 2R2C dynamics and heat
-    pump limits as the RL environment, and the same terminal thermal band. Its
-    objective is only minimum HVAC electrical energy; there is no tariff signal,
-    so the result is a reproducible physical-load calibration rather than a DR
-    schedule. One LP per natural day is much faster than replaying the online
-    terminal-reachability projector at every hour.
+    The RL environment's approved comfort bands remain hard constraints.  The
+    narrower calibration bands (22--24 C occupied, 18--28 C unoccupied) are
+    reference targets only: positive slack is allowed when heat-pump power or
+    terminal reachability makes the reference band impossible.  Slack carries a
+    dominant penalty, so the solution follows the reference band whenever it is
+    physically feasible and then minimizes HVAC electricity.  This mirrors the
+    original sequential reference controller without misclassifying a reference
+    target miss as a physical comfort infeasibility.
     """
     import highspy
 
@@ -54,6 +58,8 @@ def _solve_reference_day(
     mass: dict[int, Any] = {}
     heat: dict[int, Any] = {}
     cool: dict[int, Any] = {}
+    ref_under: dict[int, Any] = {}
+    ref_over: dict[int, Any] = {}
     air[0] = model.addVariable(
         lb=hvac.initial_t_air, ub=hvac.initial_t_air, type=continuous, name="t_air[0]"
     )
@@ -77,6 +83,18 @@ def _solve_reference_day(
             obj=delta_t,
             type=continuous,
             name=f"cool_kw[{t}]",
+        )
+        ref_under[t] = model.addVariable(
+            lb=0.0,
+            obj=REFERENCE_SLACK_PENALTY * delta_t,
+            type=continuous,
+            name=f"reference_under_c[{t}]",
+        )
+        ref_over[t] = model.addVariable(
+            lb=0.0,
+            obj=REFERENCE_SLACK_PENALTY * delta_t,
+            type=continuous,
+            name=f"reference_over_c[{t}]",
         )
 
         timestamp = pd.Timestamp(frame.iloc[t]["timestamp"])
@@ -117,9 +135,14 @@ def _solve_reference_day(
 
         next_timestamp = timestamp + pd.Timedelta(hours=1)
         occupied = _state_is_occupied(next_timestamp, hvac.occupied_hours)
+        hard_low, hard_high = (
+            hvac.occupied_comfort if occupied else hvac.unoccupied_comfort
+        )
         reference_low, reference_high = (22.0, 24.0) if occupied else (18.0, 28.0)
-        model.addConstr(air[t + 1] >= reference_low)
-        model.addConstr(air[t + 1] <= reference_high)
+        model.addConstr(air[t + 1] >= hard_low)
+        model.addConstr(air[t + 1] <= hard_high)
+        model.addConstr(air[t + 1] + ref_under[t] >= reference_low)
+        model.addConstr(air[t + 1] - ref_over[t] <= reference_high)
 
     terminal = episode_length
     model.addConstr(air[terminal] >= hvac.initial_t_air - hvac.terminal_air_tolerance)
@@ -139,6 +162,9 @@ def _solve_reference_day(
     cooling = np.asarray([float(model.val(cool[t])) for t in range(episode_length)])
     air_values = np.asarray([float(model.val(air[t])) for t in range(episode_length + 1)])
     mass_values = np.asarray([float(model.val(mass[t])) for t in range(episode_length + 1)])
+    reference_under = np.asarray([float(model.val(ref_under[t])) for t in range(episode_length)])
+    reference_over = np.asarray([float(model.val(ref_over[t])) for t in range(episode_length)])
+    reference_slack = reference_under + reference_over
     if np.any((heating > 1e-7) & (cooling > 1e-7)):
         raise RuntimeError("Reference LP produced simultaneous heating and cooling")
     return {
@@ -148,6 +174,9 @@ def _solve_reference_day(
         "hvac_kw": heating + cooling,
         "air_c": air_values,
         "mass_c": mass_values,
+        "reference_slack_c": reference_slack,
+        "reference_violation_hours": int(np.count_nonzero(reference_slack > 1e-7)),
+        "reference_violation_degree_hours": float(np.sum(reference_slack) * delta_t),
         "initial_t_air_c": hvac.initial_t_air,
         "initial_t_mass_c": hvac.initial_t_mass,
     }
@@ -175,6 +204,8 @@ def evaluate_target(config: dict, target_base_kw: float) -> dict[str, float | in
     hours = 0
     days = 0
     infeasible_days = 0
+    reference_violation_hours = 0
+    reference_violation_degree_hours = 0.0
     max_hvac_kw = 0.0
     hvac_samples: list[float] = []
 
@@ -201,6 +232,8 @@ def evaluate_target(config: dict, target_base_kw: float) -> dict[str, float | in
             heating_kwh += float(np.sum(heating) * delta_t)
             cooling_kwh += float(np.sum(cooling) * delta_t)
             hvac_kwh += float(np.sum(hvac_power) * delta_t)
+            reference_violation_hours += int(result["reference_violation_hours"])
+            reference_violation_degree_hours += float(result["reference_violation_degree_hours"])
             hvac_samples.extend(hvac_power.tolist())
             max_hvac_kw = max(max_hvac_kw, float(np.max(hvac_power, initial=0.0)))
             cap_hit_hours += int(np.count_nonzero(
@@ -214,8 +247,8 @@ def evaluate_target(config: dict, target_base_kw: float) -> dict[str, float | in
         "target_base_mean_kw": float(target_base_kw),
         "days": int(days),
         "hours": int(hours),
-        "reference_infeasible_days": int(infeasible_days),
-        "reference_feasible": bool(infeasible_days == 0),
+        "hard_comfort_infeasible_days": int(infeasible_days),
+        "hard_comfort_feasible": bool(infeasible_days == 0),
         "base_energy_mwh": float(base_kwh / 1000.0),
         "hvac_energy_mwh": float(hvac_kwh / 1000.0),
         "heating_energy_mwh": float(heating_kwh / 1000.0),
@@ -227,6 +260,8 @@ def evaluate_target(config: dict, target_base_kw: float) -> dict[str, float | in
         "hvac_p95_kw": float(np.percentile(array, 95)) if array.size else 0.0,
         "hvac_max_kw": float(max_hvac_kw),
         "hvac_cap_hit_hours": int(cap_hit_hours),
+        "reference_band_violation_hours": int(reference_violation_hours),
+        "reference_band_violation_degree_hours": float(reference_violation_degree_hours),
     }
     return result
 
@@ -234,10 +269,10 @@ def evaluate_target(config: dict, target_base_kw: float) -> dict[str, float | in
 def solve_base_target(config: dict, desired_total_kw: float, initial: float) -> dict:
     target = float(initial)
     history = []
-    for _ in range(5):
+    for _ in range(6):
         result = evaluate_target(config, target)
         history.append(result)
-        if not bool(result["reference_feasible"]):
+        if not bool(result["hard_comfort_feasible"]):
             break
         error = float(desired_total_kw) - float(result["annualized_total_mean_kw"])
         if abs(error) <= 0.05:
@@ -275,7 +310,7 @@ def main() -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(text + "\n", encoding="utf-8")
     if isinstance(result, dict) and not bool(
-        result.get("final", result).get("reference_feasible", True)
+        result.get("final", result).get("hard_comfort_feasible", True)
     ):
         return 2
     return 0
