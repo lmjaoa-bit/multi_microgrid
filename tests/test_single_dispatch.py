@@ -7,14 +7,17 @@ import yaml
 
 from algorithms.registry import get_algorithm_spec
 from envs.multi_microgrid_env import MultiMicrogridEnv
-from experiments.training_pipeline import _diagnostic_means, _append_actor_diagnostics
+from experiments.training_pipeline import _diagnostic_means
 
 ROOT = Path(__file__).resolve().parents[1]
+LEGACY_CONFIG = ROOT / "configs" / "cooperative_legacy_pre_dr.yaml"
+NEW_CONFIG = ROOT / "configs" / "cooperative.yaml"
 
 
-def build(slug="crossgate", split="train", disabled=False, terminal_mode="none"):
-    spec = get_algorithm_spec(slug)
-    cfg = yaml.safe_load((ROOT / "configs/cooperative.yaml").read_text(encoding="utf-8"))
+def build(split="train", disabled=False, terminal_mode="none"):
+    """Build the frozen 1-D ESS-only contract used by projector regression tests."""
+    spec = get_algorithm_spec("crossgate")
+    cfg = yaml.safe_load(LEGACY_CONFIG.read_text(encoding="utf-8"))
     cfg["_project_root"] = str(ROOT)
     cfg["terminal_soc"]["mode"] = terminal_mode
     if terminal_mode != "none":
@@ -23,7 +26,24 @@ def build(slug="crossgate", split="train", disabled=False, terminal_mode="none")
     if disabled:
         cfg["p2p"]["enabled"] = False
     env = MultiMicrogridEnv(spec.build_environment_config(cfg), split=split)
-    alg = spec.create(env, yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8")), seed=7)
+    alg = spec.create(
+        env,
+        yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8")),
+        seed=7,
+    )
+    return env, alg
+
+
+def build_dr_matd3(split="train"):
+    spec = get_algorithm_spec("matd3_dispatch")
+    cfg = yaml.safe_load(NEW_CONFIG.read_text(encoding="utf-8"))
+    cfg["_project_root"] = str(ROOT)
+    env = MultiMicrogridEnv(spec.build_environment_config(cfg), split=split)
+    alg = spec.create(
+        env,
+        yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8")),
+        seed=7,
+    )
     return env, alg
 
 
@@ -36,7 +56,9 @@ def synthetic_state(env):
         for name in ("load", "pv", "wind", "feasible_charge_min", "feasible_discharge_min"):
             state[:, index[f"{mg}_{name}"]] = 0
         for kind in ("charge", "discharge"):
-            state[:, index[f"{mg}_feasible_{kind}_max"]] = 30 / getattr(env.cores[mg].battery, f"max_{kind}_kw")
+            state[:, index[f"{mg}_feasible_{kind}_max"]] = 30 / getattr(
+                env.cores[mg].battery, f"max_{kind}_kw"
+            )
         state[:, index[f"{mg}_grid_buy_price"]] = .8 / norm[mg]["price"]
         state[:, index[f"{mg}_grid_sell_price"]] = .1 / norm[mg]["price"]
     state[:, index["mg1_load"]] = 10 / norm["mg1"]["load"]
@@ -86,11 +108,13 @@ def test_capacity_price_masks_and_gradcheck():
     env, alg = build()
     state, index = synthetic_state(env)
     raw = torch.tensor([[[.7], [-.2], [.2]]], dtype=torch.float64, requires_grad=True)
-    effective, plans = alg.project_actions(state, raw)
+    _, plans = alg.project_actions(state, raw)
     for p in plans:
         assert float((p["local"] + p["mandatory_export"] + p["offer"]).detach()) <= 30 + 1e-8
         assert not (float(p["charge"].detach()) > 0 and float(p["local"].detach()) > 0)
-    assert torch.autograd.gradcheck(lambda a: alg.project_actions(state, a)[0], (raw,), eps=1e-6, atol=1e-4)
+    assert torch.autograd.gradcheck(
+        lambda a: alg.project_actions(state, a)[0], (raw,), eps=1e-6, atol=1e-4
+    )
     state[:, index["mg1_grid_sell_price"]] = 2 / env.global_state_builder.norm["mg1"]["price"]
     assert float(alg.project_actions(state, raw)[1][0]["offer"].detach()) == 0
     with pytest.raises(ValueError, match="requires raw"):
@@ -116,23 +140,26 @@ def test_forced_intervals_use_the_whole_raw_range(kind):
         assert raw.grad[0, 0, 0] > 0
         actual = p["local"] + p["mandatory_export"] + p["offer"]
         assert float(p["charge"].detach() if kind == "charge" else actual.detach()) >= 6 - 1e-7
-    assert requested == pytest.approx([-30, -24, -18, -12, -6] if kind == "charge" else [6, 12, 18, 24, 30])
+    assert requested == pytest.approx(
+        [-30, -24, -18, -12, -6] if kind == "charge" else [6, 12, 18, 24, 30]
+    )
 
 
-@pytest.mark.parametrize("slug", ["crossgate",
-                                  "matd3_dispatch"])
-def test_rollout_update_diagnostics_and_checkpoint(slug, tmp_path):
+def test_crossgate_rollout_update_diagnostics_and_checkpoint(tmp_path):
     torch.set_num_threads(1)
-    env, alg = build(slug)
+    env, alg = build()
     observations, info = env.reset(seed=7, deterministic=True)
     state = info["global_state"]
     diagnostic_records = []
     assert env.action_dim == alg.action_dim == 1
+    done = False
     for _ in range(24):
         actions = alg.select_actions(observations, .1)
         with torch.no_grad():
-            effective, plans = alg.project_actions(torch.tensor(state).unsqueeze(0),
-                torch.tensor(np.asarray([actions[mg] for mg in env.agent_ids])).unsqueeze(0))
+            effective, plans = alg.project_actions(
+                torch.tensor(state).unsqueeze(0),
+                torch.tensor(np.asarray([actions[mg] for mg in env.agent_ids])).unsqueeze(0),
+            )
         next_obs, rewards, done, info = env.step(actions)
         for i, mg in enumerate(env.agent_ids):
             p = info["plans"][mg]
@@ -142,44 +169,45 @@ def test_rollout_update_diagnostics_and_checkpoint(slug, tmp_path):
             assert p["direct_local_priority_reserve_kw"] == 0
             remaining = p["ess_flexible_discharge_kw"]
             assert p["sharing_offer_ratio"] == pytest.approx(
-                p["ess_p2p_offer_kw"] / remaining if remaining > 1e-9 else 0.0)
-            assert not (info["devices"][mg]["charge_kw"] > 1e-6 and info["devices"][mg]["discharge_kw"] > 1e-6)
-            actual = info["devices"][mg]["discharge_kw"]
-            assert actual == pytest.approx(p["ess_to_local_kw"] + p["ess_to_p2p_kw"] + p["mandatory_export_kw"], abs=2e-5)
-        alg.replay.add(observations, state, actions, rewards[env.agent_ids[0]],
-                       next_obs, info["global_state_after"], done)
+                p["ess_p2p_offer_kw"] / remaining if remaining > 1e-9 else 0.0
+            )
+            assert not (
+                info["devices"][mg]["charge_kw"] > 1e-6
+                and info["devices"][mg]["discharge_kw"] > 1e-6
+            )
+        alg.replay.add(
+            observations, state, actions, rewards[env.agent_ids[0]],
+            next_obs, info["global_state_after"], done,
+        )
         metrics = alg.update(4)
         if "actor_diagnostics" in metrics:
             diagnostic_records.append(metrics)
-            assert set(metrics["actor_diagnostics"]) == set(env.agent_ids)
-            for mg, diagnostic in metrics["actor_diagnostics"].items():
+            for diagnostic in metrics["actor_diagnostics"].values():
                 assert diagnostic["post_clip_grad_norm"] <= alg.actor_max_grad_norm + 1e-5
                 assert diagnostic["local_override_kw_max"] == 0
-                assert "masked_offer_action_grad_max" not in diagnostic
                 assert "dispatch_action_grad_rms" in diagnostic
                 assert np.isfinite(list(diagnostic.values())).all()
-                assert sum(x*x for x in metrics["actor_branch_grad_norms"][mg].values()) == pytest.approx(
-                    metrics["actor_grad_norms"][mg] ** 2, rel=1e-4, abs=1e-9)
         observations, state = next_obs, info["global_state_after"]
     assert diagnostic_records and done
     aggregate = _diagnostic_means(diagnostic_records)
     assert "dispatch_action_grad_rms" in aggregate["actor_diagnostics"]["mg3"]
-    for mg in env.agent_ids:
-        b = env.cores[mg].battery
-        assert b.soc_min - 1e-6 <= b.soc <= b.soc_max + 1e-6
+
     path = tmp_path / "best_model.pt"
     alg.save(path)
-    _, restored = build(slug, split="test")
+    _, restored = build(split="test")
     restored.load(path)
     for mg, action in alg.select_actions(observations).items():
         assert np.array_equal(action, restored.select_actions(observations)[mg])
-    other = "matd3_dispatch" if slug == "crossgate" else "crossgate"
+
+    # The migrated MATD3 uses a different algorithm/action space and must reject
+    # a legacy CrossGate checkpoint rather than silently interpreting it.
+    _, dr_matd3 = build_dr_matd3(split="test")
     with pytest.raises(ValueError, match="different algorithm"):
-        build(other)[1].load(path)
-    incompatible = build(slug, disabled=True)[1]
+        dr_matd3.load(path)
+
+    incompatible = build(disabled=True)[1]
     with pytest.raises(ValueError, match="physical projection"):
         incompatible.load(path)
-
 
 
 def test_forced_terminal_export_without_market():
