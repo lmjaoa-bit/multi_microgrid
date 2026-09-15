@@ -32,9 +32,11 @@ def apply_runtime_recommendation(
     algorithm_config: Mapping[str, object],
     benchmark_result: Mapping[str, object],
 ) -> dict[str, object]:
-    """Copy a config and change only runtime thread settings from a benchmark row."""
+    """Copy a config and apply the benchmark's recommended device and thread settings."""
     result = deepcopy(dict(algorithm_config))
     runtime = dict(result.get("runtime", {}))
+    if benchmark_result.get("device") is not None:
+        runtime["device"] = str(benchmark_result["device"])
     runtime["cpu_threads"] = int(benchmark_result["cpu_threads"])
     runtime["interop_threads"] = int(benchmark_result["interop_threads"])
     result["runtime"] = runtime
