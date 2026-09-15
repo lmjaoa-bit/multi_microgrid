@@ -11,7 +11,7 @@ Every experimental algorithm owns three isolated areas:
 ```text
 algorithms/<algorithm>/          implementation and plugin.py
 configs/algorithms/<algorithm>.yaml
-outputs/<algorithm>/runs/<run_id>/
+outputs/working_runs/<algorithm>/runs/<run_id>/
 ```
 
 The shared workflow owns everything that should remain identical across algorithms:
@@ -24,6 +24,8 @@ evaluation/evaluate_algorithm.py test and saved-result generation
 evaluation/settlement.py         Equal and Shapley settlement
 evaluation/plotting.py           saved-result-only figures
 experiments/layout.py            output directory layout
+experiments/result_lifecycle.py  working/release result lifecycle
+scripts/manage_results.py        explicit release promotion CLI
 ```
 
 ## Create a variant
@@ -44,6 +46,60 @@ Each plugin must expose an `AlgorithmSpec`, and its algorithm instance must prov
 - `save(path)` and `load(path)`
 - `replay.add(...)` and `len(replay)`
 
+## Working runs and retained releases
+
+Normal training always produces a working result first:
+
+```text
+code/config change
+→ python scripts/run_experiment.py ...
+→ outputs/working_runs/<algorithm>/runs/<run_id>/
+→ inspect/debug/compare
+```
+
+Working runs are temporary research material. They may be deleted after they are no longer useful.
+A working run does **not** become a permanent paper result just because it completed successfully.
+
+When a result is accepted for long-term retention, first make sure the corresponding code is committed
+and the recorded Git state is clean. Then promote the run explicitly:
+
+```powershell
+python scripts/manage_results.py promote `
+  --run outputs/working_runs/pnn_transformer/runs/<run_id> `
+  --release flexible_load_v1
+```
+
+Promotion copies the complete run into:
+
+```text
+outputs/releases/<release_name>/<run_id>/
+```
+
+Each retained run contains `release_manifest.json` and `README.md`; the global index is
+`outputs/releases/registry.csv`. Promotion never deletes the working source and never overwrites an
+existing retained run.
+
+A run recorded with dirty or unknown Git state is rejected by default. `--allow-dirty` is an explicit
+escape hatch only; the generated release README/manifest records the warning so the reproducibility
+risk cannot be hidden.
+
+Typical lifecycle:
+
+```text
+modify code/config
+→ short/medium runs in working_runs
+→ reject or refine
+→ commit accepted code
+→ run/re-run the experiment from that committed state
+→ inspect final result
+→ promote to a named release
+→ use releases/registry.csv for later comparison and paper writing
+```
+
+Use new release names (`flexible_load_v1`, `flexible_load_v2`, etc.) instead of replacing old release
+artifacts. Treat retained release files as immutable source evidence; regenerated figures or new
+analysis should live in separate report/analysis directories.
+
 ## Remove a failed experiment
 
 Stop its process, then remove only these isolated paths:
@@ -51,17 +107,17 @@ Stop its process, then remove only these isolated paths:
 ```text
 algorithms/<failed_algorithm>/
 configs/algorithms/<failed_algorithm>.yaml
-outputs/<failed_algorithm>/       optional; retain it when results are still useful
+outputs/working_runs/<failed_algorithm>/       optional; retain it when results are still useful
 ```
 
-No central registry file needs editing. Other algorithms are loaded only when explicitly selected.
+No central algorithm registry file needs editing. Other algorithms are loaded only when explicitly
+selected. Do not delete a retained `outputs/releases/...` result during ordinary cleanup.
 
-## Standard run contents
+## Standard working-run contents
 
 ```text
-outputs/<algorithm>/
+outputs/working_runs/<algorithm>/
 ├── latest_run.json
-├── legacy/                       migrated historical loose artifacts only
 └── runs/
     └── <ALGORITHM>_<timestamp>_seed<seed>/
         ├── checkpoints/
