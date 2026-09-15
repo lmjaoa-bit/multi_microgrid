@@ -1,0 +1,41 @@
+name: MATD3 DR 300-episode validation
+
+on:
+  push:
+    branches: [codex/controllable-devices]
+    paths:
+      - '.github/workflows/matd3-dr-300-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  medium-train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Regenerate Yancheng-area data
+        run: python scripts/build_spatial_market_data.py
+      - name: Run 300-episode plain MATD3 validation
+        run: >-
+          python scripts/run_experiment.py
+          --algorithm matd3_dispatch
+          --config configs/cooperative.yaml
+          --algorithm-config configs/algorithms/matd3_dispatch_short_validation.yaml
+          --episodes 300
+          --test-episodes 24
+          --validation-interval 50
+          --validation-days 12
+          --device cpu
+          --seed 42
+          --no-dashboard
+          --no-milp
