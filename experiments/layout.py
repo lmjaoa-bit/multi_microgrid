@@ -5,6 +5,9 @@ from datetime import datetime
 from pathlib import Path
 
 
+DEFAULT_WORKING_OUTPUT_ROOT = Path("outputs") / "working_runs"
+
+
 @dataclass(frozen=True)
 class ExperimentLayout:
     """Stable per-algorithm output layout shared by every experiment."""
