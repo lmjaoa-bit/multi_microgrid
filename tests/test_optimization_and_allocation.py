@@ -12,7 +12,11 @@ from evaluation.compare_independent_cooperative import compare_dispatches
 from evaluation.settlement import settle_test_day
 from evaluation.shapley_allocator import calculate_shapley
 from optimization.cooperative_dispatch import solve_cooperative_dispatch
-from optimization.common_constraints import DispatchData, solve_dispatch
+from optimization.common_constraints import (
+    DispatchData,
+    _add_shared_pair_capacity_constraints,
+    solve_dispatch,
+)
 from optimization.independent_dispatch import solve_independent_dispatch
 
 
@@ -31,7 +35,25 @@ def test_independent_baseline_does_not_mutate_cooperative_environment() -> None:
     assert result.pair_flows_kwh == {}
 
 
+def test_shared_pair_capacity_constraint_couples_both_directions() -> None:
+    import highspy
+
+    model = highspy.Highs()
+    model.setOptionValue("output_flag", False)
+    continuous = highspy.HighsVarType.kContinuous
+    capacity = 75.0
+    forward = model.addVariable(lb=0.0, ub=capacity, obj=-1.0, type=continuous)
+    reverse = model.addVariable(lb=0.0, ub=capacity, obj=-1.0, type=continuous)
+    flows = {("a", "b", 0): forward, ("b", "a", 0): reverse}
+    _add_shared_pair_capacity_constraints(model, flows, ["a", "b"], 1, capacity)
+    model.minimize()
+    assert model.getSolution().value_valid
+    assert float(model.val(forward) + model.val(reverse)) <= capacity + 1e-8
+
+
 def test_cooperative_oracle_power_balance() -> None:
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    pair_capacity = float(config["p2p"]["pair_capacity_kw"])
     result = solve_cooperative_dispatch(CONFIG, split="test")
     frame = result.trajectories
     residual = (frame["renewable_kw"] + frame["battery_discharge_kw"] + frame["grid_import_kw"]
@@ -40,7 +62,14 @@ def test_cooperative_oracle_power_balance() -> None:
                 - frame["p2p_export_kw"] - frame["curtailment_kw"])
     assert residual.abs().max() < 1e-6
     assert not ((frame["grid_import_kw"] > 1e-8) & (frame["p2p_export_kw"] > 1e-8)).any()
-    assert max(result.pair_flows_kwh.values(), default=0.0) <= 24 * 60.0 + 1e-6
+    ids = [str(mg["id"]) for mg in config["microgrids"]]
+    for i, first in enumerate(ids):
+        for second in ids[i + 1:]:
+            pair_energy = (
+                result.pair_flows_kwh.get(f"{first}->{second}", 0.0)
+                + result.pair_flows_kwh.get(f"{second}->{first}", 0.0)
+            )
+            assert pair_energy <= 24 * pair_capacity + 1e-6
 
 
 def test_renewable_only_dispatch_rejects_battery_sourced_p2p_exports() -> None:
