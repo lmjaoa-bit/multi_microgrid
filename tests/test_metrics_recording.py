@@ -59,6 +59,22 @@ def test_episode_collector_has_dr_aware_schema_and_24_hour_rows() -> None:
     assert "flexible_load_energy_kwh" in metrics["dr_statistics_by_microgrid"]["mg1"]
     assert "ess_offer_acceptance_rate_by_microgrid" in metrics["p2p_statistics"]
 
+    p2p_stats = metrics["p2p_statistics"]
+    assert p2p_stats["pair_capacity_kw"] == 75.0
+    assert p2p_stats["unconstrained_total_energy_kwh"] + 1e-9 >= p2p_stats["total_energy_kwh"]
+    assert p2p_stats["blocked_by_pair_capacity_kwh"] >= -1e-9
+    assert np.isclose(
+        p2p_stats["blocked_by_pair_capacity_kwh"],
+        p2p_stats["unconstrained_total_energy_kwh"] - p2p_stats["total_energy_kwh"],
+        atol=1e-8,
+    )
+    assert set(p2p_stats["pair_saturation_rate_by_pair"]) == {
+        "mg1_mg2", "mg1_mg3", "mg2_mg3"
+    }
+    assert 0.0 <= p2p_stats["blocked_energy_rate"] <= 1.0 + 1e-9
+    assert "p2p_blocked_by_pair_capacity_kwh" in first
+    assert "p2p_unconstrained_total_energy_kwh" in first
+
     action_dims = metrics["action_statistics"]["by_microgrid"]["mg1"]["dimensions"]
     assert "battery" in action_dims
     assert "dr_raw" in action_dims
