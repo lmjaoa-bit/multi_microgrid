@@ -212,3 +212,23 @@ def test_update_run_metadata_git_identity_preserves_existing_fields(tmp_path: Pa
     assert payload["git_branch"] == "feature"
     assert payload["git_commit"] == "new"
     assert payload["git_dirty"] is False
+
+
+def test_promote_repairs_copied_json_paths_to_release_directory(tmp_path: Path):
+    source = _make_complete_run(tmp_path / "working_runs" / "pnn_transformer" / "runs")
+    summary_path = source / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["run_directory"] = str(source)
+    summary["best_checkpoint"] = str(source / "checkpoints" / "best_model.pt")
+    summary["nested"] = {"test_evaluation": str(source / "test_evaluation.json")}
+    _write_json(summary_path, summary)
+
+    releases = tmp_path / "releases"
+    promote_run(source, releases, "portable_v1")
+    final_dir = releases / "portable_v1" / source.name
+    copied = json.loads((final_dir / "summary.json").read_text(encoding="utf-8"))
+
+    assert copied["run_directory"] == str(final_dir.resolve())
+    assert copied["best_checkpoint"] == str((final_dir / "checkpoints" / "best_model.pt").resolve())
+    assert copied["nested"]["test_evaluation"] == str((final_dir / "test_evaluation.json").resolve())
+    assert str(source) not in json.dumps(copied)
