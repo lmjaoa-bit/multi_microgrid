@@ -104,7 +104,8 @@ def _inspect_run(run_dir: Path, *, require_directory_name: bool) -> dict[str, An
     if not run_dir.is_dir():
         raise PromotionError(f"Run directory does not exist: {run_dir}")
     for relative in _REQUIRED_ARTIFACTS:
-        if not (run_dir / relative).exists():
+        path = run_dir / relative
+        if not path.exists():
             raise PromotionError(f"Missing required artifact: {relative}")
 
     metadata = _read_json(run_dir / "run_metadata.json")
@@ -163,6 +164,59 @@ def _inspect_run(run_dir: Path, *, require_directory_name: bool) -> dict[str, An
 
 def inspect_run(run_dir: str | Path) -> dict[str, Any]:
     return _inspect_run(Path(run_dir), require_directory_name=True)
+
+
+def _replace_path_prefix(value: Any, old_prefix: str, new_prefix: str) -> tuple[Any, bool]:
+    if isinstance(value, dict):
+        changed = False
+        result = {}
+        for key, item in value.items():
+            converted, item_changed = _replace_path_prefix(item, old_prefix, new_prefix)
+            result[key] = converted
+            changed = changed or item_changed
+        return result, changed
+    if isinstance(value, list):
+        changed = False
+        result = []
+        for item in value:
+            converted, item_changed = _replace_path_prefix(item, old_prefix, new_prefix)
+            result.append(converted)
+            changed = changed or item_changed
+        return result, changed
+    if isinstance(value, str):
+        converted = value
+        candidates = (
+            (old_prefix, new_prefix),
+            (old_prefix.replace("\\", "/"), new_prefix.replace("\\", "/")),
+        )
+        for old, new in candidates:
+            if old and old in converted:
+                converted = converted.replace(old, new)
+        return converted, converted != value
+    return value, False
+
+
+def _repair_copied_json_paths(temp_dir: Path, source: Path, final_dir: Path) -> list[str]:
+    repaired: list[str] = []
+    for name in (
+        "run_metadata.json",
+        "training_summary.json",
+        "summary.json",
+        "test_evaluation.json",
+        "test_summary.json",
+    ):
+        path = temp_dir / name
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise PromotionError(f"Cannot repair copied metadata path in {path}: {exc}") from exc
+        converted, changed = _replace_path_prefix(payload, str(source), str(final_dir.resolve()))
+        if changed:
+            path.write_text(json.dumps(converted, ensure_ascii=False, indent=2), encoding="utf-8")
+            repaired.append(name)
+    return repaired
 
 
 def _registry_rows(registry_path: Path) -> list[dict[str, str]]:
@@ -250,11 +304,14 @@ def promote_run(
         "allow_dirty_override": bool(allow_dirty and dirty is not False),
         "source_run_directory": str(source),
         "release_run_directory": str(final_dir.resolve()),
+        "repaired_json_paths": [],
     }
 
     try:
         shutil.copytree(source, temp_dir)
+        repaired_json_paths = _repair_copied_json_paths(temp_dir, source, final_dir)
         copied_info = _inspect_run(temp_dir, require_directory_name=False)
+        manifest["repaired_json_paths"] = repaired_json_paths
         if copied_info["run_id"] != info["run_id"]:
             raise PromotionError("Copied release failed run_id verification")
         (temp_dir / "release_manifest.json").write_text(
