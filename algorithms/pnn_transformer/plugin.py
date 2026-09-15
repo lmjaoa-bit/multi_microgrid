@@ -1,8 +1,15 @@
 from __future__ import annotations
 
 from algorithms.pnn_transformer.algorithm import PnnTransformer
+from algorithms.pnn_transformer.runtime import install_historical_actor_runtime_optimizations
 from algorithms.registry import AlgorithmSpec, PROJECT_ROOT
+from algorithms.runtime_helpers import install_single_dispatch_runtime_optimizations
 
+
+install_historical_actor_runtime_optimizations()
+install_single_dispatch_runtime_optimizations(
+    PnnTransformer, variant="pnn_transformer"
+)
 
 ALGORITHM_SPEC = AlgorithmSpec(
     slug="pnn_transformer",
@@ -19,4 +26,3 @@ ALGORITHM_SPEC = AlgorithmSpec(
         },
     },
 )
-

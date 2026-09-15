@@ -40,6 +40,9 @@ def test_historical_899_config_keeps_forecast_horizon_four():
 
 
 def test_actor_diagnostics_can_be_disabled_without_changing_action():
+    from algorithms.registry import get_algorithm_spec
+
+    get_algorithm_spec("pnn_transformer")  # installs runtime-only Actor method overrides
     torch.manual_seed(42)
     actor = PnnTransformerDispatchActor(
         _historical_schema(), ["mg1", "mg2", "mg3"], "mg1", forecast_horizon=4
