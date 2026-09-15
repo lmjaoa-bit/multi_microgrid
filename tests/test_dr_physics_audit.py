@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -10,6 +14,9 @@ from scripts.audit_dr_physics import (
     require_clean_audit,
     select_monthly_representatives,
 )
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _candidates() -> list[DayCandidate]:
@@ -56,3 +63,15 @@ def test_require_clean_audit_rejects_any_hard_violation() -> None:
         require_clean_audit({**clean, "data_quality_flags": ["fallback"]})
     with pytest.raises(RuntimeError, match="projection"):
         require_clean_audit({**clean, "projection_exercised": False})
+
+
+def test_audit_script_runs_as_direct_cli_entrypoint() -> None:
+    result = subprocess.run(
+        [sys.executable, "scripts/audit_dr_physics.py", "--help"],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Audit heterogeneous DR physics" in result.stdout
