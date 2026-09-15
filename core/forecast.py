@@ -11,7 +11,7 @@ from core.tariffs import has_heterogeneous_tariffs
 
 
 class SharedForecastProvider:
-    """Vectorized episode forecasts with shared public weather and prices."""
+    """Vectorized episode forecasts for exogenous/base-load quantities only."""
 
     def __init__(self, config: Mapping[str, Any], profiles: HeterogeneousProfileModel,
                  seed: int = 42) -> None:
@@ -66,11 +66,10 @@ class SharedForecastProvider:
             bool(forecast_noise) if forecast_noise is not None else not self.deterministic
         )
 
-        def multiplier(name: str) -> np.ndarray:
-            """Correlated, horizon-growing multiplicative forecast error."""
+        def correlated_error(name: str) -> np.ndarray:
             sigma_1h = float(sigma.get(name, 0.0))
             if not apply_noise or sigma_1h <= 0.0:
-                return np.ones(shape, dtype=np.float64)
+                return np.zeros(shape, dtype=np.float64)
             innovations = rng.normal(size=shape)
             correlated = np.empty(shape, dtype=np.float64)
             correlated[:, 0] = innovations[:, 0]
@@ -85,31 +84,35 @@ class SharedForecastProvider:
             maximum = self.error_max.get(name)
             if maximum is not None:
                 error = np.clip(error, -float(maximum), float(maximum))
-            return 1.0 + error
+            return error
 
-        def finish(values: np.ndarray) -> np.ndarray:
-            nonnegative = np.maximum(0.0, values)
-            return np.where(valid, nonnegative, 0.0)
+        def multiplier(name: str) -> np.ndarray:
+            return 1.0 + correlated_error(name)
+
+        def finish_nonnegative(values: np.ndarray) -> np.ndarray:
+            return np.where(valid, np.maximum(0.0, values), 0.0)
+
+        def finish_signed(values: np.ndarray) -> np.ndarray:
+            return np.where(valid, values, 0.0)
 
         ghi_source = self.context["ghi_w_per_m2"].to_numpy(dtype=np.float64)
         wind_source = self.context["wind_speed_mps"].to_numpy(dtype=np.float64)
-        ghi = ghi_source[indices].copy()
-        wind_speed = wind_source[indices].copy()
+        ghi = ghi_source[indices].copy() * multiplier("ghi")
+        wind_speed = wind_source[indices].copy() * multiplier("wind_speed")
         shared_price = None
         if not self.heterogeneous_tariffs:
-            shared_price = self.context["buy_price_per_kwh"].to_numpy(dtype=np.float64)[indices].copy()
-        ghi *= multiplier("ghi")
-        wind_speed *= multiplier("wind_speed")
-        if shared_price is not None:
-            shared_price *= multiplier("price")
-        ghi = finish(ghi)
-        wind_speed = finish(wind_speed)
+            shared_price = (
+                self.context["buy_price_per_kwh"].to_numpy(dtype=np.float64)[indices].copy()
+                * multiplier("price")
+            )
+        ghi = finish_nonnegative(ghi)
+        wind_speed = finish_nonnegative(wind_speed)
         self._public_arrays = {
             "ghi_w_per_m2": ghi,
             "wind_speed_mps": wind_speed,
         }
         if shared_price is not None:
-            self._public_arrays["grid_price_per_kwh"] = finish(shared_price)
+            self._public_arrays["grid_price_per_kwh"] = finish_nonnegative(shared_price)
 
         self._local_arrays = {}
         for mg_id in self.agent_ids:
@@ -126,22 +129,30 @@ class SharedForecastProvider:
                 or abs(float(renewable_cfg.get("weather_time_shift_hours", 0.0))) > 1e-12
             )
             if has_local_weather:
-                # Shifted-weather scenarios use their cached local generation
-                # path so the deterministic forecast matches the environment.
                 pv = np.asarray(exogenous["pv_kw"], dtype=np.float64)[indices].copy()
                 wind = np.asarray(exogenous["wind_kw"], dtype=np.float64)[indices].copy()
                 pv *= multiplier("ghi")
                 wind *= multiplier("wind_speed")
-                pv = finish(pv)
-                wind = finish(wind)
+                pv = finish_nonnegative(pv)
+                wind = finish_nonnegative(wind)
             else:
                 pv = float(renewable_cfg["pv_capacity_kw"]) * self.profiles.pv_capacity_factor_series(ghi)
                 wind = float(renewable_cfg["wind_capacity_kw"]) * self.profiles.wind_capacity_factor_series(wind_speed)
             self._local_arrays[mg_id] = {
-                "load_kw": finish(load),
+                # This is intentionally the exogenous/base load. Future flexible
+                # load is endogenous to the policy and is never forecast here.
+                "load_kw": finish_nonnegative(load),
                 "pv_kw": np.where(valid, pv, 0.0),
                 "wind_kw": np.where(valid, wind, 0.0),
             }
+
+            dr_cfg = self.profiles.mg_cfg[mg_id].get("dr", {})
+            if str(dr_cfg.get("type", "")) == "commercial_hvac":
+                column = str(dr_cfg.get("temperature_column", "temperature_c"))
+                temperature = self.context[column].to_numpy(dtype=np.float64)[indices].copy()
+                temperature += correlated_error("temperature")
+                self._local_arrays[mg_id]["temperature_c"] = finish_signed(temperature)
+
             if self.heterogeneous_tariffs:
                 buy_source = self.context[buy_price_column(mg_id)].to_numpy(dtype=np.float64)
                 sell_source = self.context[sell_price_column(mg_id)].to_numpy(dtype=np.float64)
@@ -153,14 +164,14 @@ class SharedForecastProvider:
                     buy_price *= price_noise
                     sell_price *= price_noise
                 self._local_arrays[mg_id].update({
-                    "grid_price_per_kwh": finish(buy_price),
-                    "grid_sell_price_per_kwh": finish(sell_price),
+                    "grid_price_per_kwh": finish_nonnegative(buy_price),
+                    "grid_sell_price_per_kwh": finish_nonnegative(sell_price),
                 })
             else:
                 sell_ratio = float(self.config.get("price", {}).get("sell_ratio", 0.5))
                 assert shared_price is not None
                 self._local_arrays[mg_id]["grid_sell_price_per_kwh"] = (
-                    finish(shared_price) * sell_ratio
+                    finish_nonnegative(shared_price) * sell_ratio
                 )
 
     def valid(self, t: int, k: int) -> float:
