@@ -81,6 +81,25 @@ def build_dispatch_data(config: str | Path | Mapping[str, Any], split: str = "te
     return cfg, data
 
 
+def _add_shared_pair_capacity_constraints(
+    model: Any,
+    flow_variables: Mapping[tuple[Any, ...], Any],
+    agent_ids: Sequence[str],
+    horizon: int,
+    pair_capacity_kw: float,
+) -> None:
+    """Enforce one physical bidirectional capacity for every unordered P2P pair."""
+    ids = list(agent_ids)
+    for i, first in enumerate(ids):
+        for second in ids[i + 1:]:
+            for t in range(int(horizon)):
+                model.addConstr(
+                    flow_variables[(first, second, t)]
+                    + flow_variables[(second, first, t)]
+                    <= float(pair_capacity_kw)
+                )
+
+
 def solve_dispatch(
     config: Mapping[str, Any],
     data: DispatchData,
@@ -178,6 +197,9 @@ def solve_dispatch(
                     if source != destination:
                         add("flow", (source, destination, t), lb=0.0,
                             ub=pair_capacity_kw, obj=1e-8, type=continuous)
+        _add_shared_pair_capacity_constraints(
+            model, variables["flow"], ids, data.horizon, pair_capacity_kw
+        )
 
     for t in range(data.horizon):
         for mg in ids:
