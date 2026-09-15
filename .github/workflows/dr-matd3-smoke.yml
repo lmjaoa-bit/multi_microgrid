@@ -1,0 +1,99 @@
+name: Plain MATD3 DR short-training smoke
+
+on:
+  push:
+    branches: [codex/controllable-devices]
+    paths:
+      - '.github/workflows/dr-matd3-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  matd3-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Regenerate Yancheng-area NASA POWER data
+        run: python scripts/build_spatial_market_data.py
+      - name: Run three-episode plain MATD3 smoke
+        run: >-
+          python scripts/run_experiment.py
+          --algorithm matd3_dispatch
+          --algorithm-config configs/smoke/matd3_dispatch.yaml
+          --device cpu
+          --seed 42
+          --no-milp
+          --no-dashboard
+          --output-root /tmp/dr_matd3_smoke
+      - name: Verify training and evaluation artifacts
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          from pathlib import Path
+
+          root = Path('/tmp/dr_matd3_smoke/matd3_dispatch')
+          latest = json.loads((root / 'latest_run.json').read_text(encoding='utf-8'))
+          run_dir = Path(latest['run_directory'])
+          history = json.loads((run_dir / 'training_history.json').read_text(encoding='utf-8'))
+          summary = json.loads((run_dir / 'summary.json').read_text(encoding='utf-8'))
+          validation = json.loads((run_dir / 'validation_history.json').read_text(encoding='utf-8'))
+
+          assert len(history) == 3, len(history)
+          assert history[-1]['total_steps'] == 72, history[-1]['total_steps']
+          assert history[-1]['replay_size'] == 72, history[-1]['replay_size']
+          assert len(validation) == 3, len(validation)
+          assert summary['test_days_count'] == 2, summary['test_days_count']
+          assert (run_dir / 'checkpoints' / 'best_model.pt').is_file()
+          assert (run_dir / 'checkpoints' / 'final_model.pt').is_file()
+
+          critic_losses = [
+              float(row['critic_loss']) for row in history
+              if row.get('critic_loss') is not None and math.isfinite(float(row['critic_loss']))
+          ]
+          actor_losses = [
+              float(row['actor_loss']) for row in history
+              if row.get('actor_loss') is not None and math.isfinite(float(row['actor_loss']))
+          ]
+          actor_grad_norms = [
+              float(row['actor_grad_norm']) for row in history
+              if row.get('actor_grad_norm') is not None and math.isfinite(float(row['actor_grad_norm']))
+          ]
+          critic_grad_norms = [
+              float(row['critic_grad_norm']) for row in history
+              if row.get('critic_grad_norm') is not None and math.isfinite(float(row['critic_grad_norm']))
+          ]
+          assert critic_losses, 'no finite critic loss recorded'
+          assert actor_losses, 'no finite actor loss recorded'
+          assert actor_grad_norms and max(actor_grad_norms) > 0.0, actor_grad_norms
+          assert critic_grad_norms and max(critic_grad_norms) > 0.0, critic_grad_norms
+
+          feasible = [float(row['feasible_rate']) for row in validation]
+          assert all(math.isfinite(value) for value in feasible), feasible
+          assert min(feasible) >= 1.0 - 1e-12, feasible
+
+          print(json.dumps({
+              'run_id': summary['run_id'],
+              'episodes': summary['episodes'],
+              'total_steps': summary['total_steps'],
+              'best_episode': summary['best_episode'],
+              'best_validation_profit_mean': summary['best_validation_profit_mean'],
+              'final_100_profit_mean': summary['final_100_profit_mean'],
+              'test_days_count': summary['test_days_count'],
+              'critic_loss_last': critic_losses[-1],
+              'actor_loss_last': actor_losses[-1],
+              'actor_grad_norm_max': max(actor_grad_norms),
+              'critic_grad_norm_max': max(critic_grad_norms),
+              'validation_feasible_rate': feasible,
+          }, indent=2))
+          PY
