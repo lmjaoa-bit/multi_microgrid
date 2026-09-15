@@ -1,0 +1,30 @@
+name: Apply ESS projection diagnostic green patch
+
+on:
+  push:
+    branches: [codex/controllable-devices]
+    paths:
+      - '.github/workflows/ess-diagnostic-green.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/controllable-devices
+          fetch-depth: 0
+      - name: Apply ESS diagnostic patch
+        run: |
+          python scripts/_apply_ess_projection_diagnostic_patch.py
+          python -m py_compile envs/multi_microgrid_env.py
+      - name: Commit patch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add envs/multi_microgrid_env.py
+          git commit -m 'fix: separate ESS projection from P2P masking'
+          git push origin HEAD:codex/controllable-devices
