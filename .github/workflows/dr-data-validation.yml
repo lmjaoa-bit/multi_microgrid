@@ -6,9 +6,11 @@ on:
     paths:
       - '.github/workflows/dr-data-validation.yml'
       - 'scripts/build_spatial_market_data.py'
+      - 'scripts/calibrate_hvac_load.py'
       - 'configs/cooperative.yaml'
       - 'core/data_manager.py'
       - 'core/forecast.py'
+      - 'components/commercial_hvac.py'
   workflow_dispatch:
 
 permissions:
@@ -17,7 +19,7 @@ permissions:
 jobs:
   regenerate-and-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -50,3 +52,5 @@ jobs:
           assert not any(step_info['terminal_soc_infeasible'].values())
           print('regional-data smoke passed')
           PY
+      - name: Calibrate MG2 annual reference HVAC load
+        run: python scripts/calibrate_hvac_load.py --output /tmp/mg2_hvac_calibration.json
