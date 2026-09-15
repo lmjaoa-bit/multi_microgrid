@@ -13,7 +13,7 @@ from envs.multi_microgrid_env import MultiMicrogridEnv
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CONFIG = ROOT / "configs" / "cooperative.yaml"
+CONFIG = ROOT / "configs" / "cooperative_legacy_pre_dr.yaml"
 
 
 def test_p2p_energy_and_transfer_conservation() -> None:
@@ -93,8 +93,6 @@ def test_renewable_p2p_only_keeps_peer_pool_but_blocks_ess_exports() -> None:
     assert saw_renewable_offer
 
 
-
-
 def test_independent_mode_disables_p2p() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     config["_project_root"] = str(ROOT)
@@ -114,7 +112,7 @@ def test_battery_soc_and_power_feasibility() -> None:
     assert battery.soc_min <= state["soc"] <= battery.soc_max
 
 
-def test_environment_has_one_battery_action_and_no_capacity_commitment_fields() -> None:
+def test_legacy_environment_has_one_battery_action_and_no_capacity_commitment_fields() -> None:
     env = MultiMicrogridEnv(CONFIG)
     env.reset(seed=2, deterministic=True)
     _, rewards, _, info = env.step({mg: np.asarray([0.0]) for mg in env.agent_ids})
@@ -125,13 +123,10 @@ def test_environment_has_one_battery_action_and_no_capacity_commitment_fields() 
     assert all(abs(x["power_balance_residual_kw"]) < 1e-7 for x in info["settlements"].values())
 
 
-
-
 def test_ess_p2p_sale_never_coincides_with_external_grid_import() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     config["_project_root"] = str(ROOT)
     config = get_algorithm_spec("matd3_dispatch").build_environment_config(config)
-    # This sale test requires stored energy; the default study starts empty.
     for mg in config["microgrids"]:
         mg["battery"]["initial_soc"] = .55
     env = MultiMicrogridEnv(config, split="test")
@@ -152,10 +147,8 @@ def test_terminal_reachability_bounds() -> None:
     env = MultiMicrogridEnv(CONFIG)
     env.reset(seed=3, deterministic=True)
     done = False
-    info = {}
     while not done:
-        _, _, done, info = env.step({mg: np.asarray([1.0]) for mg in env.agent_ids})
+        _, _, done, _ = env.step({mg: np.asarray([1.0]) for mg in env.agent_ids})
     for core in env.cores.values():
         assert core.battery.soc_min <= float(core.battery.soc) <= core.battery.soc_max
-        # Reachability projection prevents extreme drop
         assert float(core.battery.soc) >= core.battery.initial_soc - 0.03 - 1e-6
