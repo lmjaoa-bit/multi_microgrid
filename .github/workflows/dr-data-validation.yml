@@ -58,6 +58,7 @@ jobs:
           assert not any(step_info['terminal_soc_infeasible'].values())
           print('regional-data smoke passed')
           PY
+      # Seasonal stress audit is the gate before any short MATD3 training run.
       - name: Audit 12-month heterogeneous DR physics
         run: >-
           python scripts/audit_dr_physics.py
