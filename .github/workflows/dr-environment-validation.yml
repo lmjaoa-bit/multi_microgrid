@@ -1,0 +1,48 @@
+name: DR environment validation
+
+on:
+  push:
+    branches: [codex/controllable-devices]
+    paths:
+      - '.github/workflows/dr-environment-validation.yml'
+      - 'components/**'
+      - 'core/**'
+      - 'envs/**'
+      - 'algorithms/matd3_dispatch/**'
+      - 'configs/**'
+      - 'tests/test_controllable_loads.py'
+      - 'tests/test_joint_action_projection.py'
+      - 'tests/test_dr_environment.py'
+      - 'tests/test_experiment_profiles.py'
+      - 'tests/test_plain_single_dispatch.py'
+      - 'tests/test_cooperative_physics.py'
+      - 'tests/test_daily_soc_and_future_prices.py'
+      - 'tests/test_milp_mpc.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run DR and compatibility tests
+        run: >-
+          python -m pytest -q
+          tests/test_controllable_loads.py
+          tests/test_joint_action_projection.py
+          tests/test_dr_environment.py
+          tests/test_experiment_profiles.py
+          tests/test_plain_single_dispatch.py
+          tests/test_cooperative_physics.py
+          tests/test_daily_soc_and_future_prices.py
+          tests/test_milp_mpc.py
