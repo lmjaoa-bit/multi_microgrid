@@ -16,7 +16,7 @@ from experiments.profiles import experiment_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 STRONG_CONFIG = ROOT / "configs" / "cooperative.yaml"
-WEAK_CONFIG = ROOT / "configs" / "ablations" / "cooperative_instantaneous_projection.yaml"
+WEAK_CONFIG = ROOT / "configs" / "cooperative_instantaneous_projection.yaml"
 
 
 def _load(path: Path) -> dict:
