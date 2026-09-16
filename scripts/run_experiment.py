@@ -11,6 +11,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from algorithms.registry import get_algorithm_spec
+from evaluation.service_reliability import augment_run_outputs
 from experiments.layout import DEFAULT_WORKING_OUTPUT_ROOT
 from experiments.result_lifecycle import capture_git_identity, update_run_metadata_git_identity
 from experiments.training_pipeline import build_parser, train
@@ -42,7 +43,9 @@ def main(argv: list[str] | None = None) -> int:
     identity = capture_git_identity(PROJECT_ROOT)
     args = _apply_algorithm_runtime_defaults(build_managed_parser().parse_args(argv))
     summary = train(args)
-    update_run_metadata_git_identity(Path(str(summary["run_directory"])), identity)
+    run_dir = Path(str(summary["run_directory"]))
+    augment_run_outputs(run_dir)
+    update_run_metadata_git_identity(run_dir, identity)
     return 0
 
 
