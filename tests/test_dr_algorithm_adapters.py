@@ -56,6 +56,29 @@ def test_variant_uses_dr_action_space_and_joint_projection(slug: str):
     assert step_info["action_design"] == "single_dispatch_dr"
 
 
+@pytest.mark.parametrize("slug", DR_VARIANTS)
+def test_variant_replay_critic_and_actor_update_use_projected_dr_actions(slug: str):
+    _, env, _, model = build_variant(slug)
+    observations, info = env.reset(seed=42, deterministic=True)
+    actions = model.select_actions(observations, noise_std=0.0)
+    next_obs, rewards, terminal, step_info = env.step(actions)
+    model.replay.add(
+        observations,
+        info["global_state"],
+        actions,
+        rewards[env.agent_ids[0]],
+        next_obs,
+        step_info["global_state_after"],
+        terminal,
+    )
+
+    first = model.update(1)
+    second = model.update(1)
+    assert np.isfinite(first["critic_loss"])
+    assert np.isfinite(second["critic_loss"])
+    assert np.isfinite(second["actor_loss"])
+
+
 @pytest.mark.parametrize("slug", ("matd3_transformer", "pnn_transformer"))
 def test_transformer_variants_receive_dr_state_and_hvac_forecast_gradients(slug: str):
     _, env, _, model = build_variant(slug)
