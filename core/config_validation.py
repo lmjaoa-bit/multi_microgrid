@@ -116,6 +116,13 @@ def validate_config(config: Mapping[str, Any]) -> None:
     ):
         raise ValueError("data.allow_temperature_fallback must be boolean")
 
+    projection = config.get("constraint_projection", {})
+    if not isinstance(projection, Mapping):
+        raise ValueError("constraint_projection must be a mapping")
+    projection_mode = str(projection.get("mode", "strong"))
+    if projection_mode not in {"strong", "instantaneous"}:
+        raise ValueError("constraint_projection.mode must be strong or instantaneous")
+
     sharing = config.get("ess_sharing", {})
     if sharing.get("control_mode", "single_dispatch") != "single_dispatch":
         raise ValueError("Only single_dispatch ESS control is supported")
