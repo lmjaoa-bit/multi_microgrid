@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-import numpy as np
-import pytest
+
 import torch
 import yaml
 
@@ -28,18 +27,20 @@ def test_pnn_initialization_and_forward():
     spec, env, settings, pnn = build_pnn()
     assert spec.slug == "pnn"
     assert type(pnn) is PNN
-    assert pnn.action_dim == 1
+    assert pnn.action_dim == 2
+    assert pnn.raw_action_dim == 2
+    assert pnn.effective_action_dim == 3
 
-    observations, info = env.reset(seed=42, deterministic=True)
+    observations, _ = env.reset(seed=42, deterministic=True)
     actions = pnn.select_actions(observations, noise_std=0.0)
 
     for mg in env.agent_ids:
         actor = pnn.actors[mg]
         assert type(actor) is PNNDispatchActor
         assert actor.feature_dim == 32
-        assert -1.0 <= float(actions[mg][0]) <= 1.0
+        assert actions[mg].shape == (2,)
+        assert all(-1.0 <= float(value) <= 1.0 for value in actions[mg])
 
-    # Test diagnostics
     prods = pnn.product_diagnostics()
     for mg in env.agent_ids:
         assert "linear_signal_norm" in prods[mg]
@@ -48,27 +49,34 @@ def test_pnn_initialization_and_forward():
 
 
 def test_pnn_gradient_flow():
-    spec, env, settings, pnn = build_pnn()
+    _, env, _, pnn = build_pnn()
     obs, _ = env.reset(seed=42, deterministic=True)
     for mg in env.agent_ids:
         actor = pnn.actors[mg]
         t_obs = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0)
         action = actor(t_obs)
+        assert action.shape == (1, 2)
         loss = (action ** 2).sum()
         pnn.actor_optimizers[mg].zero_grad()
         loss.backward()
 
         branches = actor.branch_modules()
-        for b_name, modules in branches.items():
-            b_norm = sum(p.grad.norm(2).item() for m in modules for p in m.parameters() if p.grad is not None)
-            assert b_norm > 0, f"Branch {b_name} for agent {mg} received zero gradient"
+        for branch_name, modules in branches.items():
+            branch_norm = sum(
+                parameter.grad.norm(2).item()
+                for module in modules
+                for parameter in module.parameters()
+                if parameter.grad is not None
+            )
+            assert branch_norm > 0, f"Branch {branch_name} for agent {mg} received zero gradient"
 
 
 def test_pnn_save_and_load(tmp_path: Path):
     spec, env, settings, pnn = build_pnn()
     save_path = tmp_path / "pnn_checkpoint.pt"
     pnn.save(save_path)
-    assert save_path.exists()
+    payload = torch.load(save_path, map_location="cpu", weights_only=True)
+    assert payload["action_semantics"] == "single_dispatch_dr_v1"
 
     pnn_loaded = spec.create(env, settings, seed=99)
     pnn_loaded.load(save_path)
