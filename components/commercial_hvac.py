@@ -8,16 +8,25 @@ import pandas as pd
 from components.controllable_load import (
     clipped_raw,
     delivered_fraction as clamp_delivered_fraction,
+    validate_projection_mode,
 )
 
 
 class CommercialHVACDR:
     """Reversible heat-pump DR backed by a 2R2C building thermal model."""
 
-    def __init__(self, config: Mapping[str, Any], *, delta_t: float, episode_length: int) -> None:
+    def __init__(
+        self,
+        config: Mapping[str, Any],
+        *,
+        delta_t: float,
+        episode_length: int,
+        projection_mode: str = "strong",
+    ) -> None:
         self.config = dict(config)
         self.delta_t = float(delta_t)
         self.episode_length = int(episode_length)
+        self.projection_mode = validate_projection_mode(projection_mode)
         self.r_oa = float(config["r_out_air_c_per_kw"])
         self.r_am = float(config["r_air_mass_c_per_kw"])
         self.c_air = float(config["c_air_kwh_per_c"])
@@ -271,17 +280,20 @@ class CommercialHVACDR:
             return self._bounds_cache_value
 
         one_low, one_high = self._one_step_bounds_q(t)
-        terminal_low = self._solve_terminal_q(t, maximize=False)
-        terminal_high = self._solve_terminal_q(t, maximize=True)
-        if terminal_low is None or terminal_high is None:
-            self.terminal_thermal_infeasible = True
+        if self.projection_mode == "instantaneous":
             q_low, q_high = one_low, one_high
         else:
-            q_low = max(one_low, min(terminal_low, terminal_high))
-            q_high = min(one_high, max(terminal_low, terminal_high))
-            if q_low > q_high + 1e-7:
+            terminal_low = self._solve_terminal_q(t, maximize=False)
+            terminal_high = self._solve_terminal_q(t, maximize=True)
+            if terminal_low is None or terminal_high is None:
                 self.terminal_thermal_infeasible = True
                 q_low, q_high = one_low, one_high
+            else:
+                q_low = max(one_low, min(terminal_low, terminal_high))
+                q_high = min(one_high, max(terminal_low, terminal_high))
+                if q_low > q_high + 1e-7:
+                    self.terminal_thermal_infeasible = True
+                    q_low, q_high = one_low, one_high
         result = (
             float(np.clip(
                 self._q_to_signed_electric(q_low),
