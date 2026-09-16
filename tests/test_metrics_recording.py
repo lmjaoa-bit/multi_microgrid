@@ -1,18 +1,14 @@
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
 import numpy as np
 
 from envs.multi_microgrid_env import MultiMicrogridEnv
-from evaluation.evaluate_matd3 import _build_joint_summary, _daily_row
-from utils.metrics_collector import (
-    EpisodeMetricsCollector,
-    aggregate_episode_metrics,
-    distribution_statistics,
-    write_json,
-)
+from evaluation.service_reliability import augment_run_outputs
+from utils.metrics_collector import EpisodeMetricsCollector, distribution_statistics, write_json
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -63,20 +59,7 @@ def test_episode_collector_has_dr_aware_schema_and_24_hour_rows() -> None:
     assert set(metrics["dr_statistics_by_microgrid"]) == set(env.agent_ids)
     assert "projection_rate" in metrics["dr_statistics_by_microgrid"]["mg1"]
     assert "flexible_load_energy_kwh" in metrics["dr_statistics_by_microgrid"]["mg1"]
-    assert "supply_infeasible_rate" in metrics["dr_statistics_by_microgrid"]["mg1"]
     assert "ess_offer_acceptance_rate_by_microgrid" in metrics["p2p_statistics"]
-
-    service = metrics["service_reliability"]
-    assert service["unmet_energy_kwh"] >= 0.0
-    assert 0.0 <= service["unmet_load_hour_rate"] <= 1.0
-    assert 0.0 <= service["unmet_load_microgrid_hour_rate"] <= 1.0
-    assert 0.0 <= service["dr_supply_infeasible_rate"] <= 1.0
-    assert 0.0 <= service["dr_supply_infeasible_microgrid_hour_rate"] <= 1.0
-    assert metrics["constraint_statistics"]["strict_feasible_episode"] == (
-        metrics["constraint_statistics"]["feasible_episode"]
-        and not service["unmet_load_day"]
-        and not service["dr_supply_infeasible_day"]
-    )
 
     # Pair-capacity diagnostics are an exact same-offer counterfactual, not
     # unmatched ESS offer energy relabeled as network congestion.
@@ -102,61 +85,87 @@ def test_episode_collector_has_dr_aware_schema_and_24_hour_rows() -> None:
     assert "sharing_offer_ratio_raw" not in action_dims
 
 
-def test_service_reliability_distinguishes_physical_from_strict_feasibility() -> None:
-    env = MultiMicrogridEnv(CONFIG, split="test")
-    day = str(env.data.valid_days[0].date())
-    observations, _ = env.reset(day=day, deterministic=True)
-    for grid in env.grids.values():
-        grid.import_limit_kw = 0.0
+def test_service_reliability_augments_daily_and_summary_outputs(tmp_path: Path) -> None:
+    run_dir = tmp_path / "run"
+    hourly_dir = run_dir / "test_hourly_trajectories"
+    hourly_dir.mkdir(parents=True)
 
-    collector = EpisodeMetricsCollector(env, capture_hourly=True)
-    actions = {mg: np.zeros(env.action_dim, dtype=np.float32) for mg in env.agent_ids}
-    _, rewards, _, info = env.step(actions)
-    collector.record_step(actions, info, rewards)
-    metrics = collector.finalize_episode()
-    metrics["date"] = day
-    metrics["test_seed"] = 42
+    hourly_rows = [
+        {
+            "date": "2018-11-28", "hour": 3,
+            "mg1_unmet_load_kw": 0.0, "mg2_unmet_load_kw": 0.0,
+            "mg3_unmet_load_kw": 2.5,
+            "mg1_dr_supply_infeasible": 0, "mg2_dr_supply_infeasible": 0,
+            "mg3_dr_supply_infeasible": 1,
+        },
+        {
+            "date": "2018-11-28", "hour": 4,
+            "mg1_unmet_load_kw": 0.0, "mg2_unmet_load_kw": 0.0,
+            "mg3_unmet_load_kw": 0.0,
+            "mg1_dr_supply_infeasible": 0, "mg2_dr_supply_infeasible": 0,
+            "mg3_dr_supply_infeasible": 0,
+        },
+    ]
+    with (hourly_dir / "2018-11-28.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(hourly_rows[0]))
+        writer.writeheader()
+        writer.writerows(hourly_rows)
 
-    service = metrics["service_reliability"]
-    assert service["unmet_energy_kwh"] > 0.0
-    assert service["unmet_load_hour_count"] == 1
-    assert service["unmet_load_hour_rate"] == 1.0
-    assert service["unmet_load_microgrid_hour_count"] >= 1
-    assert service["unmet_load_microgrid_hour_rate"] > 0.0
-    assert service["dr_supply_infeasible_hour_count"] == 1
-    assert service["dr_supply_infeasible_rate"] == 1.0
-    assert service["dr_supply_infeasible_microgrid_hour_count"] >= 1
-    assert service["dr_supply_infeasible_microgrid_hour_rate"] > 0.0
-    assert service["unmet_load_day"]
-    assert service["dr_supply_infeasible_day"]
-    assert not service["strict_feasible_episode"]
-    assert not metrics["constraint_statistics"]["strict_feasible_episode"]
+    daily_rows = [{
+        "date": "2018-11-28",
+        "feasible_day": True,
+        "soc_violation_day": False,
+        "power_balance_violation_day": False,
+        "p2p_balance_violation_day": False,
+    }]
+    with (run_dir / "test_daily_metrics.csv").open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(daily_rows[0]))
+        writer.writeheader()
+        writer.writerows(daily_rows)
 
-    aggregate = aggregate_episode_metrics([metrics])
-    assert aggregate["unmet_energy_kwh_total"] == service["unmet_energy_kwh"]
-    assert aggregate["unmet_energy_kwh_mean"] == service["unmet_energy_kwh"]
-    assert aggregate["unmet_load_day_rate"] == 1.0
-    assert aggregate["unmet_load_hour_rate_mean"] == 1.0
-    assert aggregate["dr_supply_infeasible_day_rate"] == 1.0
-    assert aggregate["dr_supply_infeasible_rate_mean"] == 1.0
-    assert aggregate["strict_feasible_rate"] == 0.0
+    base_summary = {
+        "test_days_count": 1,
+        "algorithm": {"feasible_rate": 1.0},
+        "matd3": {"feasible_rate": 1.0},
+    }
+    for name in ("test_summary.json", "test_evaluation.json"):
+        (run_dir / name).write_text(json.dumps(base_summary), encoding="utf-8")
+    (run_dir / "summary.json").write_text(json.dumps({"test_days_count": 1}), encoding="utf-8")
 
-    row = _daily_row(metrics, metrics, None, algorithm_slug="matd3_dispatch")
-    assert row["unmet_energy_kwh"] == service["unmet_energy_kwh"]
-    assert row["unmet_load_day"]
-    assert row["dr_supply_infeasible_day"]
-    assert not row["strict_feasible_day"]
-    assert row["unmet_load_hour_rate"] == 1.0
-    assert row["dr_supply_infeasible_rate"] == 1.0
-    for mg in env.agent_ids:
-        assert row[f"unmet_energy_{mg}_kwh"] >= 0.0
-        assert 0.0 <= row[f"dr_supply_infeasible_rate_{mg}"] <= 1.0
+    reliability = augment_run_outputs(run_dir, generate_plot=False)
 
-    joint = _build_joint_summary([row])
-    assert joint["strict_feasible_day_rate"] == 0.0
-    assert joint["unmet_load_day_rate"] == 1.0
-    assert joint["dr_supply_infeasible_day_rate"] == 1.0
-    assert joint["unmet_energy_mean_kwh"] == service["unmet_energy_kwh"]
+    assert reliability["unmet_energy_total_kwh"] == 2.5
+    assert reliability["unmet_energy_mean_kwh"] == 2.5
+    assert reliability["unmet_load_day_rate"] == 1.0
+    assert reliability["unmet_load_hour_rate_mean"] == 0.5
+    assert np.isclose(reliability["unmet_load_microgrid_hour_rate_mean"], 1.0 / 6.0)
+    assert reliability["dr_supply_infeasible_day_rate"] == 1.0
+    assert reliability["dr_supply_infeasible_rate_mean"] == 0.5
+    assert np.isclose(reliability["dr_supply_infeasible_microgrid_hour_rate_mean"], 1.0 / 6.0)
+    assert reliability["strict_feasible_day_rate"] == 0.0
+    assert reliability["by_microgrid"]["mg3"]["unmet_energy_total_kwh"] == 2.5
+
+    with (run_dir / "test_daily_metrics.csv").open(encoding="utf-8", newline="") as handle:
+        row = next(csv.DictReader(handle))
+    assert float(row["unmet_energy_kwh"]) == 2.5
+    assert row["unmet_load_day"].lower() == "true"
+    assert row["dr_supply_infeasible_day"].lower() == "true"
+    assert row["strict_feasible_day"].lower() == "false"
+    assert float(row["unmet_load_hour_rate"]) == 0.5
+    assert float(row["dr_supply_infeasible_rate"]) == 0.5
+    assert float(row["unmet_energy_mg3_kwh"]) == 2.5
+    assert float(row["dr_supply_infeasible_rate_mg3"]) == 0.5
+
+    test_summary = json.loads((run_dir / "test_summary.json").read_text(encoding="utf-8"))
+    assert test_summary["strict_feasible_day_rate"] == 0.0
+    assert test_summary["unmet_energy_total_kwh"] == 2.5
+    assert test_summary["service_reliability"]["unmet_load_day_rate"] == 1.0
+    assert test_summary["algorithm"]["service_reliability"]["strict_feasible_day_rate"] == 0.0
+    assert test_summary["matd3"]["service_reliability"]["strict_feasible_day_rate"] == 0.0
+
+    run_summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
+    assert run_summary["strict_feasible_day_rate"] == 0.0
+    assert run_summary["service_reliability"]["unmet_energy_total_kwh"] == 2.5
 
 
 def test_json_writer_converts_numpy_and_rejects_nonfinite_json(tmp_path: Path) -> None:
