@@ -26,6 +26,9 @@ class GlobalStateBuilder:
         self.control_mode = str(config.get("ess_sharing", {}).get("control_mode", "single_dispatch"))
         self.action_design = str(config.get("action_design", "single_dispatch"))
         self.dr_enabled = self.action_design == "single_dispatch_dr"
+        self.constraint_projection_mode = str(
+            config.get("constraint_projection", {}).get("mode", "strong")
+        )
         self.heterogeneous_tariffs = has_heterogeneous_tariffs(config)
         self.episode_length = int(config.get("time", {}).get("episode_length", 24))
 
@@ -198,12 +201,16 @@ class GlobalStateBuilder:
                 float(history["clearing_ratio"]),
             ])
         if self.control_mode == "single_dispatch":
+            enforce_terminal = (
+                self.constraint_projection_mode == "strong"
+                and self.config["terminal_soc"]["mode"] != "none"
+            )
             for mg in self.agent_ids:
                 battery = cores[mg].battery
                 floor, ceiling = battery.reachable_soc_envelope(
                     t, self.episode_length,
                     tolerance=float(self.config["terminal_soc"]["tolerance"]),
-                    enforce_terminal=self.config["terminal_soc"]["mode"] != "none")
+                    enforce_terminal=enforce_terminal)
                 neutral = battery.map_action(0.0, floor, ceiling)
                 values.extend([
                     neutral["charge_requested_kw"] / battery.max_charge_kw,
