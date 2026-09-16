@@ -14,6 +14,8 @@ from components.controllable_load import build_controllable_load
 from components.ev_charging import EVChargingDR
 from components.industrial_mill import IndustrialMillDR
 from core.config_validation import validate_config
+from envs.environment_factory import build_environment
+from envs.instantaneous_projection_env import InstantaneousProjectionEnv
 from envs.multi_microgrid_env import MultiMicrogridEnv
 from experiments.profiles import experiment_contract
 
@@ -53,6 +55,18 @@ def test_projection_mode_validation_and_default_contract_are_explicit() -> None:
     contract = experiment_contract(spec, instantaneous, CONFIG)
     assert contract["constraint_projection_mode"] == "instantaneous"
     assert contract["physical_settings"]["constraint_projection"]["mode"] == "instantaneous"
+
+
+def test_environment_factory_preserves_strong_baseline_and_selects_ablation() -> None:
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    baseline = build_environment(config, split="train")
+    assert type(baseline) is MultiMicrogridEnv
+
+    instantaneous = deepcopy(config)
+    instantaneous["constraint_projection"]["mode"] = "instantaneous"
+    ablation = build_environment(instantaneous, split="train")
+    assert isinstance(ablation, InstantaneousProjectionEnv)
+    assert ablation.constraint_projection_mode == "instantaneous"
 
 
 def test_instantaneous_mill_projection_drops_terminal_reachability() -> None:
@@ -121,8 +135,8 @@ def test_instantaneous_hvac_projection_skips_terminal_lookahead_solver() -> None
 def test_instantaneous_environment_penalizes_terminal_constraint_violations() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     config["constraint_projection"]["mode"] = "instantaneous"
-    env = MultiMicrogridEnv(config, split="train")
-    assert env.constraint_projection_mode == "instantaneous"
+    env = build_environment(config, split="train")
+    assert isinstance(env, InstantaneousProjectionEnv)
     observations, _ = env.reset(day=str(env.data.valid_days[0].date()), deterministic=True)
     done = False
     info = None
