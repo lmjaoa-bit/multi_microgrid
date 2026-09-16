@@ -8,16 +8,25 @@ import pandas as pd
 from components.controllable_load import (
     delivered_fraction as clamp_delivered_fraction,
     raw_to_unit_interval,
+    validate_projection_mode,
 )
 
 
 class EVChargingDR:
-    """Aggregate residential EV charging with a hard departure-energy target."""
+    """Aggregate residential EV charging with an optional hard departure-energy target."""
 
-    def __init__(self, config: Mapping[str, Any], *, delta_t: float, episode_length: int) -> None:
+    def __init__(
+        self,
+        config: Mapping[str, Any],
+        *,
+        delta_t: float,
+        episode_length: int,
+        projection_mode: str = "strong",
+    ) -> None:
         self.config = dict(config)
         self.delta_t = float(delta_t)
         self.episode_length = int(episode_length)
+        self.projection_mode = validate_projection_mode(projection_mode)
         self.capacity_kwh = float(config["fleet_capacity_kwh"])
         self.initial_soc = float(config["initial_soc"])
         self.target_soc = float(config["target_soc"])
@@ -65,8 +74,15 @@ class EVChargingDR:
 
     def feasible_bounds(self, t: int) -> tuple[float, float]:
         steps = self._remaining_steps(t)
+        if steps <= 0:
+            return (0.0, 0.0)
+        if self.projection_mode == "instantaneous":
+            headroom = max(0.0, (self.max_soc - self.soc) * self.capacity_kwh)
+            maximum = min(self.max_charge_kw, headroom / (self.eta * self.delta_t))
+            return (0.0, float(maximum))
+
         remaining = self._remaining_battery_kwh()
-        if steps <= 0 or remaining <= 1e-10:
+        if remaining <= 1e-10:
             return (0.0, 0.0)
         maximum = min(self.max_charge_kw, remaining / (self.eta * self.delta_t))
         future_max_battery = self.eta * self.max_charge_kw * max(steps - 1, 0) * self.delta_t
