@@ -22,6 +22,7 @@ from experiments.profiles import experiment_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / "configs" / "cooperative.yaml"
+ABLATION_CONFIG = ROOT / "configs" / "cooperative_instantaneous_projection.yaml"
 
 
 def _day_frame(*, tout: float = 18.0, ghi: float = 0.0) -> pd.DataFrame:
@@ -55,6 +56,15 @@ def test_projection_mode_validation_and_default_contract_are_explicit() -> None:
     contract = experiment_contract(spec, instantaneous, CONFIG)
     assert contract["constraint_projection_mode"] == "instantaneous"
     assert contract["physical_settings"]["constraint_projection"]["mode"] == "instantaneous"
+
+
+def test_ablation_config_differs_from_baseline_only_by_projection_mode() -> None:
+    baseline = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    ablation = yaml.safe_load(ABLATION_CONFIG.read_text(encoding="utf-8"))
+    assert baseline["constraint_projection"]["mode"] == "strong"
+    assert ablation["constraint_projection"]["mode"] == "instantaneous"
+    ablation["constraint_projection"]["mode"] = "strong"
+    assert ablation == baseline
 
 
 def test_environment_factory_preserves_strong_baseline_and_selects_ablation() -> None:
