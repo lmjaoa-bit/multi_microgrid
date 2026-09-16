@@ -42,6 +42,7 @@ jobs:
           tests/test_dr_environment.py
           tests/test_dr_physics_audit.py
           tests/test_experiment_profiles.py
+          tests/test_projection_ablation.py
           tests/test_plain_single_dispatch.py
           tests/test_cooperative_physics.py
           tests/test_daily_soc_and_future_prices.py
