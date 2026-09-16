@@ -6,9 +6,6 @@ import numpy as np
 import pandas as pd
 
 
-PROJECTION_MODES = {"strong", "instantaneous"}
-
-
 class ControllableLoad(Protocol):
     """Small common surface for heterogeneous flexible electrical loads."""
 
@@ -45,38 +42,21 @@ def delivered_fraction(value: float) -> float:
     return float(np.clip(result, 0.0, 1.0))
 
 
-def validate_projection_mode(value: str) -> str:
-    mode = str(value)
-    if mode not in PROJECTION_MODES:
-        raise ValueError(
-            f"projection_mode must be one of {sorted(PROJECTION_MODES)}, got {mode!r}"
-        )
-    return mode
-
-
 def build_controllable_load(
     config: Mapping[str, Any],
     *,
     delta_t: float,
     episode_length: int,
-    projection_mode: str = "strong",
 ) -> ControllableLoad:
     """Build one physical DR model from a microgrid ``dr`` configuration."""
-    mode = validate_projection_mode(projection_mode)
     kind = str(config.get("type", ""))
     if kind == "industrial_mill":
         from components.industrial_mill import IndustrialMillDR
-        return IndustrialMillDR(
-            config, delta_t=delta_t, episode_length=episode_length, projection_mode=mode
-        )
+        return IndustrialMillDR(config, delta_t=delta_t, episode_length=episode_length)
     if kind == "commercial_hvac":
         from components.commercial_hvac import CommercialHVACDR
-        return CommercialHVACDR(
-            config, delta_t=delta_t, episode_length=episode_length, projection_mode=mode
-        )
+        return CommercialHVACDR(config, delta_t=delta_t, episode_length=episode_length)
     if kind == "ev_charging":
         from components.ev_charging import EVChargingDR
-        return EVChargingDR(
-            config, delta_t=delta_t, episode_length=episode_length, projection_mode=mode
-        )
+        return EVChargingDR(config, delta_t=delta_t, episode_length=episode_length)
     raise ValueError(f"Unsupported controllable load type: {kind!r}")

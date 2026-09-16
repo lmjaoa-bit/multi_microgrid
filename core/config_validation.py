@@ -130,24 +130,12 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if action_design not in {"single_dispatch", "single_dispatch_dr"}:
         raise ValueError("action_design must be single_dispatch or single_dispatch_dr")
 
-    projection = config.get("constraint_projection", {})
-    if not isinstance(projection, Mapping):
-        raise ValueError("constraint_projection must be a mapping")
-    projection_mode = str(projection.get("mode", "strong"))
-    if projection_mode not in {"strong", "instantaneous"}:
-        raise ValueError("constraint_projection.mode must be strong or instantaneous")
-    if projection_mode == "instantaneous" and action_design != "single_dispatch_dr":
-        raise ValueError("constraint_projection.mode=instantaneous requires single_dispatch_dr")
-
     terminal = config["terminal_soc"]
     if terminal.get("mode") not in {"none", "penalty", "hard"}:
         raise ValueError("terminal_soc.mode must be none, penalty or hard")
     _number(terminal.get("tolerance"), "terminal_soc.tolerance", 0.0)
-    penalty_rate = _number(terminal.get("penalty_per_kwh", 0.0), "terminal_soc.penalty_per_kwh", 0.0)
     if action_design == "single_dispatch_dr" and terminal.get("mode") != "hard":
         raise ValueError("single_dispatch_dr baseline requires hard cyclic terminal SOC")
-    if projection_mode == "instantaneous" and penalty_rate <= 0.0:
-        raise ValueError("instantaneous projection requires terminal_soc.penalty_per_kwh > 0")
 
     observation = config.get("observation", {})
     horizon = observation.get("future_horizon", 4)

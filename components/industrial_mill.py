@@ -8,25 +8,16 @@ import pandas as pd
 from components.controllable_load import (
     delivered_fraction as clamp_delivered_fraction,
     raw_to_unit_interval,
-    validate_projection_mode,
 )
 
 
 class IndustrialMillDR:
-    """Raw-meal mill with an intermediate silo and optional terminal reachability."""
+    """Raw-meal mill with an intermediate silo and hard daily reachability."""
 
-    def __init__(
-        self,
-        config: Mapping[str, Any],
-        *,
-        delta_t: float,
-        episode_length: int,
-        projection_mode: str = "strong",
-    ) -> None:
+    def __init__(self, config: Mapping[str, Any], *, delta_t: float, episode_length: int) -> None:
         self.config = dict(config)
         self.delta_t = float(delta_t)
         self.episode_length = int(episode_length)
-        self.projection_mode = validate_projection_mode(projection_mode)
         self.rated_power_kw = float(config["rated_power_kw"])
         self.production_tph = float(config["rated_production_tph"])
         self.downstream_tph = float(config["downstream_consumption_tph"])
@@ -73,24 +64,9 @@ class IndustrialMillDR:
         self.last_projection = False
         self.terminal_infeasible = False
 
-    def _instantaneous_bounds(self) -> tuple[float, float]:
-        production = self.production_tph * self.delta_t
-        consumption = self.downstream_tph * self.delta_t
-        low = (self.silo_min_t - self.silo_t + consumption) / production
-        high = (self.silo_max_t - self.silo_t + consumption) / production
-        low = max(0.0, low)
-        high = min(1.0, high)
-        if low > high + 1e-9:
-            self.terminal_infeasible = True
-            midpoint = float(np.clip((low + high) * 0.5, 0.0, 1.0))
-            return (midpoint, midpoint)
-        return (float(np.clip(low, 0.0, 1.0)), float(np.clip(high, 0.0, 1.0)))
-
     def feasible_bounds(self, t: int) -> tuple[float, float]:
         if not 0 <= int(t) < self.episode_length:
             return (0.0, 0.0)
-        if self.projection_mode == "instantaneous":
-            return self._instantaneous_bounds()
         production = self.production_tph * self.delta_t
         consumption = self.downstream_tph * self.delta_t
         required_low, required_high = self._reachable[int(t) + 1]

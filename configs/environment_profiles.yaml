@@ -3,10 +3,6 @@ cooperative_standard:
   config: configs/cooperative.yaml
   description: Heterogeneous industrial-commercial-residential DR environment for plain MATD3 validation.
 
-cooperative_instantaneous_projection:
-  config: configs/cooperative_instantaneous_projection.yaml
-  description: Projection ablation retaining only one-step physical feasibility plus terminal penalties.
-
 cooperative_legacy_pre_dr:
   config: configs/cooperative_legacy_pre_dr.yaml
   description: Frozen pre-DR environment retained for algorithms not yet migrated to controllable loads.
