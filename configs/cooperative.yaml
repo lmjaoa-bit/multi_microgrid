@@ -39,8 +39,15 @@ ess_sharing:
 
 action_design: single_dispatch_dr
 
+# Baseline behavior. "strong" keeps the existing future-reachability projector;
+# the ablation config switches this to "instantaneous" while keeping the same
+# physical system and action design.
+constraint_projection:
+  mode: strong
+
 # Daily episodes use cyclic ESS reachability. Hard feasibility is enforced by
-# the battery projector; this is not intended as a routine soft reward term.
+# the battery projector in the strong baseline. In the instantaneous ablation,
+# penalty_per_kwh is reused as the terminal equivalent-energy penalty rate.
 terminal_soc:
   mode: hard
   tolerance: 0.03
@@ -96,8 +103,6 @@ microgrids:
   - id: mg2
     type: commercial_wind_hvac
     load_profile:
-      # Real 2018 Yancheng-area T2M calibration: 71.87 kW base +
-      # approximately 8.40 kW annual-mean HVAC = approximately 80 kW total.
       target_mean_kw: 71.87
       weekend_multiplier: 0.57
       variability_clip: [0.65, 1.45]
