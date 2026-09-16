@@ -6,6 +6,7 @@ from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
+import yaml
 
 
 BLUE = "#2F6B9A"
@@ -188,6 +189,92 @@ def _grouped_bars(
     return fig
 
 
+def _warmup_episode_position(
+    training: Sequence[Mapping[str, Any]],
+    warmup_steps: int | float | None,
+) -> float | None:
+    """Map an environment-step warm-up boundary onto the episode axis."""
+    if not training or warmup_steps is None:
+        return None
+    target = float(warmup_steps)
+    if not np.isfinite(target) or target <= 0.0:
+        return None
+
+    previous_episode = 0.0
+    previous_steps = 0.0
+    for index, item in enumerate(training):
+        episode = float(item.get("episode", index + 1))
+        step_value = item.get("total_steps", item.get("steps"))
+        if step_value is None:
+            continue
+        steps = float(step_value)
+        if not np.isfinite(episode) or not np.isfinite(steps):
+            continue
+        if steps >= target:
+            delta_steps = steps - previous_steps
+            if delta_steps <= 0.0:
+                return episode
+            fraction = float(np.clip((target - previous_steps) / delta_steps, 0.0, 1.0))
+            return previous_episode + fraction * (episode - previous_episode)
+        previous_episode = episode
+        previous_steps = steps
+    return None
+
+
+def _training_convergence_figure(
+    training: Sequence[Mapping[str, Any]],
+    validation: Sequence[Mapping[str, Any]],
+    *,
+    warmup_steps: int | float | None,
+) -> Any:
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(9.3, 5.4))
+    if not training:
+        _no_data(ax, "Training Convergence", "training_history.json is unavailable")
+        return fig
+
+    episodes = np.asarray(
+        [item.get("episode", index + 1) for index, item in enumerate(training)],
+        dtype=float,
+    )
+    raw = np.asarray([item.get("team_profit", np.nan) for item in training], dtype=float)
+    moving = pd.Series(raw).rolling(100, min_periods=1).mean().to_numpy()
+    ax.plot(episodes, raw, color=BLUE, alpha=0.18, linewidth=0.8,
+            label="Training Team Profit (raw)")
+    ax.plot(episodes, moving, color=BLUE, linewidth=2.3, label="Team Profit MA100")
+
+    if validation:
+        val_x = [item["episode"] for item in validation]
+        val_y = [item["team_profit_mean"] for item in validation]
+        ax.plot(val_x, val_y, color=GOLD, marker="o", linewidth=1.8,
+                label="Validation Mean Team Profit")
+        best = max(validation, key=lambda item: float(item["team_profit_mean"]))
+        ax.scatter([best["episode"]], [best["team_profit_mean"]], color=ORANGE, zorder=5)
+        ax.annotate(
+            f"Best: ep {best['episode']}\n{best['team_profit_mean']:.1f}",
+            (best["episode"], best["team_profit_mean"]),
+            xytext=(8, 12), textcoords="offset points", fontsize=8,
+        )
+
+    warmup_episode = _warmup_episode_position(training, warmup_steps)
+    if warmup_episode is not None:
+        steps_label = int(float(warmup_steps))
+        ax.axvline(
+            warmup_episode, color=INK, linestyle="--", linewidth=1.0,
+            label=f"Warm-up ends ({steps_label} steps)",
+        )
+
+    ax.set_title("Training Convergence")
+    ax.set_xlabel("Training Episode")
+    ax.set_ylabel("Team Profit")
+    ax.grid(axis="y")
+    if len(episodes) > 1:
+        ax.set_xlim(left=1.0, right=float(episodes[-1]))
+    ax.legend(loc="best")
+    return fig
+
+
 def generate_figures(
     run_dir: str | Path,
     *,
@@ -266,33 +353,15 @@ def generate_figures(
         ax.text(x, y - 0.035, text, transform=ax.transAxes, color=INK, fontsize=12, fontweight="bold")
     written += _save(fig, figure_dir, "00_experiment_summary", formats)
 
-    # 01: training convergence.
-    fig, ax = plt.subplots(figsize=(9.3, 5.4))
-    if training:
-        episodes = np.asarray([item.get("episode", index + 1) for index, item in enumerate(training)], dtype=float)
-        raw = np.asarray([item.get("team_profit", np.nan) for item in training], dtype=float)
-        moving = pd.Series(raw).rolling(100, min_periods=1).mean().to_numpy()
-        ax.plot(episodes, raw, color=BLUE, alpha=0.18, linewidth=0.8, label="Training Team Profit (raw)")
-        ax.plot(episodes, moving, color=BLUE, linewidth=2.3, label="Team Profit MA100")
-        if validation:
-            val_x = [item["episode"] for item in validation]
-            val_y = [item["team_profit_mean"] for item in validation]
-            ax.plot(val_x, val_y, color=GOLD, marker="o", linewidth=1.8, label="Validation Mean Team Profit")
-            best = max(validation, key=lambda item: float(item["team_profit_mean"]))
-            ax.scatter([best["episode"]], [best["team_profit_mean"]], color=ORANGE, zorder=5)
-            ax.annotate(
-                f"Best: ep {best['episode']}\n{best['team_profit_mean']:.1f}",
-                (best["episode"], best["team_profit_mean"]),
-                xytext=(8, 12), textcoords="offset points", fontsize=8,
-            )
-        ax.axvline(episodes[-1], color=INK, linestyle="--", linewidth=0.9, label=f"Final Episode {int(episodes[-1])}")
-        ax.set_title("Training Convergence")
-        ax.set_xlabel("Training Episode")
-        ax.set_ylabel("Team Profit")
-        ax.grid(axis="y")
-        ax.legend(loc="best")
-    else:
-        _no_data(ax, "Training Convergence", "training_history.json is unavailable")
+    # 01: complete training convergence from Episode 1 with raw, MA100, validation, and warm-up boundary.
+    config_snapshot: Mapping[str, Any] = {}
+    config_snapshot_path = root / "config_snapshot.yaml"
+    if config_snapshot_path.exists():
+        loaded_snapshot = yaml.safe_load(config_snapshot_path.read_text(encoding="utf-8")) or {}
+        if isinstance(loaded_snapshot, Mapping):
+            config_snapshot = loaded_snapshot
+    warmup_steps = config_snapshot.get("algorithm", {}).get("algorithm", {}).get("warmup_steps")
+    fig = _training_convergence_figure(training, validation, warmup_steps=warmup_steps)
     fig.tight_layout()
     written += _save(fig, figure_dir, "01_training_convergence", formats)
 
