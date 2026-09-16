@@ -13,7 +13,8 @@ import evaluation.evaluate_matd3 as evaluate_module
 import experiments.training_pipeline as training_module
 
 
-ABLATION_CONFIG = PROJECT_ROOT / "configs" / "ablations" / "cooperative_instantaneous_projection.yaml"
+ABLATION_CONFIG = PROJECT_ROOT / "configs" / "cooperative_instantaneous_projection.yaml"
+ABLATION_OUTPUT_ROOT = PROJECT_ROOT / "outputs" / "working_runs" / "projection_ablation"
 
 
 class _ProjectionAwareEnvironment:
@@ -40,6 +41,8 @@ def main(argv: list[str] | None = None) -> int:
         args.extend(["--algorithm", "matd3_dispatch"])
     if "--config" not in args:
         args.extend(["--config", str(ABLATION_CONFIG)])
+    if "--output-root" not in args and "--output" not in args:
+        args.extend(["--output-root", str(ABLATION_OUTPUT_ROOT)])
     return run_experiment.main(args)
 
 
