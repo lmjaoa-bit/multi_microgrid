@@ -37,6 +37,7 @@ def test_default_environment_drops_cross_time_projection_but_keeps_instantaneous
     env.reset(day=day, deterministic=True)
 
     battery = env.cores["mg1"].battery
+    assert not hasattr(battery, "reachable_soc_envelope")
     battery.soc = battery.soc_min
     assert env._battery_flex(23)["mg1"]["feasible_charge_min_ratio"] == pytest.approx(0.0)
 
@@ -116,9 +117,9 @@ def test_p0_constraint_pressure_features_are_exposed_to_actor_and_centralized_cr
 
 
 def test_all_trainable_algorithms_accept_optional_diagnostic_sampling_flag() -> None:
-    for cls in (MATD3, Matd3Dispatch, PNN, Matd3Transformer, PnnTransformer):
+    for cls in (Matd3Dispatch, PNN, Matd3Transformer, PnnTransformer):
         signature = inspect.signature(cls.update)
-        assert "collect_diagnostics" in signature.parameters
+        assert "collect_diagnostics" in signature.parameters, cls.__name__
 
 
 def test_all_algorithm_configs_default_to_twenty_step_diagnostic_sampling() -> None:

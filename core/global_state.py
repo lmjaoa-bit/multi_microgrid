@@ -162,9 +162,10 @@ class GlobalStateBuilder:
             n = self.norm[mg]
             previous = history["by_microgrid"][mg]
             battery = cores[mg].battery
+            terminal_enabled = self.config["terminal_soc"]["mode"] != "none"
             remaining_hours = max(self.episode_length - int(t), 0) * float(battery.delta_t)
-            soc_gap = float(battery.soc) - float(battery.initial_soc)
-            if remaining_hours > 0.0:
+            soc_gap = (float(battery.soc) - float(battery.initial_soc)) if terminal_enabled else 0.0
+            if terminal_enabled and remaining_hours > 0.0:
                 if soc_gap >= 0.0:
                     required_kw = soc_gap * float(battery.capacity_kwh) * float(battery.eta_discharge) / remaining_hours
                     required_ratio = required_kw / max(float(battery.max_discharge_kw), 1e-12)
@@ -173,11 +174,14 @@ class GlobalStateBuilder:
                     required_ratio = required_kw / max(float(battery.max_charge_kw), 1e-12)
             else:
                 required_ratio = 0.0
+            p0_time_ratio = (
+                remaining_hours / max(float(self.episode_length), 1.0)
+                if terminal_enabled else 0.0
+            )
             values.extend([ex["load_kw"] / n["load"], ex["pv_kw"] / n["pv"],
                            ex["wind_kw"] / n["wind"], float(battery.soc),
                            previous["p2p_net_kwh"] / n["trade"], soc_gap,
-                           remaining_hours / max(float(self.episode_length), 1.0),
-                           required_ratio, abs(required_ratio)])
+                           p0_time_ratio, required_ratio, abs(required_ratio)])
             if self.heterogeneous_tariffs:
                 buy_price, sell_price = prices_from_row(row, mg)
                 values.extend([buy_price / n["price"], sell_price / n["price"]])
@@ -225,11 +229,7 @@ class GlobalStateBuilder:
         if self.control_mode == "single_dispatch":
             for mg in self.agent_ids:
                 battery = cores[mg].battery
-                floor, ceiling = battery.reachable_soc_envelope(
-                    t, self.episode_length,
-                    tolerance=float(self.config["terminal_soc"]["tolerance"]),
-                    enforce_terminal=False)
-                neutral = battery.map_action(0.0, floor, ceiling)
+                neutral = battery.map_action(0.0)
                 values.extend([
                     neutral["charge_requested_kw"] / battery.max_charge_kw,
                     -neutral["feasible_min_kw"] / battery.max_charge_kw,

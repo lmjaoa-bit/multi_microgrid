@@ -190,13 +190,7 @@ class MultiMicrogridEnv:
         if self.ess_sharing_control_mode == "single_dispatch":
             for mg in self.agent_ids:
                 battery = self.cores[mg].battery
-                floor, ceiling = battery.reachable_soc_envelope(
-                    index,
-                    self.episode_length,
-                    tolerance=float(self.config["terminal_soc"]["tolerance"]),
-                    enforce_terminal=False,
-                )
-                neutral = battery.map_action(0.0, floor, ceiling)
+                neutral = battery.map_action(0.0)
                 remaining_hours = max(self.episode_length - int(index), 0) * self.delta_t
                 soc_gap = float(battery.soc) - float(battery.initial_soc)
                 if remaining_hours > 0.0:
@@ -435,7 +429,6 @@ class MultiMicrogridEnv:
                 episode_length=self.episode_length,
                 tolerance=tolerance,
                 exogenous=actual_current[mg],
-                enforce_terminal=False,
             )
             requested_dr = self._tensor_value(projected[i]["dr_requested"])
             dr_delta = self._tensor_value(projected[i]["dr_projection_delta"])
@@ -727,7 +720,6 @@ class MultiMicrogridEnv:
                 t=self.t,
                 episode_length=self.episode_length,
                 tolerance=tolerance,
-                enforce_terminal=self.config["terminal_soc"]["mode"] != "none",
                 exogenous=current[mg],
             )
             for mg in self.agent_ids

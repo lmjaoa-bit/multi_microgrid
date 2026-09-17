@@ -216,7 +216,7 @@ def test_crossgate_rollout_update_diagnostics_and_checkpoint(tmp_path):
         incompatible.load(path)
 
 
-def test_forced_terminal_export_without_market():
+def test_terminal_penalty_does_not_force_last_hour_export_without_market():
     env, _ = build(disabled=True, terminal_mode="penalty")
     env.reset(seed=1, deterministic=True)
     env.t = 23
@@ -229,10 +229,11 @@ def test_forced_terminal_export_without_market():
     assert done
     for mg in env.agent_ids:
         b = env.cores[mg].battery
-        assert info["plans"][mg]["mandatory_export_kw"] > 0
-        assert info["plans"][mg]["dispatch_forced"]
-        assert info["plans"][mg]["ess_p2p_offer_kw"] == 0
-        assert b.soc <= b.initial_soc + .030001
+        assert info["plans"][mg]["mandatory_export_kw"] == pytest.approx(0.0)
+        assert not info["plans"][mg]["dispatch_forced"]
+        assert info["plans"][mg]["ess_p2p_offer_kw"] == pytest.approx(0.0)
+        assert abs(b.soc - b.initial_soc) > env.config["terminal_soc"]["tolerance"]
+        assert info["terminal_soc_penalty"][mg] > 0.0
 
 
 def test_no_market_optional_energy_stays_in_battery():
