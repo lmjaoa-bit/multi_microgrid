@@ -88,29 +88,38 @@ def test_mill_full_duty_updates_inventory_and_power():
     assert mill.silo_t == pytest.approx(old + 1.186 * plan["effective_duty"] - 0.975)
 
 
-def test_mill_last_hour_projection_preserves_terminal_silo_band():
+def test_mill_last_hour_projection_keeps_only_instantaneous_silo_safety():
     mill = IndustrialMillDR(MG1, delta_t=1.0, episode_length=24)
     mill.reset(day_frame(), np.full(24, 48.6))
     mill.silo_t = 10.53
     lo, hi = mill.feasible_bounds(23)
+    terminal_deviations = []
     for raw in (-1.0, 1.0):
         plan = mill.plan(raw, 23)
         assert lo - 1e-12 <= plan["effective_duty"] <= hi + 1e-12
         terminal = 10.53 + 1.186 * plan["effective_duty"] - 0.975
-        assert abs(terminal - 10.53) <= 0.20 + 1e-9
+        assert mill.silo_min_t <= terminal <= mill.silo_max_t
+        terminal_deviations.append(abs(terminal - mill.initial_silo_t))
+    assert max(terminal_deviations) > mill.terminal_tolerance_t
 
 
-def test_ev_forces_charging_early_enough_to_hit_departure_target():
+def test_ev_deadline_is_observable_but_not_forced_into_the_action():
     ev = EVChargingDR(MG3, delta_t=1.0, episode_length=24)
     ev.reset(day_frame(), np.full(24, 57.52))
     assert ev.soc == pytest.approx(0.50)
     for t in range(7):
         lo, hi = ev.feasible_bounds(t)
-        assert 0.0 <= lo <= hi <= 93.6 + 1e-9
+        assert lo == pytest.approx(0.0)
+        assert 0.0 < hi <= 93.6 + 1e-9
+        state = ev.state(t)
+        assert state["ev_remaining_battery_kwh"] > 0.0
+        assert state["deadline_pressure"] > 0.0
         ev.commit(ev.plan(-1.0, t))
-    assert ev.soc == pytest.approx(0.80, abs=1e-9)
+    assert ev.soc == pytest.approx(0.50)
     assert ev.feasible_bounds(7) == pytest.approx((0.0, 0.0))
-    assert ev.state(7)["deadline_pressure"] == pytest.approx(0.0)
+    departed = ev.state(7)
+    assert departed["target_missed"] == pytest.approx(1.0)
+    assert departed["ev_remaining_battery_kwh"] > 0.0
 
 
 def test_ev_never_charges_above_target_or_after_departure():
@@ -155,34 +164,39 @@ def test_hvac_signed_control_stays_within_physical_cap_and_comfort_projection():
     assert hvac.t_air >= old_air - 1e-9
 
 
-def test_hvac_feasible_bound_cache_avoids_duplicate_highs_solves():
+def test_hvac_feasible_bound_cache_avoids_duplicate_one_step_solves():
     hvac = CommercialHVACDR(MG2, delta_t=1.0, episode_length=24)
     hvac.reset(day_frame(tout=18.0), np.full(24, 75.0))
     calls = 0
-    original = hvac._solve_terminal_q
+    original = hvac._one_step_bounds_q
 
-    def counted(t, *, maximize):
+    def counted(t):
         nonlocal calls
         calls += 1
-        return original(t, maximize=maximize)
+        return original(t)
 
-    hvac._solve_terminal_q = counted
+    hvac._one_step_bounds_q = counted
     first = hvac.feasible_bounds(0)
     second = hvac.feasible_bounds(0)
     assert first == pytest.approx(second)
-    assert calls == 2
+    assert calls == 1
     hvac.commit(hvac.plan(0.0, 0))
     hvac.feasible_bounds(1)
-    assert calls == 4
+    assert calls == 2
 
 
-def test_hvac_terminal_reachability_keeps_end_state_in_daily_band():
+def test_hvac_terminal_deviation_becomes_p0_pressure_instead_of_forced_reachability():
     hvac = CommercialHVACDR(MG2, delta_t=1.0, episode_length=24)
     frame = day_frame(tout=18.0, ghi=0.0)
     hvac.reset(frame, np.full(24, 75.0))
     for t in range(24):
         plan = hvac.plan(-1.0 if t % 2 == 0 else 1.0, t)
         hvac.commit(plan)
-    if not hvac.terminal_thermal_infeasible:
-        assert abs(hvac.t_air - hvac.initial_t_air) <= 1.0 + 1e-6
-        assert abs(hvac.t_mass - hvac.initial_t_mass) <= 0.3 + 1e-6
+    state = hvac.state(24)
+    assert state["hvac_time_to_terminal_h"] == pytest.approx(0.0)
+    assert state["terminal_air_gap_c"] == pytest.approx(hvac.t_air - hvac.initial_t_air)
+    assert state["terminal_mass_gap_c"] == pytest.approx(hvac.t_mass - hvac.initial_t_mass)
+    assert state["thermal_recovery_pressure"] >= 0.0
+    if (abs(state["terminal_air_gap_c"]) > hvac.terminal_air_tolerance
+            or abs(state["terminal_mass_gap_c"]) > hvac.terminal_mass_tolerance):
+        assert state["thermal_recovery_pressure"] > 0.0
