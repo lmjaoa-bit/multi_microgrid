@@ -256,6 +256,23 @@ class CommercialHVACDR:
 
     def state(self, t: int) -> dict[str, float]:
         low, high = self.feasible_bounds(t)
+        remaining_hours = max(self.episode_length - int(t), 0) * self.delta_t
+        terminal_air_gap = float(self.initial_t_air - self.t_air)
+        terminal_mass_gap = float(self.initial_t_mass - self.t_mass)
+        if remaining_hours > 0.0:
+            required_thermal_kw = (
+                terminal_air_gap * self.c_air
+                + terminal_mass_gap * self.c_mass
+            ) / remaining_hours
+            if required_thermal_kw >= 0.0:
+                required_electric_kw = required_thermal_kw / self.cop_heat
+                recovery_pressure = abs(required_electric_kw) / self.heat_max_kw
+            else:
+                required_electric_kw = required_thermal_kw / self.cop_cool
+                recovery_pressure = abs(required_electric_kw) / self.cool_max_kw
+        else:
+            required_electric_kw = 0.0
+            recovery_pressure = 0.0
         if 0 <= int(t) < self.episode_length:
             t_out, _, _ = self._exogenous(t)
             comfort_low, comfort_high = self._comfort_bounds(t)
@@ -279,6 +296,11 @@ class CommercialHVACDR:
             "is_weekend": weekend,
             "hvac_feasible_min_kw": low,
             "hvac_feasible_max_kw": high,
+            "terminal_air_gap_c": terminal_air_gap,
+            "terminal_mass_gap_c": terminal_mass_gap,
+            "time_remaining_h": float(remaining_hours),
+            "required_avg_recovery_power_kw": float(required_electric_kw),
+            "thermal_recovery_pressure": float(recovery_pressure),
             "comfort_infeasible": float(self.comfort_infeasible),
             "terminal_thermal_infeasible": float(self.terminal_thermal_infeasible),
         }

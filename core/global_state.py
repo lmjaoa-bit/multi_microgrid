@@ -5,6 +5,7 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from core.constraint_observations import ess_terminal_guidance
 from core.tariffs import has_heterogeneous_tariffs, prices_from_row
 
 
@@ -19,6 +20,7 @@ class GlobalStateBuilder:
         self.norm = {mg: profiles.normalizers(mg, delta_t) for mg in self.agent_ids}
         self.price_norm = profiles.price_max
         self.forecasts = forecasts
+        self.delta_t = float(delta_t)
         self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
         self.include_forecast_validity = bool(
             config.get("observation", {}).get("mask_forecast_beyond_episode", False)
@@ -34,19 +36,22 @@ class GlobalStateBuilder:
         if kind == "industrial_mill":
             return [
                 f"{mg}_silo_ratio", f"{mg}_silo_target_gap",
-                f"{mg}_time_to_terminal", f"{mg}_dr_min", f"{mg}_dr_max",
+                f"{mg}_time_remaining", f"{mg}_required_avg_production",
+                f"{mg}_production_pressure", f"{mg}_dr_min", f"{mg}_dr_max",
             ]
         if kind == "commercial_hvac":
             return [
                 f"{mg}_t_air", f"{mg}_t_mass", f"{mg}_t_out",
                 f"{mg}_comfort_lower_margin", f"{mg}_comfort_upper_margin",
                 f"{mg}_occupied", f"{mg}_is_weekend",
+                f"{mg}_terminal_air_gap", f"{mg}_terminal_mass_gap",
+                f"{mg}_time_remaining", f"{mg}_thermal_recovery_pressure",
                 f"{mg}_dr_min", f"{mg}_dr_max",
             ]
         if kind == "ev_charging":
             return [
-                f"{mg}_ev_soc", f"{mg}_ev_soc_gap", f"{mg}_ev_remaining_energy",
-                f"{mg}_ev_hours_to_departure", f"{mg}_ev_available",
+                f"{mg}_ev_soc", f"{mg}_ev_soc_gap", f"{mg}_remaining_energy",
+                f"{mg}_hours_to_departure", f"{mg}_ev_available",
                 f"{mg}_deadline_pressure", f"{mg}_dr_min", f"{mg}_dr_max",
             ]
         raise ValueError(f"{mg}: unsupported DR type {kind!r}")
@@ -57,8 +62,12 @@ class GlobalStateBuilder:
             # In the DR environment `load` is the uncontrollable/base load. The
             # joint action projector adds effective flexible load before ESS
             # local-first projection.
-            names.extend([f"{mg}_load", f"{mg}_pv", f"{mg}_wind", f"{mg}_soc",
-                          f"{mg}_previous_p2p_net"])
+            names.extend([
+                f"{mg}_load", f"{mg}_pv", f"{mg}_wind", f"{mg}_soc",
+                f"{mg}_terminal_soc_gap", f"{mg}_time_to_terminal",
+                f"{mg}_required_avg_power_to_target", f"{mg}_terminal_pressure",
+                f"{mg}_previous_p2p_net",
+            ])
             if self.heterogeneous_tariffs:
                 names.extend([f"{mg}_grid_buy_price", f"{mg}_grid_sell_price"])
             if self.dr_enabled:
@@ -102,10 +111,15 @@ class GlobalStateBuilder:
         kind = str(dr["type"])
         if kind == "industrial_mill":
             capacity = max(float(dr["silo_capacity_t"]), 1e-9)
+            production = max(float(dr["rated_production_tph"]), 1e-9)
             return [
                 float(state["silo_ratio"]),
                 float(state["silo_target_gap_t"]) / capacity,
-                float(state["time_to_terminal_h"]) / max(float(self.episode_length), 1.0),
+                float(state["time_remaining_h"]) / max(
+                    float(self.episode_length) * self.delta_t, 1.0
+                ),
+                float(state["required_avg_production_tph"]) / production,
+                float(state["production_pressure"]),
                 float(state["mill_feasible_min"]),
                 float(state["mill_feasible_max"]),
             ]
@@ -121,6 +135,12 @@ class GlobalStateBuilder:
                 float(state["comfort_upper_margin_c"]) / margin_scale,
                 float(state["occupied"]),
                 float(state["is_weekend"]),
+                float(state["terminal_air_gap_c"]) / temp_scale,
+                float(state["terminal_mass_gap_c"]) / temp_scale,
+                float(state["time_remaining_h"]) / max(
+                    float(self.episode_length) * self.delta_t, 1.0
+                ),
+                float(state["thermal_recovery_pressure"]),
                 float(state["hvac_feasible_min_kw"]) / scale,
                 float(state["hvac_feasible_max_kw"]) / scale,
             ]
@@ -131,7 +151,9 @@ class GlobalStateBuilder:
                 float(state["ev_soc"]),
                 float(state["ev_soc_gap"]),
                 float(state["ev_remaining_battery_kwh"]) / capacity,
-                float(state["ev_hours_to_departure"]) / max(float(self.episode_length), 1.0),
+                float(state["ev_hours_to_departure"]) / max(
+                    float(self.episode_length) * self.delta_t, 1.0
+                ),
                 float(state["ev_available"]),
                 float(state["deadline_pressure"]),
                 float(state["ev_feasible_min_kw"]) / power,
@@ -150,9 +172,24 @@ class GlobalStateBuilder:
                   else cores[mg].exogenous(row))
             n = self.norm[mg]
             previous = history["by_microgrid"][mg]
-            values.extend([ex["load_kw"] / n["load"], ex["pv_kw"] / n["pv"],
-                           ex["wind_kw"] / n["wind"], float(cores[mg].battery.soc),
-                           previous["p2p_net_kwh"] / n["trade"]])
+            guidance = ess_terminal_guidance(
+                cores[mg].battery,
+                max(self.episode_length - int(t), 0) * self.delta_t,
+                enabled=self.config["terminal_soc"]["mode"] != "none",
+            )
+            values.extend([
+                ex["load_kw"] / n["load"],
+                ex["pv_kw"] / n["pv"],
+                ex["wind_kw"] / n["wind"],
+                float(cores[mg].battery.soc),
+                guidance["terminal_soc_gap"],
+                guidance["time_to_terminal_h"] / max(
+                    float(self.episode_length) * self.delta_t, 1.0
+                ),
+                guidance["required_avg_power_to_target"],
+                guidance["terminal_pressure"],
+                previous["p2p_net_kwh"] / n["trade"],
+            ])
             if self.heterogeneous_tariffs:
                 buy_price, sell_price = prices_from_row(row, mg)
                 values.extend([buy_price / n["price"], sell_price / n["price"]])

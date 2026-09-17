@@ -111,12 +111,25 @@ class IndustrialMillDR:
     def state(self, t: int) -> dict[str, float]:
         low, high = self.feasible_bounds(t)
         target_gap = self.silo_t - self.initial_silo_t
+        remaining_hours = max(self.episode_length - int(t), 0) * self.delta_t
+        if remaining_hours > 0.0:
+            required_production = (
+                self.downstream_tph
+                + (self.initial_silo_t - self.silo_t) / remaining_hours
+            )
+            production_pressure = required_production / self.production_tph
+        else:
+            required_production = 0.0
+            production_pressure = 0.0
         return {
             "silo_level_t": float(self.silo_t),
             "silo_ratio": float(self.silo_t / self.silo_capacity_t),
             "silo_target_gap_t": float(target_gap),
             "mill_feasible_min": low,
             "mill_feasible_max": high,
-            "time_to_terminal_h": float(max(self.episode_length - int(t), 0)),
+            "time_to_terminal_h": float(remaining_hours),
+            "time_remaining_h": float(remaining_hours),
+            "required_avg_production_tph": float(required_production),
+            "production_pressure": float(production_pressure),
             "terminal_infeasible": float(self.terminal_infeasible),
         }

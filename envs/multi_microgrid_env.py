@@ -12,6 +12,7 @@ from components.ev_charging import EVChargingDR
 from components.industrial_mill import IndustrialMillDR
 from core.action_codec import ActionCodec
 from core.config_validation import validate_config
+from core.constraint_observations import ess_terminal_guidance
 from core.cost_accounting import CostAccounting
 from core.data_manager import DataManager
 from core.forecast import SharedForecastProvider
@@ -186,6 +187,11 @@ class MultiMicrogridEnv:
                 / max(1.0, self.cores[mg].battery.max_charge_kw),
                 "available_discharge_ratio": self.cores[mg].battery.available_discharge_kw()
                 / max(1.0, self.cores[mg].battery.max_discharge_kw),
+                **ess_terminal_guidance(
+                    self.cores[mg].battery,
+                    max(self.episode_length - int(index), 0) * self.delta_t,
+                    enabled=self.config["terminal_soc"]["mode"] != "none",
+                ),
             }
             for mg in self.agent_ids
         }
@@ -380,7 +386,7 @@ class MultiMicrogridEnv:
         costs: dict[str, dict[str, float]],
         terminal: bool,
     ) -> dict[str, dict[str, float]]:
-        if terminal:
+        if terminal and self.config["terminal_soc"]["mode"] != "none":
             breakdown = {
                 mg: self._terminal_constraint_breakdown(mg) for mg in self.agent_ids
             }
