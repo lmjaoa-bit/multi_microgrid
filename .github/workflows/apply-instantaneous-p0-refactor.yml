@@ -4,7 +4,7 @@ on:
   push:
     branches: [codex/instantaneous-p0-diagnostics]
     paths:
-      - 'scripts/_apply_instantaneous_p0_refactor_v2.py'
+      - 'scripts/_apply_diagnostic_sampling.py'
 
 permissions:
   contents: write
@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Apply refactor
-        run: python scripts/_apply_instantaneous_p0_refactor_v2.py
+        run: python scripts/_apply_diagnostic_sampling.py
       - name: Sanity check syntax
         run: python -m compileall -q algorithms components core envs experiments
       - name: Commit generated refactor
@@ -33,6 +33,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "No generated changes"
           else
-            git commit -m "refactor: make instantaneous constraints canonical with P0"
+            git commit -m "perf: sample heavy training diagnostics every 20 updates"
             git push origin HEAD:codex/instantaneous-p0-diagnostics
           fi
