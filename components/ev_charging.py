@@ -12,7 +12,7 @@ from components.controllable_load import (
 
 
 class EVChargingDR:
-    """Aggregate residential EV charging with a hard departure-energy target."""
+    """Aggregate EV charging with instantaneous availability and SOC limits."""
 
     def __init__(self, config: Mapping[str, Any], *, delta_t: float, episode_length: int) -> None:
         self.config = dict(config)
@@ -64,18 +64,13 @@ class EVChargingDR:
         return self.departure_hour - hour
 
     def feasible_bounds(self, t: int) -> tuple[float, float]:
-        steps = self._remaining_steps(t)
-        remaining = self._remaining_battery_kwh()
-        if steps <= 0 or remaining <= 1e-10:
+        if self._remaining_steps(t) <= 0:
             return (0.0, 0.0)
-        maximum = min(self.max_charge_kw, remaining / (self.eta * self.delta_t))
-        future_max_battery = self.eta * self.max_charge_kw * max(steps - 1, 0) * self.delta_t
-        minimum = max(0.0, (remaining - future_max_battery) / (self.eta * self.delta_t))
-        minimum = min(minimum, self.max_charge_kw)
-        if minimum > maximum + 1e-8:
-            self.target_missed = True
-            minimum = maximum
-        return (float(minimum), float(maximum))
+        headroom_kwh = max(0.0, (self.max_soc - self.soc) * self.capacity_kwh)
+        if headroom_kwh <= 1e-10:
+            return (0.0, 0.0)
+        maximum = min(self.max_charge_kw, headroom_kwh / (self.eta * self.delta_t))
+        return (0.0, float(maximum))
 
     def plan(self, raw_action: float, t: int) -> dict[str, Any]:
         proposed = raw_to_unit_interval(raw_action) * self.max_charge_kw

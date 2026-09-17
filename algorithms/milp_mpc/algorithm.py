@@ -138,11 +138,7 @@ class MilpMpc:
                 dis = float(row["battery_discharge_kw"])
 
                 battery = self.env.cores[mg].battery
-                soc_min_r, soc_max_r = battery.reachable_soc_envelope(
-                    t=t, episode_length=24, target_soc=battery.initial_soc, tolerance=0.03,
-                    enforce_terminal=self.env.config["terminal_soc"]["mode"] != "none"
-                )
-                neutral = battery.map_action(0.0, soc_min_reach=soc_min_r, soc_max_reach=soc_max_r)
+                neutral = battery.map_action(0.0)
 
                 if dis > 1e-3:
                     max_dis = neutral["feasible_max_kw"]

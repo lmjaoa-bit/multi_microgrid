@@ -174,95 +174,6 @@ class CommercialHVACDR:
         closest = float(np.clip(0.5 * (low + high), self.q_min_kw, self.q_max_kw))
         return closest, closest
 
-    def _solve_terminal_q(self, t: int, *, maximize: bool) -> float | None:
-        try:
-            import highspy
-        except ImportError:
-            return None
-        if self._frame is None or self._base_load_kw is None:
-            raise RuntimeError("HVAC must be reset before use")
-        if not 0 <= int(t) < self.episode_length:
-            return 0.0
-        model = highspy.Highs()
-        model.setOptionValue("output_flag", False)
-        continuous = highspy.HighsVarType.kContinuous
-        air: dict[int, Any] = {}
-        mass: dict[int, Any] = {}
-        q: dict[int, Any] = {}
-        start = int(t)
-        air[start] = model.addVariable(
-            lb=self.t_air, ub=self.t_air, type=continuous, name=f"t_air[{start}]"
-        )
-        mass[start] = model.addVariable(
-            lb=self.t_mass, ub=self.t_mass, type=continuous, name=f"t_mass[{start}]"
-        )
-        for k in range(start, self.episode_length):
-            air[k + 1] = model.addVariable(
-                lb=-100.0, ub=100.0, type=continuous, name=f"t_air[{k+1}]"
-            )
-            mass[k + 1] = model.addVariable(
-                lb=-100.0, ub=100.0, type=continuous, name=f"t_mass[{k+1}]"
-            )
-            objective = (
-                -1.0 if maximize and k == start
-                else 1.0 if (not maximize and k == start)
-                else 0.0
-            )
-            q[k] = model.addVariable(
-                lb=self.q_min_kw,
-                ub=self.q_max_kw,
-                obj=objective,
-                type=continuous,
-                name=f"q_hvac[{k}]",
-            )
-            t_out, q_solar, q_internal = self._exogenous(k)
-            q_air = self.solar_air_fraction * q_solar
-            q_mass = (1.0 - self.solar_air_fraction) * q_solar
-            a_air = 1.0 - self.delta_t / self.c_air * (
-                1.0 / self.r_oa + 1.0 / self.r_am
-            )
-            b_mass = self.delta_t / self.c_air * (1.0 / self.r_am)
-            constant_air = self.delta_t / self.c_air * (
-                t_out / self.r_oa + q_internal + q_air
-            )
-            mass_from_air = self.delta_t / self.c_mass * (1.0 / self.r_am)
-            mass_self = 1.0 - self.delta_t / self.c_mass * (1.0 / self.r_am)
-            constant_mass = self.delta_t / self.c_mass * q_mass
-            model.addConstr(
-                air[k + 1]
-                == a_air * air[k]
-                + b_mass * mass[k]
-                + self.delta_t / self.c_air * q[k]
-                + constant_air
-            )
-            model.addConstr(
-                mass[k + 1]
-                == mass_from_air * air[k]
-                + mass_self * mass[k]
-                + constant_mass
-            )
-            comfort_low, comfort_high = self._state_comfort_bounds(k + 1)
-            model.addConstr(air[k + 1] >= comfort_low)
-            model.addConstr(air[k + 1] <= comfort_high)
-        terminal = self.episode_length
-        model.addConstr(
-            air[terminal] >= self.initial_t_air - self.terminal_air_tolerance
-        )
-        model.addConstr(
-            air[terminal] <= self.initial_t_air + self.terminal_air_tolerance
-        )
-        model.addConstr(
-            mass[terminal] >= self.initial_t_mass - self.terminal_mass_tolerance
-        )
-        model.addConstr(
-            mass[terminal] <= self.initial_t_mass + self.terminal_mass_tolerance
-        )
-        model.minimize()
-        solution = model.getSolution()
-        if not solution.value_valid:
-            return None
-        return float(model.val(q[start]))
-
     def feasible_bounds(self, t: int) -> tuple[float, float]:
         if not 0 <= int(t) < self.episode_length:
             return (0.0, 0.0)
@@ -270,18 +181,7 @@ class CommercialHVACDR:
         if self._bounds_cache_key == key and self._bounds_cache_value is not None:
             return self._bounds_cache_value
 
-        one_low, one_high = self._one_step_bounds_q(t)
-        terminal_low = self._solve_terminal_q(t, maximize=False)
-        terminal_high = self._solve_terminal_q(t, maximize=True)
-        if terminal_low is None or terminal_high is None:
-            self.terminal_thermal_infeasible = True
-            q_low, q_high = one_low, one_high
-        else:
-            q_low = max(one_low, min(terminal_low, terminal_high))
-            q_high = min(one_high, max(terminal_low, terminal_high))
-            if q_low > q_high + 1e-7:
-                self.terminal_thermal_infeasible = True
-                q_low, q_high = one_low, one_high
+        q_low, q_high = self._one_step_bounds_q(t)
         result = (
             float(np.clip(
                 self._q_to_signed_electric(q_low),

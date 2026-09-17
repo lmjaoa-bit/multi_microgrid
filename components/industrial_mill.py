@@ -12,7 +12,7 @@ from components.controllable_load import (
 
 
 class IndustrialMillDR:
-    """Raw-meal mill with an intermediate silo and hard daily reachability."""
+    """Raw-meal mill constrained by its instantaneous silo inventory."""
 
     def __init__(self, config: Mapping[str, Any], *, delta_t: float, episode_length: int) -> None:
         self.config = dict(config)
@@ -30,28 +30,11 @@ class IndustrialMillDR:
             raise ValueError("Invalid raw-meal silo bounds")
         if min(self.rated_power_kw, self.production_tph, self.delta_t) <= 0.0:
             raise ValueError("Mill power, production, and timestep must be positive")
-        self._reachable = self._build_reachable_intervals()
         self.silo_t = self.initial_silo_t
         self._frame: pd.DataFrame | None = None
         self._base_load_kw: np.ndarray | None = None
         self.last_projection = False
         self.terminal_infeasible = False
-
-    def _build_reachable_intervals(self) -> list[tuple[float, float]]:
-        production = self.production_tph * self.delta_t
-        consumption = self.downstream_tph * self.delta_t
-        target_low = max(self.silo_min_t, self.initial_silo_t - self.terminal_tolerance_t)
-        target_high = min(self.silo_max_t, self.initial_silo_t + self.terminal_tolerance_t)
-        intervals: list[tuple[float, float]] = [(0.0, 0.0)] * (self.episode_length + 1)
-        intervals[self.episode_length] = (target_low, target_high)
-        for t in range(self.episode_length - 1, -1, -1):
-            next_low, next_high = intervals[t + 1]
-            low = max(self.silo_min_t, next_low + consumption - production)
-            high = min(self.silo_max_t, next_high + consumption)
-            if low > high + 1e-10:
-                raise ValueError("Mill terminal silo set is unreachable with configured production limits")
-            intervals[t] = (low, high)
-        return intervals
 
     def reset(self, episode_frame: pd.DataFrame, base_load_kw: np.ndarray) -> None:
         if len(episode_frame) < self.episode_length:
@@ -69,9 +52,8 @@ class IndustrialMillDR:
             return (0.0, 0.0)
         production = self.production_tph * self.delta_t
         consumption = self.downstream_tph * self.delta_t
-        required_low, required_high = self._reachable[int(t) + 1]
-        low = (required_low - self.silo_t + consumption) / production
-        high = (required_high - self.silo_t + consumption) / production
+        low = (self.silo_min_t - self.silo_t + consumption) / production
+        high = (self.silo_max_t - self.silo_t + consumption) / production
         low = max(0.0, low)
         high = min(1.0, high)
         if low > high + 1e-9:

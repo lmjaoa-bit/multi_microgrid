@@ -88,7 +88,7 @@ def test_mill_full_duty_updates_inventory_and_power():
     assert mill.silo_t == pytest.approx(old + 1.186 * plan["effective_duty"] - 0.975)
 
 
-def test_mill_last_hour_projection_preserves_terminal_silo_band():
+def test_mill_last_hour_projection_preserves_physical_silo_band_only():
     mill = IndustrialMillDR(MG1, delta_t=1.0, episode_length=24)
     mill.reset(day_frame(), np.full(24, 48.6))
     mill.silo_t = 10.53
@@ -96,11 +96,12 @@ def test_mill_last_hour_projection_preserves_terminal_silo_band():
     for raw in (-1.0, 1.0):
         plan = mill.plan(raw, 23)
         assert lo - 1e-12 <= plan["effective_duty"] <= hi + 1e-12
-        terminal = 10.53 + 1.186 * plan["effective_duty"] - 0.975
-        assert abs(terminal - 10.53) <= 0.20 + 1e-9
+        next_silo = 10.53 + 1.186 * plan["effective_duty"] - 0.975
+        assert mill.silo_min_t <= next_silo <= mill.silo_max_t
+    assert abs(mill.plan(-1.0, 23)["silo_after_t"] - mill.initial_silo_t) > 0.20
 
 
-def test_ev_forces_charging_early_enough_to_hit_departure_target():
+def test_ev_does_not_force_charging_to_hit_departure_target():
     ev = EVChargingDR(MG3, delta_t=1.0, episode_length=24)
     ev.reset(day_frame(), np.full(24, 57.52))
     assert ev.soc == pytest.approx(0.50)
@@ -108,7 +109,7 @@ def test_ev_forces_charging_early_enough_to_hit_departure_target():
         lo, hi = ev.feasible_bounds(t)
         assert 0.0 <= lo <= hi <= 93.6 + 1e-9
         ev.commit(ev.plan(-1.0, t))
-    assert ev.soc == pytest.approx(0.80, abs=1e-9)
+    assert ev.soc == pytest.approx(0.50, abs=1e-9)
     assert ev.feasible_bounds(7) == pytest.approx((0.0, 0.0))
     assert ev.state(7)["deadline_pressure"] == pytest.approx(0.0)
 
@@ -155,34 +156,34 @@ def test_hvac_signed_control_stays_within_physical_cap_and_comfort_projection():
     assert hvac.t_air >= old_air - 1e-9
 
 
-def test_hvac_feasible_bound_cache_avoids_duplicate_highs_solves():
+def test_hvac_feasible_bound_cache_avoids_duplicate_one_step_solves():
     hvac = CommercialHVACDR(MG2, delta_t=1.0, episode_length=24)
     hvac.reset(day_frame(tout=18.0), np.full(24, 75.0))
     calls = 0
-    original = hvac._solve_terminal_q
+    original = hvac._one_step_bounds_q
 
-    def counted(t, *, maximize):
+    def counted(t):
         nonlocal calls
         calls += 1
-        return original(t, maximize=maximize)
+        return original(t)
 
-    hvac._solve_terminal_q = counted
+    hvac._one_step_bounds_q = counted
     first = hvac.feasible_bounds(0)
     second = hvac.feasible_bounds(0)
     assert first == pytest.approx(second)
-    assert calls == 2
+    assert calls == 1
     hvac.commit(hvac.plan(0.0, 0))
     hvac.feasible_bounds(1)
-    assert calls == 4
+    assert calls == 2
 
 
-def test_hvac_terminal_reachability_keeps_end_state_in_daily_band():
+def test_hvac_instantaneous_projection_keeps_each_state_in_comfort_band():
     hvac = CommercialHVACDR(MG2, delta_t=1.0, episode_length=24)
     frame = day_frame(tout=18.0, ghi=0.0)
     hvac.reset(frame, np.full(24, 75.0))
     for t in range(24):
         plan = hvac.plan(-1.0 if t % 2 == 0 else 1.0, t)
         hvac.commit(plan)
-    if not hvac.terminal_thermal_infeasible:
-        assert abs(hvac.t_air - hvac.initial_t_air) <= 1.0 + 1e-6
-        assert abs(hvac.t_mass - hvac.initial_t_mass) <= 0.3 + 1e-6
+    low, high = hvac._state_comfort_bounds(24)
+    assert low - 1e-6 <= hvac.t_air <= high + 1e-6
+    assert abs(hvac.t_air - hvac.initial_t_air) > hvac.terminal_air_tolerance

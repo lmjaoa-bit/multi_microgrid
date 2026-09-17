@@ -31,25 +31,10 @@ class MicrogridCore:
         self,
         row: pd.Series,
         action: Mapping[str, Any],
-        t: int = 0,
-        episode_length: int = 24,
-        tolerance: float = 0.03,
         exogenous: Mapping[str, float] | None = None,
-        enforce_terminal: bool = True,
     ) -> dict[str, float]:
         current = dict(exogenous) if exogenous is not None else self.exogenous(row)
-        soc_min_reach, soc_max_reach = self.battery.reachable_soc_envelope(
-            t=t,
-            episode_length=episode_length,
-            target_soc=self.battery.initial_soc,
-            tolerance=tolerance,
-            enforce_terminal=enforce_terminal,
-        )
-        battery = self.battery.map_action(
-            float(action["battery"]),
-            soc_min_reach=soc_min_reach,
-            soc_max_reach=soc_max_reach,
-        )
+        battery = self.battery.map_action(float(action["battery"]))
         charge = float(battery["charge_requested_kw"])
         discharge = float(battery["discharge_requested_kw"])
         net = current["renewable_kw"] + discharge - current["load_kw"] - charge

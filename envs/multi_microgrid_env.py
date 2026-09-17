@@ -189,13 +189,7 @@ class MultiMicrogridEnv:
         if self.ess_sharing_control_mode == "single_dispatch":
             for mg in self.agent_ids:
                 battery = self.cores[mg].battery
-                floor, ceiling = battery.reachable_soc_envelope(
-                    index,
-                    self.episode_length,
-                    tolerance=float(self.config["terminal_soc"]["tolerance"]),
-                    enforce_terminal=self.config["terminal_soc"]["mode"] != "none",
-                )
-                neutral = battery.map_action(0.0, floor, ceiling)
+                neutral = battery.map_action(0.0)
                 result[mg].update({
                     "feasible_charge_min_ratio": neutral["charge_requested_kw"] / battery.max_charge_kw,
                     "feasible_charge_max_ratio": -neutral["feasible_min_kw"] / battery.max_charge_kw,
@@ -415,11 +409,7 @@ class MultiMicrogridEnv:
             plan = self.cores[mg].plan_local(
                 row,
                 decoded[mg],
-                t=self.t,
-                episode_length=self.episode_length,
-                tolerance=tolerance,
                 exogenous=actual_current[mg],
-                enforce_terminal=True,
             )
             requested_dr = self._tensor_value(projected[i]["dr_requested"])
             dr_delta = self._tensor_value(projected[i]["dr_projection_delta"])
@@ -708,10 +698,6 @@ class MultiMicrogridEnv:
             mg: self.cores[mg].plan_local(
                 row,
                 decoded[mg],
-                t=self.t,
-                episode_length=self.episode_length,
-                tolerance=tolerance,
-                enforce_terminal=self.config["terminal_soc"]["mode"] != "none",
                 exogenous=current[mg],
             )
             for mg in self.agent_ids

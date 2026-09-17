@@ -9,8 +9,8 @@ class BatteryModel:
     """Battery model used by every microgrid.
 
     Action sign after mapping: positive power is discharge, negative power is charge.
-    The policy action itself is always in [-1, 1] and is mapped to the feasible
-    SOC interval with terminal reachability projection.
+    The policy action itself is always in [-1, 1] and is mapped only to the
+    instantaneous SOC and power limits.
     """
 
     capacity_kwh: float
@@ -59,113 +59,27 @@ class BatteryModel:
         stored_kwh = max(0.0, (float(self.soc) - self.soc_min) * self.capacity_kwh)
         return min(self.max_discharge_kw, stored_kwh * self.eta_discharge / self.delta_t)
 
-    def reachable_soc_envelope(
-        self,
-        t: int,
-        episode_length: int = 24,
-        target_soc: float | None = None,
-        tolerance: float = 0.03,
-        enforce_terminal: bool = True,
-    ) -> tuple[float, float]:
-        """Compute the feasible SOC interval at step t+1 that guarantees terminal target reachability."""
-        if not enforce_terminal:
-            return float(self.soc_min), float(self.soc_max)
-        target = float(self.initial_soc if target_soc is None else target_soc)
-        tol = max(0.0, float(tolerance))
-        steps_remaining_after_next = max(0, int(episode_length) - 1 - int(t))
-
-        # Max SOC that can be gained by charging in remaining steps after t+1
-        max_gain_soc = (
-            steps_remaining_after_next
-            * self.eta_charge
-            * self.max_charge_kw
-            * self.delta_t
-            / self.capacity_kwh
-        )
-        soc_min_reach = max(self.soc_min, target - tol - max_gain_soc)
-
-        # Max SOC that can be lost by discharging in remaining steps after t+1
-        max_loss_soc = (
-            steps_remaining_after_next
-            * (self.max_discharge_kw * self.delta_t / self.eta_discharge)
-            / self.capacity_kwh
-        )
-        soc_max_reach = min(self.soc_max, target + tol + max_loss_soc)
-
-        return float(soc_min_reach), float(soc_max_reach)
-
-    def map_action(
-        self,
-        action: float,
-        soc_min_reach: float | None = None,
-        soc_max_reach: float | None = None,
-    ) -> Dict[str, float]:
-        """Map an action into feasible charge/discharge with terminal reachability."""
+    def map_action(self, action: float) -> Dict[str, float]:
+        """Map an action into the instantaneous feasible charge/discharge range."""
         if self.soc is None:
             self.reset()
         assert self.soc is not None
 
         a = max(-1.0, min(1.0, float(action)))
-        floor = self.soc_min if soc_min_reach is None else max(self.soc_min, float(soc_min_reach))
-        ceiling = self.soc_max if soc_max_reach is None else min(self.soc_max, float(soc_max_reach))
-
-        # Check required minimum charge/discharge if currently outside reachability envelope
-        if float(self.soc) < floor:
-            needed_gain_kwh = (floor - float(self.soc)) * self.capacity_kwh
-            feasible_ch_min = float(needed_gain_kwh / (self.eta_charge * self.delta_t))
-        else:
-            feasible_ch_min = 0.0
-
-        if float(self.soc) > ceiling:
-            needed_loss_kwh = (float(self.soc) - ceiling) * self.capacity_kwh
-            feasible_dis_min = float(needed_loss_kwh * self.eta_discharge / self.delta_t)
-        else:
-            feasible_dis_min = 0.0
-
-        # Maximum available charge up to ceiling
-        headroom_kwh = max(0.0, (ceiling - float(self.soc)) * self.capacity_kwh)
-        feasible_ch_max = float(min(self.max_charge_kw, headroom_kwh / (self.eta_charge * self.delta_t)))
-        feasible_ch_min = float(min(feasible_ch_min, self.max_charge_kw))
-
-        # Maximum available discharge respecting power, energy, and reachability.
-        usable_reach_stored_kwh = max(0.0, (float(self.soc) - floor) * self.capacity_kwh)
-        reach_dispatch_max_kw = usable_reach_stored_kwh * self.eta_discharge / self.delta_t
-
-        feasible_dis_max = float(min(self.max_discharge_kw, reach_dispatch_max_kw))
-        feasible_dis_min = float(min(feasible_dis_min, self.max_discharge_kw))
-
-        if feasible_ch_min > 0.0:
-            # Must charge to guarantee reaching terminal SOC
-            feasible_dis_max = 0.0
-            if a <= 0.0:
-                charge_kw = feasible_ch_min + (-a) * max(0.0, feasible_ch_max - feasible_ch_min)
-            else:
-                charge_kw = feasible_ch_min
+        feasible_ch_max = float(self.available_charge_kw())
+        feasible_dis_max = float(self.available_discharge_kw())
+        if a > 0.0:
+            power_kw = a * feasible_dis_max
+            charge_kw = 0.0
+            discharge_kw = float(power_kw)
+        elif a < 0.0:
+            charge_kw = (-a) * feasible_ch_max
             discharge_kw = 0.0
             power_kw = -float(charge_kw)
-        elif feasible_dis_min > 0.0:
-            # Must discharge to guarantee reaching terminal SOC
-            feasible_ch_max = 0.0
-            if a >= 0.0:
-                discharge_kw = feasible_dis_min + a * max(0.0, feasible_dis_max - feasible_dis_min)
-            else:
-                discharge_kw = feasible_dis_min
-            charge_kw = 0.0
-            power_kw = float(discharge_kw)
         else:
-            # Normal operating range
-            if a > 0.0:
-                power_kw = a * feasible_dis_max
-                charge_kw = 0.0
-                discharge_kw = float(power_kw)
-            elif a < 0.0:
-                charge_kw = (-a) * feasible_ch_max
-                discharge_kw = 0.0
-                power_kw = -float(charge_kw)
-            else:
-                charge_kw = 0.0
-                discharge_kw = 0.0
-                power_kw = 0.0
+            charge_kw = 0.0
+            discharge_kw = 0.0
+            power_kw = 0.0
 
         return {
             "raw_action": a,

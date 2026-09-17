@@ -200,11 +200,7 @@ class GlobalStateBuilder:
         if self.control_mode == "single_dispatch":
             for mg in self.agent_ids:
                 battery = cores[mg].battery
-                floor, ceiling = battery.reachable_soc_envelope(
-                    t, self.episode_length,
-                    tolerance=float(self.config["terminal_soc"]["tolerance"]),
-                    enforce_terminal=self.config["terminal_soc"]["mode"] != "none")
-                neutral = battery.map_action(0.0, floor, ceiling)
+                neutral = battery.map_action(0.0)
                 values.extend([
                     neutral["charge_requested_kw"] / battery.max_charge_kw,
                     -neutral["feasible_min_kw"] / battery.max_charge_kw,
