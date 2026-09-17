@@ -4,7 +4,7 @@ on:
   push:
     branches: [codex/instantaneous-p0-diagnostics]
     paths:
-      - 'scripts/_apply_instantaneous_p0_refactor.py'
+      - 'scripts/_apply_instantaneous_p0_refactor_v2.py'
 
 permissions:
   contents: write
@@ -22,7 +22,7 @@ jobs:
         with:
           python-version: '3.11'
       - name: Apply refactor
-        run: python scripts/_apply_instantaneous_p0_refactor.py
+        run: python scripts/_apply_instantaneous_p0_refactor_v2.py
       - name: Sanity check syntax
         run: python -m compileall -q algorithms components core envs experiments
       - name: Commit generated refactor
