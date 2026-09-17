@@ -2,7 +2,7 @@ name: DR environment validation
 
 on:
   push:
-    branches: [codex/controllable-devices]
+    branches: [codex/controllable-devices, codex/instantaneous-p0-diagnostics]
     paths:
       - '.github/workflows/dr-environment-validation.yml'
       - 'components/**'
@@ -43,6 +43,7 @@ jobs:
           tests/test_dr_physics_audit.py
           tests/test_experiment_profiles.py
           tests/test_projection_ablation.py
+          tests/test_instantaneous_default_and_p0.py
           tests/test_plain_single_dispatch.py
           tests/test_cooperative_physics.py
           tests/test_daily_soc_and_future_prices.py
