@@ -33,9 +33,9 @@ jobs:
         run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
-      - name: Verify canonical projection mode
+      - name: Verify canonical terminal semantics
         run: >-
-          python -c "import yaml; c=yaml.safe_load(open('configs/cooperative.yaml', encoding='utf-8')); assert c['constraint_projection']['mode'] == 'strong'"
+          python -c "import yaml; c=yaml.safe_load(open('configs/cooperative.yaml', encoding='utf-8')); assert 'constraint_projection' not in c; assert c['terminal_soc']['mode'] == 'penalty'"
       - name: Regenerate Yancheng-area data
         run: python scripts/build_spatial_market_data.py
       - name: Run short MATD3 training gate

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
+import yaml
 
 from envs.multi_microgrid_env import MultiMicrogridEnv
 
@@ -64,3 +66,40 @@ def test_hvac_bounds_never_call_terminal_optimizer(
     low, high = hvac.feasible_bounds(0)
 
     assert -hvac.cool_max_kw <= low <= high <= hvac.heat_max_kw
+
+
+def test_canonical_config_has_no_projection_mode() -> None:
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+
+    assert "constraint_projection" not in config
+    assert config["terminal_soc"]["mode"] == "penalty"
+
+
+def test_terminal_penalty_reports_every_device(env: MultiMicrogridEnv) -> None:
+    done = False
+    while not done:
+        actions = {
+            mg: np.asarray([0.0, -1.0], dtype=np.float32)
+            for mg in env.agent_ids
+        }
+        _, rewards, done, info = env.step(actions)
+
+    breakdown = info["terminal_constraint_penalty"]
+    assert set(breakdown) == set(env.agent_ids)
+    expected_fields = {
+        "ess_equivalent_kwh",
+        "mill_equivalent_kwh",
+        "hvac_equivalent_kwh",
+        "ev_equivalent_kwh",
+        "total_equivalent_kwh",
+        "total_penalty",
+    }
+    assert all(expected_fields <= set(item) for item in breakdown.values())
+    assert breakdown["mg1"]["mill_equivalent_kwh"] > 0.0
+    assert breakdown["mg3"]["ev_equivalent_kwh"] > 0.0
+    assert info["terminal_constraint_penalty_total"] == pytest.approx(
+        sum(item["total_penalty"] for item in breakdown.values())
+    )
+    assert rewards["mg1"] == pytest.approx(
+        info["team_profit"] / env.accounting.reward_scale
+    )

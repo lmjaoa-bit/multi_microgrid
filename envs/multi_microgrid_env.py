@@ -7,6 +7,9 @@ import numpy as np
 import yaml
 
 from components.controllable_load import build_controllable_load
+from components.commercial_hvac import CommercialHVACDR
+from components.ev_charging import EVChargingDR
+from components.industrial_mill import IndustrialMillDR
 from core.action_codec import ActionCodec
 from core.config_validation import validate_config
 from core.cost_accounting import CostAccounting
@@ -306,6 +309,103 @@ class MultiMicrogridEnv:
             potential -= progress * diff * battery.capacity_kwh * rate
         return potential
 
+    def _terminal_constraint_breakdown(self, mg: str) -> dict[str, float]:
+        battery = self.cores[mg].battery
+        tolerance = float(self.config["terminal_soc"]["tolerance"])
+        ess_equivalent = max(
+            0.0,
+            abs(float(battery.soc) - float(battery.initial_soc)) - tolerance,
+        ) * float(battery.capacity_kwh)
+
+        mill_equivalent = 0.0
+        hvac_equivalent = 0.0
+        ev_equivalent = 0.0
+        device = self.dr_devices.get(mg) if self.dr_enabled else None
+        if isinstance(device, IndustrialMillDR):
+            deviation_t = max(
+                0.0,
+                abs(float(device.silo_t) - float(device.initial_silo_t))
+                - float(device.terminal_tolerance_t),
+            )
+            mill_equivalent = (
+                deviation_t
+                / max(float(device.production_tph), 1e-12)
+                * float(device.rated_power_kw)
+            )
+        elif isinstance(device, CommercialHVACDR):
+            air_deviation = max(
+                0.0,
+                abs(float(device.t_air) - float(device.initial_t_air))
+                - float(device.terminal_air_tolerance),
+            )
+            mass_deviation = max(
+                0.0,
+                abs(float(device.t_mass) - float(device.initial_t_mass))
+                - float(device.terminal_mass_tolerance),
+            )
+            air_cop = (
+                float(device.cop_cool)
+                if float(device.t_air) > float(device.initial_t_air)
+                else float(device.cop_heat)
+            )
+            mass_cop = (
+                float(device.cop_cool)
+                if float(device.t_mass) > float(device.initial_t_mass)
+                else float(device.cop_heat)
+            )
+            hvac_equivalent = (
+                air_deviation * float(device.c_air) / max(air_cop, 1e-12)
+                + mass_deviation * float(device.c_mass) / max(mass_cop, 1e-12)
+            )
+        elif isinstance(device, EVChargingDR):
+            ev_equivalent = max(
+                0.0,
+                float(device.target_soc) - float(device.soc),
+            ) * float(device.capacity_kwh)
+
+        equivalent = ess_equivalent + mill_equivalent + hvac_equivalent + ev_equivalent
+        rate = float(self.config["terminal_soc"]["penalty_per_kwh"])
+        return {
+            "ess_equivalent_kwh": float(ess_equivalent),
+            "mill_equivalent_kwh": float(mill_equivalent),
+            "hvac_equivalent_kwh": float(hvac_equivalent),
+            "ev_equivalent_kwh": float(ev_equivalent),
+            "total_equivalent_kwh": float(equivalent),
+            "penalty_rate_per_equivalent_kwh": rate,
+            "total_penalty": float(equivalent * rate),
+        }
+
+    def _apply_terminal_constraint_penalties(
+        self,
+        costs: dict[str, dict[str, float]],
+        terminal: bool,
+    ) -> dict[str, dict[str, float]]:
+        if terminal:
+            breakdown = {
+                mg: self._terminal_constraint_breakdown(mg) for mg in self.agent_ids
+            }
+        else:
+            rate = float(self.config["terminal_soc"]["penalty_per_kwh"])
+            breakdown = {
+                mg: {
+                    "ess_equivalent_kwh": 0.0,
+                    "mill_equivalent_kwh": 0.0,
+                    "hvac_equivalent_kwh": 0.0,
+                    "ev_equivalent_kwh": 0.0,
+                    "total_equivalent_kwh": 0.0,
+                    "penalty_rate_per_equivalent_kwh": rate,
+                    "total_penalty": 0.0,
+                }
+                for mg in self.agent_ids
+            }
+        for mg, item in breakdown.items():
+            penalty = float(item["total_penalty"])
+            costs[mg]["terminal_constraint_penalty"] = penalty
+            costs[mg]["terminal_soc_penalty"] = penalty
+            costs[mg]["physical_profit"] -= penalty
+            costs[mg]["individual_accounting_profit"] -= penalty
+        return breakdown
+
     def _peer_demand_offer_cap(
         self,
         seller: str,
@@ -588,8 +688,8 @@ class MultiMicrogridEnv:
                 dr_plans[mg], delivered_fraction=served_fraction
             )
 
-        # 6. Economics only. Hard device/terminal feasibility is not duplicated
-        # by routine DR penalties or SOC shaping.
+        # 6. Economics and end-of-episode terminal penalties. Penalties never
+        # alter the physical action or committed device state.
         costs = {}
         for mg in self.agent_ids:
             costs[mg] = self.accounting.calculate(
@@ -604,9 +704,9 @@ class MultiMicrogridEnv:
             costs[mg]["individual_accounting_profit"] = float(
                 costs[mg]["physical_profit"] + transfer
             )
-            costs[mg]["terminal_soc_penalty"] = 0.0
 
         terminal = self.t + 1 >= len(self.episode_df)
+        terminal_breakdown = self._apply_terminal_constraint_penalties(costs, terminal)
         terminal_soc_infeasible: dict[str, bool] = {}
         for mg in self.agent_ids:
             battery = self.cores[mg].battery
@@ -664,7 +764,14 @@ class MultiMicrogridEnv:
             "team_profit": float(team_profit),
             "team_reward": float(team_reward),
             "shaping_reward": 0.0,
-            "terminal_soc_penalty": {mg: 0.0 for mg in self.agent_ids},
+            "terminal_soc_penalty": {
+                mg: float(terminal_breakdown[mg]["total_penalty"])
+                for mg in self.agent_ids
+            },
+            "terminal_constraint_penalty": terminal_breakdown,
+            "terminal_constraint_penalty_total": float(sum(
+                item["total_penalty"] for item in terminal_breakdown.values()
+            )),
             "terminal_soc_infeasible": terminal_soc_infeasible,
             "data_quality_flags": list(self.data.data_quality_flags),
         }
@@ -692,7 +799,6 @@ class MultiMicrogridEnv:
         current = self._exogenous_at(self.t)
         prices = {mg: prices_from_row(row, mg) for mg in self.agent_ids}
         decoded = {mg: self.action_codec.decode(actions[mg]) for mg in self.agent_ids}
-        tolerance = float(self.config["terminal_soc"]["tolerance"])
 
         plans = {
             mg: self.cores[mg].plan_local(
@@ -844,22 +950,12 @@ class MultiMicrogridEnv:
         potential_before = self._soc_potential(self.t)
         potential_after = self._soc_potential(self.t + 1)
         shaping_reward = potential_after - potential_before
-        terminal_penalties = {mg: 0.0 for mg in self.agent_ids}
         terminal = self.t + 1 >= len(self.episode_df)
-        if terminal and self.config["terminal_soc"]["mode"] != "none":
-            terminal_cfg = self.config["terminal_soc"]
-            rate = float(terminal_cfg["penalty_per_kwh"])
-            for mg in self.agent_ids:
-                battery = self.cores[mg].battery
-                deviation = max(0.0, abs(float(battery.soc) - battery.initial_soc) - tolerance)
-                penalty = deviation * battery.capacity_kwh * rate
-                terminal_penalties[mg] = penalty
-                costs[mg]["terminal_soc_penalty"] = penalty
-                costs[mg]["physical_profit"] -= penalty
-                costs[mg]["individual_accounting_profit"] -= penalty
-        else:
-            for mg in self.agent_ids:
-                costs[mg]["terminal_soc_penalty"] = 0.0
+        terminal_breakdown = self._apply_terminal_constraint_penalties(costs, terminal)
+        terminal_penalties = {
+            mg: float(terminal_breakdown[mg]["total_penalty"])
+            for mg in self.agent_ids
+        }
 
         team_profit = sum(costs[mg]["physical_profit"] for mg in self.agent_ids)
         team_reward = (team_profit + shaping_reward) / self.accounting.reward_scale
@@ -906,6 +1002,8 @@ class MultiMicrogridEnv:
             "team_reward": float(team_reward),
             "shaping_reward": float(shaping_reward),
             "terminal_soc_penalty": terminal_penalties,
+            "terminal_constraint_penalty": terminal_breakdown,
+            "terminal_constraint_penalty_total": float(sum(terminal_penalties.values())),
         }
         self.t += 1
         self._terminated = terminal

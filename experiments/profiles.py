@@ -96,7 +96,6 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
     """Record resolved settings, never infer historical settings from current defaults."""
     cfg_path = Path(config_path).resolve()
     mode = env_config.get("ess_sharing", {}).get("control_mode", "single_dispatch")
-    projection_mode = str(env_config.get("constraint_projection", {}).get("mode", "strong"))
     action_design_id = str(env_config.get("action_design", mode))
     designs = catalog("action_designs", root)
     design = deepcopy(designs.get(
@@ -138,7 +137,6 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
         "action_design": design,
         "observation_mode": env_config.get("ess_sharing", {}).get("observation_mode", "local"),
         "offer_projection": env_config.get("ess_sharing", {}).get("offer_projection", "none"),
-        "constraint_projection_mode": projection_mode,
         "environment_profile": environment_name,
         "environment_config": str(cfg_path),
         "environment_overrides": deepcopy(dict(spec.environment_overrides)),
@@ -147,7 +145,7 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
         "physical_settings": {
             key: deepcopy(env_config.get(key))
             for key in (
-                "env", "p2p", "terminal_soc", "constraint_projection",
+                "env", "p2p", "terminal_soc",
                 "cost", "time", "data", "price",
             )
         },

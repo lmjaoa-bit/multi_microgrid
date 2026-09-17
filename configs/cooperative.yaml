@@ -39,15 +39,10 @@ ess_sharing:
 
 action_design: single_dispatch_dr
 
-# Projection ablation switch. The canonical baseline remains the original
-# cross-time reachability projector unless an explicit ablation config is used.
-constraint_projection:
-  mode: strong
-
-# Daily episodes use cyclic ESS reachability. Hard feasibility is enforced by
-# the battery projector; this is not intended as a routine soft reward term.
+# Daily cyclic targets are learned from observations and penalized at the end
+# of the episode. They never tighten current-step action bounds.
 terminal_soc:
-  mode: hard
+  mode: penalty
   tolerance: 0.03
   penalty_per_kwh: 1.5
 
