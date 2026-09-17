@@ -1,4 +1,5 @@
 name: DR environment validation
+# Development branch is included temporarily until this refactor is merged.
 
 on:
   push:
