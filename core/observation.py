@@ -185,13 +185,14 @@ class ObservationBuilder:
         ])
         if self.control_mode == "single_dispatch":
             flex = (battery_flex_by_microgrid or {}).get(mg_id, {})
+            terminal_enabled = self.config["terminal_soc"]["mode"] != "none"
             values.extend([
                 float(flex.get("available_charge_ratio", 0.0)),
                 float(flex.get("available_discharge_ratio", 0.0)),
-                float(battery_soc) - self.initial_soc[mg_id],
-                float(flex.get("ess_time_to_terminal", 0.0)),
-                float(flex.get("ess_required_avg_power", 0.0)),
-                float(flex.get("ess_terminal_pressure", 0.0)),
+                float(battery_soc) - self.initial_soc[mg_id] if terminal_enabled else 0.0,
+                float(flex.get("ess_time_to_terminal", 0.0)) if terminal_enabled else 0.0,
+                float(flex.get("ess_required_avg_power", 0.0)) if terminal_enabled else 0.0,
+                float(flex.get("ess_terminal_pressure", 0.0)) if terminal_enabled else 0.0,
                 previous["ess_p2p_offer_kwh"] / n["trade"],
                 previous["ess_p2p_accepted_kwh"] / n["trade"],
                 previous["ess_p2p_unmatched_kwh"] / n["trade"],
