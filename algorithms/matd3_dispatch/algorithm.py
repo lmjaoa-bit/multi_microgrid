@@ -10,6 +10,7 @@ import torch
 from torch import nn
 
 from algorithms.matd3 import MATD3
+from algorithms.diagnostic_sampling import fast_projected_update
 from algorithms.matd3.actor import Actor
 from core.joint_action_projection import JointActionProjector
 
@@ -113,7 +114,9 @@ class Matd3Dispatch(MATD3):
     def project_actions(self, state, joint_raw):
         return self.projector(state, joint_raw)
 
-    def update(self, batch_size):
+    def update(self, batch_size, collect_diagnostics: bool = True):
+        if not collect_diagnostics:
+            return fast_projected_update(self, batch_size)
         if len(self.replay) < batch_size:
             return {}
         batch = self.replay.sample(batch_size, self.agent_ids, self.device)

@@ -238,10 +238,14 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     runtime_settings = configure_torch_runtime(algorithm_cfg, args.device)
     incremental_history = bool(logging_cfg.get("incremental_history", False))
     snapshot_interval = logging_cfg.get("history_snapshot_interval", 500)
+    diagnostic_interval = logging_cfg.get("diagnostic_interval", 20)
     if incremental_history and (isinstance(snapshot_interval, bool)
                                 or not isinstance(snapshot_interval, int)
                                 or snapshot_interval < 1):
         raise ValueError("logging.history_snapshot_interval must be a positive integer")
+    if (isinstance(diagnostic_interval, bool) or not isinstance(diagnostic_interval, int)
+            or diagnostic_interval < 1):
+        raise ValueError("logging.diagnostic_interval must be a positive integer")
 
     training_episodes = int(args.episodes if args.episodes is not None
                             else training_cfg.get("episodes", 5000))
@@ -303,6 +307,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "python_version": platform.python_version(), "train_episodes": training_episodes,
         "test_episodes": test_episodes, "git_commit": _git_commit(),
         "runtime": runtime_settings,
+        "diagnostic_interval": int(diagnostic_interval),
     }
     write_json(run_dir / "run_metadata.json", metadata)
 
@@ -374,7 +379,12 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                     observations, state, actions, team_reward,
                     next_observations, info["global_state_after"], done,
                 )
-                update_metrics = algorithm.update(batch_size)
+                collect_diagnostics = (
+                    int(getattr(algorithm, "update_steps", 0)) % int(diagnostic_interval) == 0
+                )
+                update_metrics = algorithm.update(
+                    batch_size, collect_diagnostics=collect_diagnostics
+                )
                 if update_metrics:
                     diagnostics.append(update_metrics)
                 collector.record_step(actions, info, rewards)

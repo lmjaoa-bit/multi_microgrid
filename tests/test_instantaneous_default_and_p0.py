@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 from algorithms.matd3 import MATD3
+from algorithms.matd3_dispatch.algorithm import Matd3Dispatch
 from algorithms.matd3_transformer.algorithm import Matd3Transformer
 from algorithms.pnn.algorithm import PNN
 from algorithms.pnn_transformer.algorithm import PnnTransformer
@@ -114,7 +115,7 @@ def test_p0_constraint_pressure_features_are_exposed_to_actor_and_centralized_cr
 
 
 def test_all_trainable_algorithms_accept_optional_diagnostic_sampling_flag() -> None:
-    for cls in (MATD3, PNN, Matd3Transformer, PnnTransformer):
+    for cls in (MATD3, Matd3Dispatch, PNN, Matd3Transformer, PnnTransformer):
         signature = inspect.signature(cls.update)
         assert "collect_diagnostics" in signature.parameters
 

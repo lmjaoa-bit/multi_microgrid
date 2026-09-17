@@ -11,6 +11,7 @@ from torch import nn
 from algorithms.matd3.actor import Actor
 from algorithms.matd3.critic import TwinCritic
 from algorithms.matd3.replay_buffer import ReplayBuffer
+from algorithms.diagnostic_sampling import fast_plain_matd3_update
 
 
 class MATD3:
@@ -95,7 +96,9 @@ class MATD3:
                 squared += float(parameter.grad.detach().norm(2).item()) ** 2
         return float(squared ** 0.5)
 
-    def update(self, batch_size: int) -> dict[str, Any]:
+    def update(self, batch_size: int, collect_diagnostics: bool = True) -> dict[str, Any]:
+        if not collect_diagnostics:
+            return fast_plain_matd3_update(self, batch_size)
         if len(self.replay) < batch_size:
             return {}
         batch = self.replay.sample(batch_size, self.agent_ids, self.device)
