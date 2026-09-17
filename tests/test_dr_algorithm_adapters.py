@@ -21,6 +21,7 @@ def build_variant(slug: str):
     cfg["_project_root"] = str(ROOT)
     env = MultiMicrogridEnv(spec.build_environment_config(cfg))
     settings = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
+    settings.setdefault("logging", {})["diagnostic_interval"] = 2
     return spec, env, settings, spec.create(env, settings, seed=42)
 
 
@@ -74,7 +75,7 @@ def test_variant_replay_critic_and_actor_update_use_projected_dr_actions(slug: s
 
     first = model.update(1)
     second = model.update(1)
-    assert np.isfinite(first["critic_loss"])
+    assert first == {}
     assert np.isfinite(second["critic_loss"])
     assert np.isfinite(second["actor_loss"])
 

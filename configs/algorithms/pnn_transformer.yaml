@@ -18,7 +18,6 @@ algorithm:
   replay_capacity: 200000
   warmup_steps: 1000
   exploration_noise: 0.15
-  diagnostics_interval: 100
   network:
     embed_dim: 32
     num_heads: 4
@@ -42,6 +41,7 @@ validation:
   deterministic_policy: true
   fixed_scenarios: true
 logging:
+  diagnostic_interval: 20
   incremental_history: true
   history_snapshot_interval: 500
   dashboard: true

@@ -41,6 +41,11 @@ def test_pnn_initialization_and_forward():
         assert actions[mg].shape == (2,)
         assert all(-1.0 <= float(value) <= 1.0 for value in actions[mg])
 
+        actor(
+            torch.tensor(observations[mg], dtype=torch.float32).unsqueeze(0),
+            collect_diagnostics=True,
+        )
+
     prods = pnn.product_diagnostics()
     for mg in env.agent_ids:
         assert "linear_signal_norm" in prods[mg]
@@ -69,6 +74,23 @@ def test_pnn_gradient_flow():
                 if parameter.grad is not None
             )
             assert branch_norm > 0, f"Branch {branch_name} for agent {mg} received zero gradient"
+
+
+def test_pnn_diagnostics_can_be_disabled_without_changing_action():
+    _, env, _, pnn = build_pnn()
+    observations, _ = env.reset(seed=42, deterministic=True)
+    actor = pnn.actors[env.agent_ids[0]]
+    observation = torch.tensor(
+        observations[env.agent_ids[0]], dtype=torch.float32
+    ).unsqueeze(0)
+
+    with torch.no_grad():
+        expected = actor(observation, collect_diagnostics=True)
+        diagnostics = dict(actor.product_diagnostics())
+        actual = actor(observation, collect_diagnostics=False)
+
+    assert torch.equal(actual, expected)
+    assert actor.product_diagnostics() == diagnostics
 
 
 def test_pnn_save_and_load(tmp_path: Path):

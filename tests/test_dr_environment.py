@@ -113,11 +113,12 @@ def test_matd3_dispatch_dr_replay_and_update_use_projected_three_channel_actions
     settings["algorithm"] = dict(settings.get("algorithm", {}))
     settings["algorithm"]["hidden_dims"] = [32, 32]
     settings["algorithm"]["replay_capacity"] = 100
+    settings.setdefault("logging", {})["diagnostic_interval"] = 2
     model = spec.create(env, settings, seed=7)
 
     observations, reset_info = env.reset(seed=7, deterministic=True)
     state = reset_info["global_state"]
-    metrics = {}
+    diagnostic_metrics = {}
     for _ in range(4):
         actions = model.select_actions(observations, noise_std=0.05)
         assert all(value.shape == (2,) for value in actions.values())
@@ -127,9 +128,11 @@ def test_matd3_dispatch_dr_replay_and_update_use_projected_three_channel_actions
             next_obs, info["global_state_after"], done,
         )
         metrics = model.update(batch_size=2)
+        if metrics:
+            diagnostic_metrics = metrics
         observations, state = next_obs, info["global_state_after"]
 
     assert model.raw_action_dim == 2
     assert model.effective_action_dim == 3
-    assert np.isfinite(metrics["critic_loss"])
+    assert np.isfinite(diagnostic_metrics["critic_loss"])
     assert model.update_steps > 0

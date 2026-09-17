@@ -127,6 +127,23 @@ def test_transformer_diagnostics():
         assert diag["norm_ratio"] > 0.0
 
 
+def test_transformer_diagnostics_can_be_disabled_without_changing_action():
+    _, env, _, model = build_matd3_transformer()
+    observations, _ = env.reset(seed=42, deterministic=True)
+    actor = model.actors[env.agent_ids[0]]
+    observation = torch.tensor(
+        observations[env.agent_ids[0]], dtype=torch.float32
+    ).unsqueeze(0)
+
+    with torch.no_grad():
+        expected = actor(observation, collect_diagnostics=True)
+        diagnostics = dict(actor.last_diagnostics)
+        actual = actor(observation, collect_diagnostics=False)
+
+    assert torch.equal(actual, expected)
+    assert actor.last_diagnostics == diagnostics
+
+
 def test_save_and_load(tmp_path):
     spec, env, settings, model = build_matd3_transformer()
     path = tmp_path / "model.pt"

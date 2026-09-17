@@ -59,12 +59,11 @@ def test_actor_diagnostics_can_be_disabled_without_changing_action():
 
 
 def test_plugin_installs_runtime_layer_without_replacing_algorithm_definition():
+    from algorithms.diagnostic_sampling import fast_projected_update
     from algorithms.pnn_transformer.algorithm import PnnTransformer
     from algorithms.registry import get_algorithm_spec
-    from algorithms.runtime_helpers import optimized_single_dispatch_update, select_single_dispatch_actions
 
     spec = get_algorithm_spec("pnn_transformer")
     assert spec.algorithm_class is PnnTransformer
-    assert getattr(PnnTransformer, "_runtime_optimizations_installed", False)
-    assert PnnTransformer.update is optimized_single_dispatch_update
-    assert PnnTransformer.select_actions is select_single_dispatch_actions
+    assert getattr(PnnTransformer, "_diagnostic_sampling_installed", False)
+    assert PnnTransformer.update is fast_projected_update

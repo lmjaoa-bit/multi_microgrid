@@ -1,19 +1,17 @@
 from __future__ import annotations
 
+from algorithms.diagnostic_sampling import install_diagnostic_sampling
 from algorithms.dr_environment_adapter import install_dr_environment_adapter
 from algorithms.pnn_transformer.algorithm import PnnTransformer
 from algorithms.pnn_transformer.runtime import install_historical_actor_runtime_optimizations
 from algorithms.registry import AlgorithmSpec, PROJECT_ROOT
-from algorithms.runtime_helpers import install_single_dispatch_runtime_optimizations
 
 
 install_historical_actor_runtime_optimizations()
 install_dr_environment_adapter(
     PnnTransformer, slug="pnn_transformer", actor_kind="pnn_transformer"
 )
-install_single_dispatch_runtime_optimizations(
-    PnnTransformer, variant="pnn_transformer"
-)
+install_diagnostic_sampling(PnnTransformer, variant="pnn_transformer")
 
 ALGORITHM_SPEC = AlgorithmSpec(
     slug="pnn_transformer",

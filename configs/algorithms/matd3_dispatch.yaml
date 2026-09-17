@@ -27,6 +27,7 @@ validation:
   deterministic_policy: true
   fixed_scenarios: true
 logging:
+  diagnostic_interval: 20
   incremental_history: true
   history_snapshot_interval: 500
   dashboard: true

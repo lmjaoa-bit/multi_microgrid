@@ -1,5 +1,10 @@
+from algorithms.diagnostic_sampling import install_diagnostic_sampling
 from algorithms.matd3_dispatch.algorithm import Matd3Dispatch
 from algorithms.registry import AlgorithmSpec, PROJECT_ROOT
+
+install_diagnostic_sampling(
+    Matd3Dispatch, variant="matd3_dispatch", plain_actor=True
+)
 
 ALGORITHM_SPEC = AlgorithmSpec(
     slug="matd3_dispatch",

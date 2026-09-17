@@ -1,9 +1,11 @@
+from algorithms.diagnostic_sampling import install_diagnostic_sampling
 from algorithms.dr_environment_adapter import install_dr_environment_adapter
 from algorithms.pnn.algorithm import PNN
 from algorithms.registry import AlgorithmSpec, PROJECT_ROOT
 
 
 install_dr_environment_adapter(PNN, slug="pnn", actor_kind="pnn")
+install_diagnostic_sampling(PNN, variant="pnn")
 
 ALGORITHM_SPEC = AlgorithmSpec(
     slug="pnn",

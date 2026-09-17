@@ -226,7 +226,11 @@ class TransformerDispatchActor(nn.Module):
         hour_idx = torch.round(angle / (2.0 * np.pi / 24.0)).long() % 24
         return hour_idx
 
-    def forward_components(self, observation: torch.Tensor) -> dict[str, torch.Tensor]:
+    def forward_components(
+        self,
+        observation: torch.Tensor,
+        collect_diagnostics: bool = True,
+    ) -> dict[str, torch.Tensor]:
         """Forward pass exposing internal representations for verification and diagnostics."""
         is_single = observation.ndim == 1
         if is_single:
@@ -292,8 +296,9 @@ class TransformerDispatchActor(nn.Module):
         features = self.dispatch_backbone(fused)
         action = self.dispatch_head(features)
 
-        # Diagnostics: track representation norms
-        with torch.no_grad():
+        # Diagnostics are opt-in on training hot paths because converting these
+        # tensors to Python floats synchronizes CUDA with the host.
+        if collect_diagnostics:
             d_norm = float(dispatch_rep.norm(dim=-1).mean().detach().cpu())
             l_norm = float(local_rep.norm(dim=-1).mean().detach().cpu())
             i_norm = float(interact.norm(dim=-1).mean().detach().cpu())
@@ -329,9 +334,15 @@ class TransformerDispatchActor(nn.Module):
             "peer_tokens": peer_tokens,
         }
 
-    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        observation: torch.Tensor,
+        collect_diagnostics: bool = True,
+    ) -> torch.Tensor:
         """Forward pass generating continuous single dispatch intent in [-1, 1]."""
-        return self.forward_components(observation)["action"]
+        return self.forward_components(
+            observation, collect_diagnostics=collect_diagnostics
+        )["action"]
 
     def branch_modules(self) -> dict[str, tuple[nn.Module, ...] | tuple[nn.Parameter, ...]]:
         return {

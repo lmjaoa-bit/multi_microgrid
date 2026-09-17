@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from algorithms.diagnostic_sampling import install_diagnostic_sampling
 from algorithms.dr_environment_adapter import install_dr_environment_adapter
 from algorithms.matd3_transformer.algorithm import Matd3Transformer
 from algorithms.registry import AlgorithmSpec, PROJECT_ROOT
@@ -8,6 +9,7 @@ from algorithms.registry import AlgorithmSpec, PROJECT_ROOT
 install_dr_environment_adapter(
     Matd3Transformer, slug="matd3_transformer", actor_kind="transformer"
 )
+install_diagnostic_sampling(Matd3Transformer, variant="matd3_transformer")
 
 ALGORITHM_SPEC = AlgorithmSpec(
     slug="matd3_transformer",

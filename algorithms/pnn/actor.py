@@ -110,7 +110,11 @@ class PNNDispatchActor(nn.Module):
     def parameter_count(self) -> int:
         return self._parameter_count
 
-    def forward(self, observation: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self,
+        observation: torch.Tensor,
+        collect_diagnostics: bool = True,
+    ) -> torch.Tensor:
         if observation.shape[-1] != len(self.schema):
             raise ValueError(f"Observation schema mismatch: expected {len(self.schema)}, got {observation.shape[-1]}")
 
@@ -135,12 +139,13 @@ class PNNDispatchActor(nn.Module):
         # Scaled product signals as higher-order residual perturbations
         product_signals = self.product_scale * normed_products
 
-        self._last_product_norms = (
-            linear_signals.detach().norm(dim=-1).mean(),
-            product_signals.detach().norm(dim=-1).mean(),
-            p_temporal.detach().norm(dim=-1).mean(),
-            p_spatial.detach().norm(dim=-1).mean(),
-        )
+        if collect_diagnostics:
+            self._last_product_norms = (
+                linear_signals.detach().norm(dim=-1).mean(),
+                product_signals.detach().norm(dim=-1).mean(),
+                p_temporal.detach().norm(dim=-1).mean(),
+                p_spatial.detach().norm(dim=-1).mean(),
+            )
 
         # Concatenate linear and residual second-order product representations (total: 224-dim)
         combined = torch.cat([linear_signals, product_signals], dim=-1)
