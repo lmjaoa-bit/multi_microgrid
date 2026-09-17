@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 import yaml
 
 from algorithms.matd3 import MATD3
@@ -125,3 +126,48 @@ def test_all_algorithm_configs_default_to_twenty_step_diagnostic_sampling() -> N
         path = ROOT / "configs" / "algorithms" / f"{name}.yaml"
         cfg = yaml.safe_load(path.read_text(encoding="utf-8"))
         assert cfg["logging"]["diagnostic_interval"] == 20
+
+
+def test_fast_diagnostic_path_still_updates_critic_and_actor_without_heavy_metrics() -> None:
+    env = MultiMicrogridEnv(_load(), split="train")
+    algorithm_cfg = yaml.safe_load(
+        (ROOT / "configs" / "algorithms" / "matd3_dispatch.yaml").read_text(encoding="utf-8")
+    )
+    algorithm = Matd3Dispatch.from_env(env, algorithm_cfg, device="cpu", seed=42)
+    observations, reset_info = env.reset(seed=42, deterministic=True)
+    state = reset_info["global_state"]
+
+    for _ in range(2):
+        actions = {mg: np.zeros(env.action_dim, dtype=np.float32) for mg in env.agent_ids}
+        next_observations, rewards, done, info = env.step(actions)
+        algorithm.replay.add(
+            observations,
+            state,
+            actions,
+            rewards[env.agent_ids[0]],
+            next_observations,
+            info["global_state_after"],
+            done,
+        )
+        observations = next_observations
+        state = info["global_state_after"]
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("heavy diagnostic reduction must not run on the fast path")
+
+    algorithm._gradient_norm = forbidden
+    algorithm._actor_gradient_diagnostics = forbidden
+    critic_before = [p.detach().clone() for p in algorithm.critics["mg1"].parameters()]
+    actor_before = [p.detach().clone() for p in algorithm.actors["mg1"].parameters()]
+
+    assert algorithm.update(2, collect_diagnostics=False) == {}
+    assert algorithm.update(2, collect_diagnostics=False) == {}
+    assert algorithm.update_steps == 2
+    assert any(
+        not torch.equal(before, after.detach())
+        for before, after in zip(critic_before, algorithm.critics["mg1"].parameters())
+    )
+    assert any(
+        not torch.equal(before, after.detach())
+        for before, after in zip(actor_before, algorithm.actors["mg1"].parameters())
+    )
