@@ -12,7 +12,7 @@ from components.controllable_load import (
 
 
 class IndustrialMillDR:
-    """Raw-meal mill with an intermediate silo and hard daily reachability."""
+    """Raw-meal mill with instantaneous silo safety and terminal P0 signals."""
 
     def __init__(self, config: Mapping[str, Any], *, delta_t: float, episode_length: int) -> None:
         self.config = dict(config)
@@ -30,28 +30,11 @@ class IndustrialMillDR:
             raise ValueError("Invalid raw-meal silo bounds")
         if min(self.rated_power_kw, self.production_tph, self.delta_t) <= 0.0:
             raise ValueError("Mill power, production, and timestep must be positive")
-        self._reachable = self._build_reachable_intervals()
         self.silo_t = self.initial_silo_t
         self._frame: pd.DataFrame | None = None
         self._base_load_kw: np.ndarray | None = None
         self.last_projection = False
         self.terminal_infeasible = False
-
-    def _build_reachable_intervals(self) -> list[tuple[float, float]]:
-        production = self.production_tph * self.delta_t
-        consumption = self.downstream_tph * self.delta_t
-        target_low = max(self.silo_min_t, self.initial_silo_t - self.terminal_tolerance_t)
-        target_high = min(self.silo_max_t, self.initial_silo_t + self.terminal_tolerance_t)
-        intervals: list[tuple[float, float]] = [(0.0, 0.0)] * (self.episode_length + 1)
-        intervals[self.episode_length] = (target_low, target_high)
-        for t in range(self.episode_length - 1, -1, -1):
-            next_low, next_high = intervals[t + 1]
-            low = max(self.silo_min_t, next_low + consumption - production)
-            high = min(self.silo_max_t, next_high + consumption)
-            if low > high + 1e-10:
-                raise ValueError("Mill terminal silo set is unreachable with configured production limits")
-            intervals[t] = (low, high)
-        return intervals
 
     def reset(self, episode_frame: pd.DataFrame, base_load_kw: np.ndarray) -> None:
         if len(episode_frame) < self.episode_length:
@@ -65,13 +48,13 @@ class IndustrialMillDR:
         self.terminal_infeasible = False
 
     def feasible_bounds(self, t: int) -> tuple[float, float]:
+        """One-step physical silo bounds; no terminal reachable-set projection."""
         if not 0 <= int(t) < self.episode_length:
             return (0.0, 0.0)
         production = self.production_tph * self.delta_t
         consumption = self.downstream_tph * self.delta_t
-        required_low, required_high = self._reachable[int(t) + 1]
-        low = (required_low - self.silo_t + consumption) / production
-        high = (required_high - self.silo_t + consumption) / production
+        low = (self.silo_min_t - self.silo_t + consumption) / production
+        high = (self.silo_max_t - self.silo_t + consumption) / production
         low = max(0.0, low)
         high = min(1.0, high)
         if low > high + 1e-9:
@@ -129,12 +112,27 @@ class IndustrialMillDR:
     def state(self, t: int) -> dict[str, float]:
         low, high = self.feasible_bounds(t)
         target_gap = self.silo_t - self.initial_silo_t
+        remaining_steps = max(self.episode_length - int(t), 0)
+        remaining_hours = remaining_steps * self.delta_t
+        if remaining_hours > 0.0:
+            required_avg_duty = (
+                self.initial_silo_t - self.silo_t
+                + self.downstream_tph * remaining_hours
+            ) / max(self.production_tph * remaining_hours, 1e-12)
+            terminal_pressure = max(
+                0.0, abs(target_gap) - self.terminal_tolerance_t
+            ) / max(self.production_tph * remaining_hours, 1e-12)
+        else:
+            required_avg_duty = 0.0
+            terminal_pressure = max(0.0, abs(target_gap) - self.terminal_tolerance_t)
         return {
             "silo_level_t": float(self.silo_t),
             "silo_ratio": float(self.silo_t / self.silo_capacity_t),
             "silo_target_gap_t": float(target_gap),
             "mill_feasible_min": low,
             "mill_feasible_max": high,
-            "time_to_terminal_h": float(max(self.episode_length - int(t), 0)),
+            "time_to_terminal_h": float(remaining_hours),
+            "mill_required_avg_duty": float(required_avg_duty),
+            "mill_terminal_pressure": float(terminal_pressure),
             "terminal_infeasible": float(self.terminal_infeasible),
         }

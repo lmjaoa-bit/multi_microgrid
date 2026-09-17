@@ -42,12 +42,15 @@ class ObservationBuilder:
             return [
                 "silo_ratio", "silo_target_gap", "mill_feasible_min",
                 "mill_feasible_max", "time_to_terminal",
+                "mill_required_avg_duty", "mill_terminal_pressure",
             ]
         if kind == "commercial_hvac":
             return [
                 "t_air", "t_mass", "t_out", "comfort_lower_margin",
                 "comfort_upper_margin", "occupied", "is_weekend",
                 "hvac_feasible_min", "hvac_feasible_max",
+                "terminal_air_gap", "terminal_mass_gap",
+                "hvac_time_to_terminal", "thermal_recovery_pressure",
             ]
         if kind == "ev_charging":
             return [
@@ -72,6 +75,7 @@ class ObservationBuilder:
         if self.control_mode == "single_dispatch":
             names.extend([
                 "available_charge_ratio", "available_discharge_ratio", "terminal_soc_gap",
+                "ess_time_to_terminal", "ess_required_avg_power", "ess_terminal_pressure",
                 "previous_ess_p2p_offer", "previous_ess_p2p_accepted",
                 "previous_ess_p2p_unmatched", "previous_system_buy_demand",
                 "previous_system_sell_offer", "previous_clearing_ratio",
@@ -105,6 +109,8 @@ class ObservationBuilder:
                 float(state["mill_feasible_min"]),
                 float(state["mill_feasible_max"]),
                 float(state["time_to_terminal_h"]) / max(float(self.episode_length), 1.0),
+                float(state["mill_required_avg_duty"]),
+                float(state["mill_terminal_pressure"]),
             ]
         if kind == "commercial_hvac":
             scale = max(float(dr["heating_max_kw"]), float(dr["cooling_max_kw"]), 1e-9)
@@ -118,6 +124,10 @@ class ObservationBuilder:
                 float(state["is_weekend"]),
                 float(state["hvac_feasible_min_kw"]) / scale,
                 float(state["hvac_feasible_max_kw"]) / scale,
+                float(state["terminal_air_gap_c"]) / 15.0,
+                float(state["terminal_mass_gap_c"]) / 15.0,
+                float(state["hvac_time_to_terminal_h"]) / max(float(self.episode_length), 1.0),
+                float(state["thermal_recovery_pressure"]),
             ]
         if kind == "ev_charging":
             capacity = max(float(dr["fleet_capacity_kwh"]), 1e-9)
@@ -178,8 +188,10 @@ class ObservationBuilder:
             values.extend([
                 float(flex.get("available_charge_ratio", 0.0)),
                 float(flex.get("available_discharge_ratio", 0.0)),
-                (float(battery_soc) - self.initial_soc[mg_id]
-                 if self.config["terminal_soc"]["mode"] != "none" else 0.0),
+                float(battery_soc) - self.initial_soc[mg_id],
+                float(flex.get("ess_time_to_terminal", 0.0)),
+                float(flex.get("ess_required_avg_power", 0.0)),
+                float(flex.get("ess_terminal_pressure", 0.0)),
                 previous["ess_p2p_offer_kwh"] / n["trade"],
                 previous["ess_p2p_accepted_kwh"] / n["trade"],
                 previous["ess_p2p_unmatched_kwh"] / n["trade"],

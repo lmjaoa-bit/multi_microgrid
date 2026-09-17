@@ -12,7 +12,7 @@ from components.controllable_load import (
 
 
 class CommercialHVACDR:
-    """Reversible heat-pump DR backed by a 2R2C building thermal model."""
+    """2R2C HVAC with one-step comfort safety and terminal thermal P0 signals."""
 
     def __init__(self, config: Mapping[str, Any], *, delta_t: float, episode_length: int) -> None:
         self.config = dict(config)
@@ -174,114 +174,14 @@ class CommercialHVACDR:
         closest = float(np.clip(0.5 * (low + high), self.q_min_kw, self.q_max_kw))
         return closest, closest
 
-    def _solve_terminal_q(self, t: int, *, maximize: bool) -> float | None:
-        try:
-            import highspy
-        except ImportError:
-            return None
-        if self._frame is None or self._base_load_kw is None:
-            raise RuntimeError("HVAC must be reset before use")
-        if not 0 <= int(t) < self.episode_length:
-            return 0.0
-        model = highspy.Highs()
-        model.setOptionValue("output_flag", False)
-        continuous = highspy.HighsVarType.kContinuous
-        air: dict[int, Any] = {}
-        mass: dict[int, Any] = {}
-        q: dict[int, Any] = {}
-        start = int(t)
-        air[start] = model.addVariable(
-            lb=self.t_air, ub=self.t_air, type=continuous, name=f"t_air[{start}]"
-        )
-        mass[start] = model.addVariable(
-            lb=self.t_mass, ub=self.t_mass, type=continuous, name=f"t_mass[{start}]"
-        )
-        for k in range(start, self.episode_length):
-            air[k + 1] = model.addVariable(
-                lb=-100.0, ub=100.0, type=continuous, name=f"t_air[{k+1}]"
-            )
-            mass[k + 1] = model.addVariable(
-                lb=-100.0, ub=100.0, type=continuous, name=f"t_mass[{k+1}]"
-            )
-            objective = (
-                -1.0 if maximize and k == start
-                else 1.0 if (not maximize and k == start)
-                else 0.0
-            )
-            q[k] = model.addVariable(
-                lb=self.q_min_kw,
-                ub=self.q_max_kw,
-                obj=objective,
-                type=continuous,
-                name=f"q_hvac[{k}]",
-            )
-            t_out, q_solar, q_internal = self._exogenous(k)
-            q_air = self.solar_air_fraction * q_solar
-            q_mass = (1.0 - self.solar_air_fraction) * q_solar
-            a_air = 1.0 - self.delta_t / self.c_air * (
-                1.0 / self.r_oa + 1.0 / self.r_am
-            )
-            b_mass = self.delta_t / self.c_air * (1.0 / self.r_am)
-            constant_air = self.delta_t / self.c_air * (
-                t_out / self.r_oa + q_internal + q_air
-            )
-            mass_from_air = self.delta_t / self.c_mass * (1.0 / self.r_am)
-            mass_self = 1.0 - self.delta_t / self.c_mass * (1.0 / self.r_am)
-            constant_mass = self.delta_t / self.c_mass * q_mass
-            model.addConstr(
-                air[k + 1]
-                == a_air * air[k]
-                + b_mass * mass[k]
-                + self.delta_t / self.c_air * q[k]
-                + constant_air
-            )
-            model.addConstr(
-                mass[k + 1]
-                == mass_from_air * air[k]
-                + mass_self * mass[k]
-                + constant_mass
-            )
-            comfort_low, comfort_high = self._state_comfort_bounds(k + 1)
-            model.addConstr(air[k + 1] >= comfort_low)
-            model.addConstr(air[k + 1] <= comfort_high)
-        terminal = self.episode_length
-        model.addConstr(
-            air[terminal] >= self.initial_t_air - self.terminal_air_tolerance
-        )
-        model.addConstr(
-            air[terminal] <= self.initial_t_air + self.terminal_air_tolerance
-        )
-        model.addConstr(
-            mass[terminal] >= self.initial_t_mass - self.terminal_mass_tolerance
-        )
-        model.addConstr(
-            mass[terminal] <= self.initial_t_mass + self.terminal_mass_tolerance
-        )
-        model.minimize()
-        solution = model.getSolution()
-        if not solution.value_valid:
-            return None
-        return float(model.val(q[start]))
-
     def feasible_bounds(self, t: int) -> tuple[float, float]:
+        """One-step comfort/power bounds; terminal state never clips the action."""
         if not 0 <= int(t) < self.episode_length:
             return (0.0, 0.0)
         key = (int(t), round(float(self.t_air), 10), round(float(self.t_mass), 10))
         if self._bounds_cache_key == key and self._bounds_cache_value is not None:
             return self._bounds_cache_value
-
-        one_low, one_high = self._one_step_bounds_q(t)
-        terminal_low = self._solve_terminal_q(t, maximize=False)
-        terminal_high = self._solve_terminal_q(t, maximize=True)
-        if terminal_low is None or terminal_high is None:
-            self.terminal_thermal_infeasible = True
-            q_low, q_high = one_low, one_high
-        else:
-            q_low = max(one_low, min(terminal_low, terminal_high))
-            q_high = min(one_high, max(terminal_low, terminal_high))
-            if q_low > q_high + 1e-7:
-                self.terminal_thermal_infeasible = True
-                q_low, q_high = one_low, one_high
+        q_low, q_high = self._one_step_bounds_q(t)
         result = (
             float(np.clip(
                 self._q_to_signed_electric(q_low),
@@ -369,6 +269,19 @@ class CommercialHVACDR:
             comfort_low, comfort_high = self.unoccupied_comfort
             occupied = 0.0
             weekend = 0.0
+        air_gap = float(self.t_air - self.initial_t_air)
+        mass_gap = float(self.t_mass - self.initial_t_mass)
+        remaining_hours = max(self.episode_length - int(t), 0) * self.delta_t
+        air_excess = max(0.0, abs(air_gap) - self.terminal_air_tolerance)
+        mass_excess = max(0.0, abs(mass_gap) - self.terminal_mass_tolerance)
+        air_cop = self.cop_cool if air_gap > 0.0 else self.cop_heat
+        mass_cop = self.cop_cool if mass_gap > 0.0 else self.cop_heat
+        recovery_kwh = (
+            air_excess * self.c_air / max(air_cop, 1e-12)
+            + mass_excess * self.c_mass / max(mass_cop, 1e-12)
+        )
+        max_recovery_kwh = max(self.heat_max_kw, self.cool_max_kw) * max(remaining_hours, self.delta_t)
+        thermal_pressure = recovery_kwh / max(max_recovery_kwh, 1e-12)
         return {
             "t_air_c": float(self.t_air),
             "t_mass_c": float(self.t_mass),
@@ -379,6 +292,10 @@ class CommercialHVACDR:
             "is_weekend": weekend,
             "hvac_feasible_min_kw": low,
             "hvac_feasible_max_kw": high,
+            "terminal_air_gap_c": air_gap,
+            "terminal_mass_gap_c": mass_gap,
+            "hvac_time_to_terminal_h": float(remaining_hours),
+            "thermal_recovery_pressure": float(thermal_pressure),
             "comfort_infeasible": float(self.comfort_infeasible),
             "terminal_thermal_infeasible": float(self.terminal_thermal_infeasible),
         }

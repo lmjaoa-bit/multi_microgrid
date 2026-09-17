@@ -19,6 +19,7 @@ from core.observation import ObservationBuilder
 from core.profiles import HeterogeneousProfileModel
 from core.types import CoordinationHistory
 from core.tariffs import prices_from_row
+from core.terminal_constraints import apply_terminal_constraint_penalty
 from envs.cooperative_energy_sharing import CooperativeEnergySharing
 
 
@@ -193,10 +194,24 @@ class MultiMicrogridEnv:
                     index,
                     self.episode_length,
                     tolerance=float(self.config["terminal_soc"]["tolerance"]),
-                    enforce_terminal=self.config["terminal_soc"]["mode"] != "none",
+                    enforce_terminal=False,
                 )
                 neutral = battery.map_action(0.0, floor, ceiling)
+                remaining_hours = max(self.episode_length - int(index), 0) * self.delta_t
+                soc_gap = float(battery.soc) - float(battery.initial_soc)
+                if remaining_hours > 0.0:
+                    if soc_gap >= 0.0:
+                        required_kw = soc_gap * battery.capacity_kwh * battery.eta_discharge / remaining_hours
+                        required_ratio = required_kw / max(battery.max_discharge_kw, 1e-12)
+                    else:
+                        required_kw = -(-soc_gap) * battery.capacity_kwh / max(battery.eta_charge * remaining_hours, 1e-12)
+                        required_ratio = required_kw / max(battery.max_charge_kw, 1e-12)
+                else:
+                    required_ratio = 0.0
                 result[mg].update({
+                    "ess_time_to_terminal": remaining_hours / max(float(self.episode_length), 1.0),
+                    "ess_required_avg_power": float(required_ratio),
+                    "ess_terminal_pressure": float(abs(required_ratio)),
                     "feasible_charge_min_ratio": neutral["charge_requested_kw"] / battery.max_charge_kw,
                     "feasible_charge_max_ratio": -neutral["feasible_min_kw"] / battery.max_charge_kw,
                     "feasible_discharge_min_ratio": neutral["discharge_requested_kw"] / battery.max_discharge_kw,
@@ -339,7 +354,8 @@ class MultiMicrogridEnv:
 
     def step(self, actions: Mapping[str, Sequence[float]]) -> tuple[dict[str, np.ndarray], dict[str, float], bool, dict[str, Any]]:
         if self.dr_enabled:
-            return self._step_dr(actions)
+            result = self._step_dr(actions)
+            return apply_terminal_constraint_penalty(self, *result)
         return self._step_legacy(actions)
 
     def _step_dr(self, actions: Mapping[str, Sequence[float]]) -> tuple[dict[str, np.ndarray], dict[str, float], bool, dict[str, Any]]:
@@ -419,7 +435,7 @@ class MultiMicrogridEnv:
                 episode_length=self.episode_length,
                 tolerance=tolerance,
                 exogenous=actual_current[mg],
-                enforce_terminal=True,
+                enforce_terminal=False,
             )
             requested_dr = self._tensor_value(projected[i]["dr_requested"])
             dr_delta = self._tensor_value(projected[i]["dr_projection_delta"])

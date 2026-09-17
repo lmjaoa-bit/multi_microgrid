@@ -34,7 +34,8 @@ class GlobalStateBuilder:
         if kind == "industrial_mill":
             return [
                 f"{mg}_silo_ratio", f"{mg}_silo_target_gap",
-                f"{mg}_time_to_terminal", f"{mg}_dr_min", f"{mg}_dr_max",
+                f"{mg}_time_to_terminal", f"{mg}_mill_required_avg_duty",
+                f"{mg}_mill_terminal_pressure", f"{mg}_dr_min", f"{mg}_dr_max",
             ]
         if kind == "commercial_hvac":
             return [
@@ -42,6 +43,8 @@ class GlobalStateBuilder:
                 f"{mg}_comfort_lower_margin", f"{mg}_comfort_upper_margin",
                 f"{mg}_occupied", f"{mg}_is_weekend",
                 f"{mg}_dr_min", f"{mg}_dr_max",
+                f"{mg}_terminal_air_gap", f"{mg}_terminal_mass_gap",
+                f"{mg}_hvac_time_to_terminal", f"{mg}_thermal_recovery_pressure",
             ]
         if kind == "ev_charging":
             return [
@@ -58,7 +61,9 @@ class GlobalStateBuilder:
             # joint action projector adds effective flexible load before ESS
             # local-first projection.
             names.extend([f"{mg}_load", f"{mg}_pv", f"{mg}_wind", f"{mg}_soc",
-                          f"{mg}_previous_p2p_net"])
+                          f"{mg}_previous_p2p_net", f"{mg}_terminal_soc_gap",
+                          f"{mg}_ess_time_to_terminal", f"{mg}_ess_required_avg_power",
+                          f"{mg}_ess_terminal_pressure"])
             if self.heterogeneous_tariffs:
                 names.extend([f"{mg}_grid_buy_price", f"{mg}_grid_sell_price"])
             if self.dr_enabled:
@@ -106,6 +111,8 @@ class GlobalStateBuilder:
                 float(state["silo_ratio"]),
                 float(state["silo_target_gap_t"]) / capacity,
                 float(state["time_to_terminal_h"]) / max(float(self.episode_length), 1.0),
+                float(state["mill_required_avg_duty"]),
+                float(state["mill_terminal_pressure"]),
                 float(state["mill_feasible_min"]),
                 float(state["mill_feasible_max"]),
             ]
@@ -123,6 +130,10 @@ class GlobalStateBuilder:
                 float(state["is_weekend"]),
                 float(state["hvac_feasible_min_kw"]) / scale,
                 float(state["hvac_feasible_max_kw"]) / scale,
+                float(state["terminal_air_gap_c"]) / 15.0,
+                float(state["terminal_mass_gap_c"]) / 15.0,
+                float(state["hvac_time_to_terminal_h"]) / max(float(self.episode_length), 1.0),
+                float(state["thermal_recovery_pressure"]),
             ]
         if kind == "ev_charging":
             capacity = max(float(dr["fleet_capacity_kwh"]), 1e-9)
@@ -150,9 +161,23 @@ class GlobalStateBuilder:
                   else cores[mg].exogenous(row))
             n = self.norm[mg]
             previous = history["by_microgrid"][mg]
+            battery = cores[mg].battery
+            remaining_hours = max(self.episode_length - int(t), 0) * float(battery.delta_t)
+            soc_gap = float(battery.soc) - float(battery.initial_soc)
+            if remaining_hours > 0.0:
+                if soc_gap >= 0.0:
+                    required_kw = soc_gap * float(battery.capacity_kwh) * float(battery.eta_discharge) / remaining_hours
+                    required_ratio = required_kw / max(float(battery.max_discharge_kw), 1e-12)
+                else:
+                    required_kw = -(-soc_gap) * float(battery.capacity_kwh) / max(float(battery.eta_charge) * remaining_hours, 1e-12)
+                    required_ratio = required_kw / max(float(battery.max_charge_kw), 1e-12)
+            else:
+                required_ratio = 0.0
             values.extend([ex["load_kw"] / n["load"], ex["pv_kw"] / n["pv"],
-                           ex["wind_kw"] / n["wind"], float(cores[mg].battery.soc),
-                           previous["p2p_net_kwh"] / n["trade"]])
+                           ex["wind_kw"] / n["wind"], float(battery.soc),
+                           previous["p2p_net_kwh"] / n["trade"], soc_gap,
+                           remaining_hours / max(float(self.episode_length), 1.0),
+                           required_ratio, abs(required_ratio)])
             if self.heterogeneous_tariffs:
                 buy_price, sell_price = prices_from_row(row, mg)
                 values.extend([buy_price / n["price"], sell_price / n["price"]])
@@ -203,7 +228,7 @@ class GlobalStateBuilder:
                 floor, ceiling = battery.reachable_soc_envelope(
                     t, self.episode_length,
                     tolerance=float(self.config["terminal_soc"]["tolerance"]),
-                    enforce_terminal=self.config["terminal_soc"]["mode"] != "none")
+                    enforce_terminal=False)
                 neutral = battery.map_action(0.0, floor, ceiling)
                 values.extend([
                     neutral["charge_requested_kw"] / battery.max_charge_kw,

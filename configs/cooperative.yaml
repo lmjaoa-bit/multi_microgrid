@@ -39,10 +39,8 @@ ess_sharing:
 
 action_design: single_dispatch_dr
 
-# Projection ablation switch. The canonical baseline remains the original
-# cross-time reachability projector unless an explicit ablation config is used.
-constraint_projection:
-  mode: strong
+# Only instantaneous physical safety is projected. Cross-time terminal
+# requirements are exposed as P0 state features and day-end learning penalties.
 
 # Daily episodes use cyclic ESS reachability. Hard feasibility is enforced by
 # the battery projector; this is not intended as a routine soft reward term.

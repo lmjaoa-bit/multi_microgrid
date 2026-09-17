@@ -116,12 +116,6 @@ def validate_config(config: Mapping[str, Any]) -> None:
     ):
         raise ValueError("data.allow_temperature_fallback must be boolean")
 
-    projection = config.get("constraint_projection", {})
-    if not isinstance(projection, Mapping):
-        raise ValueError("constraint_projection must be a mapping")
-    projection_mode = str(projection.get("mode", "strong"))
-    if projection_mode not in {"strong", "instantaneous"}:
-        raise ValueError("constraint_projection.mode must be strong or instantaneous")
 
     sharing = config.get("ess_sharing", {})
     if sharing.get("control_mode", "single_dispatch") != "single_dispatch":
@@ -142,7 +136,7 @@ def validate_config(config: Mapping[str, Any]) -> None:
         raise ValueError("terminal_soc.mode must be none, penalty or hard")
     _number(terminal.get("tolerance"), "terminal_soc.tolerance", 0.0)
     if action_design == "single_dispatch_dr" and terminal.get("mode") != "hard":
-        raise ValueError("single_dispatch_dr baseline requires hard cyclic terminal SOC")
+        raise ValueError("single_dispatch_dr requires terminal targets for end-of-day learning penalties")
 
     observation = config.get("observation", {})
     horizon = observation.get("future_horizon", 4)
