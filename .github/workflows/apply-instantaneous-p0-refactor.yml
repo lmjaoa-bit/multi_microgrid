@@ -1,0 +1,38 @@
+name: Apply instantaneous P0 refactor
+
+on:
+  push:
+    branches: [codex/instantaneous-p0-diagnostics]
+    paths:
+      - 'scripts/_apply_instantaneous_p0_refactor.py'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: codex/instantaneous-p0-diagnostics
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Apply refactor
+        run: python scripts/_apply_instantaneous_p0_refactor.py
+      - name: Sanity check syntax
+        run: python -m compileall -q algorithms components core envs experiments
+      - name: Commit generated refactor
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No generated changes"
+          else
+            git commit -m "refactor: make instantaneous constraints canonical with P0"
+            git push origin HEAD:codex/instantaneous-p0-diagnostics
+          fi
