@@ -502,14 +502,11 @@ class MultiMicrogridEnv:
             direct = {
                 name: self._tensor_value(projected[i][name])
                 for name in (
-                    "charge", "local", "mandatory_export", "remaining", "cap", "offer",
+                    "charge", "local", "remaining", "cap", "offer",
                     "requested_ratio", "requested_power", "local_priority_reserve",
                 )
             }
             direct["mask"] = bool(projected[i]["mask"].reshape(-1)[0].item())
-            direct["forced_dispatch"] = bool(
-                projected[i]["forced_dispatch"].reshape(-1)[0].item()
-            )
             direct_plans[mg] = direct
 
             plan = self.cores[mg].plan_local(
@@ -554,15 +551,13 @@ class MultiMicrogridEnv:
                 "dr_requested_normalized": requested_dr,
                 "battery_charge_kw": float(direct["charge"]),
                 "battery_discharge_kw": float(
-                    direct["local"] + direct["mandatory_export"] + direct["offer"]
+                    direct["local"] + direct["offer"]
                 ),
-                "mandatory_export_kw": float(direct["mandatory_export"]),
                 "direct_local_discharge_kw": float(direct["local"]),
                 "direct_local_priority_reserve_kw": float(direct["local_priority_reserve"]),
                 "direct_remaining_discharge_kw": float(direct["remaining"]),
                 "direct_trade_capacity_kw": float(direct["cap"]),
                 "dispatch_requested_power_kw": float(direct["requested_power"]),
-                "dispatch_forced": bool(direct["forced_dispatch"]),
             })
             plans[mg] = plan
 
@@ -626,7 +621,7 @@ class MultiMicrogridEnv:
             accepted = float(sharing.by_microgrid[mg]["ess_p2p_sell_kw"])
             local = float(plans[mg]["ess_to_local_requested_kw"])
             requested = float(plans[mg]["battery_discharge_kw"])
-            actual_discharge = local + accepted + float(plans[mg].get("mandatory_export_kw", 0.0))
+            actual_discharge = local + accepted
             plans[mg]["battery_discharge_requested_kw"] = requested
             plans[mg]["battery_discharge_kw"] = actual_discharge
             plans[mg]["ess_to_local_kw"] = local
@@ -829,8 +824,7 @@ class MultiMicrogridEnv:
             direct_plans[mg] = direct
             plans[mg].update({
                 "battery_charge_kw": direct["charge"],
-                "battery_discharge_kw": direct["local"] + direct["mandatory_export"] + direct["offer"],
-                "mandatory_export_kw": direct["mandatory_export"],
+                "battery_discharge_kw": direct["local"] + direct["offer"],
                 "direct_local_discharge_kw": direct["local"],
                 "direct_local_priority_reserve_kw": direct["local_priority_reserve"],
                 "direct_remaining_discharge_kw": direct["remaining"],
@@ -838,7 +832,6 @@ class MultiMicrogridEnv:
                 "effective_local_action": float(effective[0, i, 0]),
                 "effective_trade_action": float(effective[0, i, 1]),
                 "dispatch_requested_power_kw": direct["requested_power"],
-                "dispatch_forced": bool(direct["forced_dispatch"]),
             })
 
         renewable_offers: dict[str, float] = {}
@@ -914,7 +907,7 @@ class MultiMicrogridEnv:
             accepted = float(sharing.by_microgrid[mg]["ess_p2p_sell_kw"])
             local = float(plans[mg]["ess_to_local_requested_kw"])
             requested = float(plans[mg]["battery_discharge_kw"])
-            actual_discharge = local + accepted + float(plans[mg].get("mandatory_export_kw", 0.0))
+            actual_discharge = local + accepted
             plans[mg]["battery_discharge_requested_kw"] = requested
             plans[mg]["battery_discharge_kw"] = actual_discharge
             plans[mg]["ess_to_local_kw"] = local

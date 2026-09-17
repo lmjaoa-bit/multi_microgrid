@@ -234,7 +234,6 @@ class Matd3Dispatch(MATD3):
                         ),
                         "dr_projection_rate": float(plan["dr_projected"].detach().float().mean()),
                         "offer_eligible_rate": float(plan["mask"].detach().float().mean()),
-                        "forced_dispatch_rate": float(plan["forced_dispatch"].detach().float().mean()),
                         "local_override_kw_max": float(
                             plan["local_priority_reserve"].detach().abs().max()
                         ),

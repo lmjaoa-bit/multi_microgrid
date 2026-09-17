@@ -42,7 +42,7 @@ def test_empty_start_no_terminal_target_or_shaping():
     assert info["shaping_reward"] == 0
     assert all(value == 0 for value in info["terminal_soc_penalty"].values())
     for mg in env.agent_ids:
-        assert not info["plans"][mg]["dispatch_forced"]
+        assert "dispatch_forced" not in info["plans"][mg]
         assert info["devices"][mg]["charge_kw"] > 0
         assert env.cores[mg].battery.soc > .6
         assert observations[mg][env.obs_builder.schema(mg).index("terminal_soc_gap")] == 0

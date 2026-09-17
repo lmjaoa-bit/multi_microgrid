@@ -29,39 +29,26 @@ class SingleDispatchProjector:
             def col(name):
                 return state[:, self.index[f"{mg}_{name}"]]
             ch_max = col("feasible_charge_max").clamp_min(0) * cfg["max_charge_kw"]
-            ch_min = col("feasible_charge_min").clamp_min(0) * cfg["max_charge_kw"]
             dis_max = col("feasible_discharge_max").clamp_min(0) * cfg["max_discharge_kw"]
-            dis_min = col("feasible_discharge_min").clamp_min(0) * cfg["max_discharge_kw"]
             u = a[:, i, 0]
-            # Ordinary operation preserves zero. When zero is physically
-            # infeasible, use the full scalar interval for the forced mode.
             power = torch.where(u >= 0, u * dis_max, u * ch_max)
-            forced_charge, forced_discharge = ch_min > 0, dis_min > 0
-            charge_power = -ch_max + (u + 1) * .5 * (ch_max - ch_min).clamp_min(0)
-            discharge_power = dis_min + (u + 1) * .5 * (dis_max - dis_min).clamp_min(0)
-            power = torch.where(forced_charge, charge_power,
-                                torch.where(forced_discharge, discharge_power, power))
             charge, discharge = (-power).clamp_min(0), power.clamp_min(0)
             net = col("load") * norm["load"] - col("pv") * norm["pv"] - col("wind") * norm["wind"]
             deficit, surplus = net.clamp_min(0), (-net).clamp_min(0)
             local = torch.minimum(discharge, deficit)
-            # This mandatory component survives an absent buyer. Everything
-            # above it is an offer, and unmatched offered power stays stored.
-            mandatory = (dis_min - local).clamp_min(0)
-            offer_raw = (discharge - local - mandatory).clamp_min(0)
-            remaining = (dis_max - local - mandatory).clamp_min(0)
+            offer_raw = (discharge - local).clamp_min(0)
+            remaining = (dis_max - local).clamp_min(0)
             demand = (deficit - local).clamp_min(0) + (charge - surplus).clamp_min(0)
             if f"{mg}_grid_buy_price" in self.index:
                 buy, sell = col("grid_buy_price") * norm["price"], col("grid_sell_price") * norm["price"]
             else:
                 buy = state[:, self.index["grid_buy_price"]] * self.price_norm
                 sell = state[:, self.index["grid_sell_price"]] * self.price_norm
-            plans.append(dict(charge=charge, local=local, mandatory_export=mandatory,
+            plans.append(dict(charge=charge, local=local,
                               remaining=remaining, demand=demand, buy=buy, sell=sell,
                               deficit=deficit, surplus=surplus, dis_max=dis_max,
                               charging=power < 0, local_priority_reserve=torch.zeros_like(local),
-                              requested_power=power, uncapped_offer=offer_raw,
-                              forced_dispatch=forced_charge | forced_discharge))
+                              requested_power=power, uncapped_offer=offer_raw))
         # All local decisions are now final. There is no second pass that
         # increases local discharge after looking at peer demand.
         capped_demands = [p["demand"].clamp(max=self.pair_capacity) for p in plans]
@@ -83,6 +70,6 @@ class SingleDispatchProjector:
             ratio = p["uncapped_offer"] / p["remaining"].clamp_min(1e-12)
             p.update(cap=cap, mask=cap > 1e-9, offer=offer, requested_ratio=ratio, peer_cap=peer_cap)
             scale = max(self.batteries[mg]["max_charge_kw"], self.batteries[mg]["max_discharge_kw"])
-            effective.append(torch.stack([(p["local"] + p["mandatory_export"] - p["charge"]) / scale,
+            effective.append(torch.stack([(p["local"] - p["charge"]) / scale,
                                           offer / scale], dim=-1))
         return torch.stack(effective, dim=1), plans

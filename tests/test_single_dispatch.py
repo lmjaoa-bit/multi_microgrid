@@ -110,7 +110,7 @@ def test_capacity_price_masks_and_gradcheck():
     raw = torch.tensor([[[.7], [-.2], [.2]]], dtype=torch.float64, requires_grad=True)
     _, plans = alg.project_actions(state, raw)
     for p in plans:
-        assert float((p["local"] + p["mandatory_export"] + p["offer"]).detach()) <= 30 + 1e-8
+        assert float((p["local"] + p["offer"]).detach()) <= 30 + 1e-8
         assert not (float(p["charge"].detach()) > 0 and float(p["local"].detach()) > 0)
     assert torch.autograd.gradcheck(
         lambda a: alg.project_actions(state, a)[0], (raw,), eps=1e-6, atol=1e-4
@@ -122,33 +122,19 @@ def test_capacity_price_masks_and_gradcheck():
 
 
 @pytest.mark.parametrize("kind", ["charge", "discharge"])
-def test_forced_intervals_use_the_whole_raw_range(kind):
+def test_projector_ignores_legacy_terminal_minimum_fields(kind):
     env, alg = build()
     state, index = synthetic_state(env)
     b = env.cores["mg1"].battery
     state[:, index[f"mg1_feasible_{kind}_min"]] = 6 / getattr(b, f"max_{kind}_kw")
-    other = "charge" if kind == "discharge" else "discharge"
-    state[:, index[f"mg1_feasible_{other}_max"]] = 0
-    requested = []
-    for value in (-1., -.5, 0., .5, 1.):
-        raw = torch.tensor([[[value], [0.], [0.]]], dtype=torch.float64, requires_grad=True)
-        _, plans = alg.project_actions(state, raw)
-        p = plans[0]
-        requested.append(float(p["requested_power"].detach()))
-        assert bool(p["forced_dispatch"])
-        p["requested_power"].sum().backward()
-        # PyTorch versions differ on the derivative assigned exactly at a clamp
-        # boundary. Interior raw actions must retain a strictly positive gradient;
-        # endpoints are validated by the full-range mapping assertion below.
-        if abs(value) < 1.0:
-            assert raw.grad[0, 0, 0] > 0
-        else:
-            assert torch.isfinite(raw.grad[0, 0, 0])
-        actual = p["local"] + p["mandatory_export"] + p["offer"]
-        assert float(p["charge"].detach() if kind == "charge" else actual.detach()) >= 6 - 1e-7
-    assert requested == pytest.approx(
-        [-30, -24, -18, -12, -6] if kind == "charge" else [6, 12, 18, 24, 30]
-    )
+    raw = torch.zeros((1, 3, 1), dtype=torch.float64, requires_grad=True)
+
+    effective, plans = alg.project_actions(state, raw)
+
+    assert float(plans[0]["requested_power"].detach()) == pytest.approx(0.0)
+    assert "forced_dispatch" not in plans[0]
+    assert "mandatory_export" not in plans[0]
+    assert torch.count_nonzero(effective) == 0
 
 
 def test_crossgate_rollout_update_diagnostics_and_checkpoint(tmp_path):
@@ -216,7 +202,7 @@ def test_crossgate_rollout_update_diagnostics_and_checkpoint(tmp_path):
         incompatible.load(path)
 
 
-def test_forced_terminal_export_without_market():
+def test_terminal_penalty_does_not_force_export_without_market():
     env, _ = build(disabled=True, terminal_mode="penalty")
     env.reset(seed=1, deterministic=True)
     env.t = 23
@@ -229,10 +215,11 @@ def test_forced_terminal_export_without_market():
     assert done
     for mg in env.agent_ids:
         b = env.cores[mg].battery
-        assert info["plans"][mg]["mandatory_export_kw"] > 0
-        assert info["plans"][mg]["dispatch_forced"]
+        assert "mandatory_export_kw" not in info["plans"][mg]
+        assert "dispatch_forced" not in info["plans"][mg]
         assert info["plans"][mg]["ess_p2p_offer_kw"] == 0
-        assert b.soc <= b.initial_soc + .030001
+        assert b.soc >= 0.7
+        assert info["terminal_constraint_penalty"][mg]["ess_equivalent_kwh"] > 0
 
 
 def test_no_market_optional_energy_stays_in_battery():

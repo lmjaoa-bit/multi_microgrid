@@ -226,7 +226,6 @@ class Matd3Transformer(MATD3):
                         "dispatch_action_grad_rms": float(action_grad[:, 0].square().mean().sqrt()),
                         "dispatch_saturation_rate": float((active_action.detach().abs() >= .95).float().mean()),
                         "offer_eligible_rate": float(plan["mask"].detach().float().mean()),
-                        "forced_dispatch_rate": float(plan["forced_dispatch"].detach().float().mean()),
                         "local_override_kw_max": float(plan["local_priority_reserve"].detach().abs().max()),
                         "optimizer_step_norm": step_norm,
                         "relative_optimizer_step_norm": step_norm / max(param_norm, 1e-20),

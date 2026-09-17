@@ -1,16 +1,15 @@
 # Independent daily dispatch with empty usable storage
 
-The default `configs/cooperative.yaml` now defines a shared cross-algorithm study:
-each natural day resets every battery to its minimum SOC (0.10), and terminal SOC
-mode is `none`. Energy below minimum SOC remains inaccessible. End-of-day energy
-has no salvage value and is not carried into the next independent episode.
+The default `configs/cooperative.yaml` defines a shared cross-algorithm study in
+which each natural day resets every battery to its configured initial SOC. Physical
+dispatch enforces only current-step SOC, power, efficiency, and energy-balance
+limits. It never forces charging or discharging to make a future terminal target
+reachable.
 
-`none` disables terminal penalties, SOC shaping, and terminal reachability limits
-in environment observations, centralized state, physical dispatch, and MILP/MPC.
-SOC bounds, power limits, efficiency, degradation and energy balance remain active.
-The existing `terminal_soc_gap` observation slot is zero in this mode to preserve
-actor schemas; it does not represent a target. Legacy `penalty` and `hard` modes
-remain available for historical configurations; their shaping behavior is unchanged.
+Terminal mode is `penalty`: an end-of-day miss is priced after the final physical
+transition, while P0 observation fields expose the SOC gap, time remaining,
+required average power, and normalized terminal pressure. The target therefore
+remains learnable information rather than an environment-selected future action.
 
 The centralized critic state now includes each microgrid's next four hourly buy
 price forecasts, normalized exactly like the actor's `price_t+k` features and read
