@@ -65,6 +65,7 @@ def test_observation_builder_schema_and_values(horizon: int):
         assert len(schema) == len(obs_vec)
 
         # Current energy trend features
+        assert "renewable_power" in schema
         assert "energy_balance" in schema
         assert "deficit_ratio" in schema
         assert "surplus_ratio" in schema
@@ -109,6 +110,7 @@ def test_future_energy_features_disabled():
 
     for mg in env.agent_ids:
         schema = env.obs_builder.schema(mg)
+        assert "renewable_power" not in schema
         assert "energy_balance" not in schema
         assert "deficit_ratio" not in schema
         assert "surplus_ratio" not in schema

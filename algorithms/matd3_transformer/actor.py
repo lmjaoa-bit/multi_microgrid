@@ -25,10 +25,13 @@ class TransformerDispatchActor(nn.Module):
       3. Future Forecast Horizon Embedding:
          Explicit, learnable position embedding for horizons t+1 ... t+H (H=forecast_horizon).
          Preserves bidirectional self-attention (no causal masking) across forecast tokens.
-      4. True Local Physical Residual Branch:
+      4. Local Energy-Aware Representation Branch:
          Direct output of local_encoder(local_feats) bypasses the Transformer entirely and is
          concatenated with dispatch_rep (torch.cat([dispatch_rep, local_rep], dim=-1)) without .detach().
          Simultaneously, local_rep is fed as the LOCAL token to the Transformer.
+         The local token represents the microgrid's current energy state (load, generation,
+         renewable sum, energy balance, deficit/surplus ratios, and ESS status) rather than
+         merely raw physical state.
       5. No Artificial Attention Scaling:
          dispatch_rep = attended[..., 0, :] without manual scaling.
     """
@@ -70,9 +73,16 @@ class TransformerDispatchActor(nn.Module):
                 raise ValueError(f"Missing required hour feature: {name}")
             hour_indices.append(schema_map[name])
 
-        # Local features
+        # Local features (Energy-Aware Representation)
+        for name in ("load", "pv", "wind"):
+            if name not in schema_map:
+                raise ValueError(f"Missing required local feature: {name}")
+            local_indices.append(schema_map[name])
+        for name in ("renewable_power", "energy_balance", "deficit_ratio", "surplus_ratio"):
+            if name in schema_map:
+                local_indices.append(schema_map[name])
         for name in (
-            "load", "pv", "wind", "soc",
+            "soc",
             "available_charge_ratio", "available_discharge_ratio", "terminal_soc_gap",
             "feasible_charge_min_ratio", "feasible_charge_max_ratio",
             "feasible_discharge_min_ratio", "feasible_discharge_max_ratio",
@@ -80,9 +90,6 @@ class TransformerDispatchActor(nn.Module):
             if name not in schema_map:
                 raise ValueError(f"Missing required local feature: {name}")
             local_indices.append(schema_map[name])
-        for name in ("energy_balance", "deficit_ratio", "surplus_ratio"):
-            if name in schema_map:
-                local_indices.append(schema_map[name])
 
         # Peer information supports two schemas:
         #   legacy cross_microgrid: [net_load, soc]
@@ -177,7 +184,7 @@ class TransformerDispatchActor(nn.Module):
         self.hour_linear = nn.Linear(len(hour_indices), self.embed_dim)
         self.hour_norm = nn.LayerNorm(self.embed_dim)
 
-        # Local Physical Residual Encoder (Linear + LayerNorm without activation to preserve signed direction)
+        # Local Energy-Aware Representation Encoder (Linear + LayerNorm without activation to preserve signed direction)
         self.local_encoder = nn.Sequential(
             nn.Linear(len(local_indices), self.embed_dim),
             nn.LayerNorm(self.embed_dim),
