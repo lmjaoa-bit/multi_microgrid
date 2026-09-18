@@ -200,3 +200,25 @@ def test_dr_features_are_part_of_transformer_inputs():
     forecast_names = [mg2.schema[int(i)] for i in mg2._all_forecast_indices]
     assert "temperature_t+1" in forecast_names
     assert "forecast_valid_t+1" in forecast_names
+
+
+def test_peer_energy_summary_replaces_raw_peer_soc():
+    _, env, _, model = build_matd3_transformer()
+    assert env.ess_sharing_observation_mode == "peer_energy_summary"
+    for mg in env.agent_ids:
+        schema = env.obs_builder.schema(mg)
+        actor = model.actors[mg]
+        for peer in actor.peers:
+            assert f"{peer}_soc" not in schema
+            for suffix in (
+                "energy_balance", "deficit", "surplus",
+                "charge_flex", "discharge_flex", "previous_p2p_net",
+            ):
+                assert f"{peer}_{suffix}" in schema
+            for k in range(1, actor.forecast_horizon + 1):
+                assert f"{peer}_energy_balance_t+{k}" in schema
+                assert f"{peer}_deficit_t+{k}" in schema
+                assert f"{peer}_surplus_t+{k}" in schema
+        assert actor.peer_representation == "energy_summary"
+        assert actor.peer_feature_dim == 6
+        assert actor.peer_encoder[0].in_features == 6
