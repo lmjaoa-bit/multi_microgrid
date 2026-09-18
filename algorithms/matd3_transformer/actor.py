@@ -81,19 +81,35 @@ class TransformerDispatchActor(nn.Module):
                 raise ValueError(f"Missing required local feature: {name}")
             local_indices.append(schema_map[name])
 
-        # Disaggregated Peer current features: 2 features [net_load, soc] per peer
+        # Peer information supports two schemas:
+        #   legacy cross_microgrid: [net_load, soc]
+        #   peer_energy_summary: public energy need/flexibility summary without raw peer SOC/DR state.
         agent_id_to_idx = {mg: i for i, mg in enumerate(agent_ids)}
         peer_agent_indices = [agent_id_to_idx[peer] for peer in self.peers]
         self.register_buffer("_peer_agent_indices", torch.tensor(peer_agent_indices, dtype=torch.long), persistent=False)
 
+        summary_suffixes = (
+            "energy_balance", "deficit", "surplus",
+            "charge_flex", "discharge_flex", "previous_p2p_net",
+        )
+        self.peer_representation = (
+            "energy_summary"
+            if self.peers and f"{self.peers[0]}_energy_balance" in schema_map
+            else "legacy_cross_microgrid"
+        )
         peer_indices: list[list[int]] = []
         for peer in self.peers:
+            if self.peer_representation == "energy_summary":
+                feature_names = [f"{peer}_{suffix}" for suffix in summary_suffixes]
+            else:
+                feature_names = [f"{peer}_net_load", f"{peer}_soc"]
             feats = []
-            for feat in (f"{peer}_net_load", f"{peer}_soc"):
+            for feat in feature_names:
                 if feat not in schema_map:
                     raise ValueError(f"Missing required peer feature: {feat}")
                 feats.append(schema_map[feat])
             peer_indices.append(feats)
+        self.peer_feature_dim = len(peer_indices[0]) if peer_indices else 0
 
         # Market features
         for name in (
@@ -106,11 +122,21 @@ class TransformerDispatchActor(nn.Module):
                 raise ValueError(f"Missing required market feature: {name}")
             market_indices.append(schema_map[name])
 
-        # Forecast features for steps k = 1, ..., forecast_horizon
+        # Forecast features for steps k = 1, ..., forecast_horizon.  In the
+        # energy-summary mode, each peer contributes a signed balance plus
+        # explicit deficit/surplus channels; future peer SOC is intentionally
+        # not exposed because it depends on the peer's unknown future actions.
         for step_idx, k in enumerate(range(1, self.forecast_horizon + 1)):
             step_feats = [f"load_t+{k}", f"pv_t+{k}", f"wind_t+{k}", f"price_t+{k}"]
             for peer in self.peers:
-                step_feats.append(f"{peer}_net_load_t+{k}")
+                if self.peer_representation == "energy_summary":
+                    step_feats.extend([
+                        f"{peer}_energy_balance_t+{k}",
+                        f"{peer}_deficit_t+{k}",
+                        f"{peer}_surplus_t+{k}",
+                    ])
+                else:
+                    step_feats.append(f"{peer}_net_load_t+{k}")
             for feat in step_feats:
                 if feat not in schema_map:
                     raise ValueError(f"Missing required forecast feature: {feat}")
@@ -160,7 +186,7 @@ class TransformerDispatchActor(nn.Module):
 
         # Disaggregated Peer Token: shared encoder + spatial identity + LayerNorm balancing
         self.peer_encoder = nn.Sequential(
-            nn.Linear(2, self.embed_dim),
+            nn.Linear(self.peer_feature_dim, self.embed_dim),
             nn.LayerNorm(self.embed_dim),
             nn.GELU(),
         )
@@ -270,7 +296,9 @@ class TransformerDispatchActor(nn.Module):
         forecast_tokens = self.forecast_norm(f_tokens + horizon_emb.unsqueeze(0) + future_hour_emb)
 
         # 4. Disaggregated Peer Tokens with Spatial Identity Embeddings + LayerNorm balancing [B, num_peers, embed_dim]
-        peer_all = observation.index_select(-1, self._all_peer_indices).reshape(batch_size, len(self.peers), 2)
+        peer_all = observation.index_select(-1, self._all_peer_indices).reshape(
+            batch_size, len(self.peers), self.peer_feature_dim
+        )
         peer_encoded = self.peer_encoder(peer_all)
         peer_spatial_emb = self.peer_id_embedding(self._peer_agent_indices)
         peer_tokens = self.peer_norm(peer_encoded + peer_spatial_emb.unsqueeze(0))
