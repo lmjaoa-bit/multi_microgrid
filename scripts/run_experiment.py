@@ -15,6 +15,7 @@ from evaluation.service_reliability import augment_run_outputs
 from experiments.layout import DEFAULT_WORKING_OUTPUT_ROOT
 from experiments.result_lifecycle import capture_git_identity, update_run_metadata_git_identity
 from experiments.training_pipeline import build_parser, train
+from scripts.generate_results import generate_results
 
 
 def build_managed_parser():
@@ -24,7 +25,6 @@ def build_managed_parser():
 
 
 def _apply_algorithm_runtime_defaults(args):
-    """Use the selected algorithm YAML's runtime device unless CLI overrides it."""
     if args.device is not None:
         return args
     if not args.algorithm:
@@ -45,6 +45,7 @@ def main(argv: list[str] | None = None) -> int:
     summary = train(args)
     run_dir = Path(str(summary["run_directory"]))
     augment_run_outputs(run_dir)
+    generate_results(run_dir)
     update_run_metadata_git_identity(run_dir, identity)
     return 0
 
