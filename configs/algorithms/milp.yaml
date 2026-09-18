@@ -1,0 +1,12 @@
+algorithm:
+  name: milp
+  solver: scipy_highs
+  horizon: 24
+  objective: environment_cost
+
+training:
+  episodes: 1
+  test_episodes: 55
+
+logging:
+  dashboard: false
