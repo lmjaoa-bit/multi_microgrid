@@ -47,7 +47,7 @@ def test_retained_plugins_keep_isolated_configs_and_explicit_environment_generat
     assert matd3_env.action_design == "single_dispatch_dr"
     assert matd3_env.action_dim == 2
     assert matd3_env.ess_sharing_control_mode == "single_dispatch"
-    assert matd3_env.ess_sharing_observation_mode == "cross_microgrid"
+    assert matd3_env.ess_sharing_observation_mode == "peer_energy_summary"
 
     cross_spec = get_algorithm_spec("crossgate")
     cross_base = yaml.safe_load(LEGACY_ENV_CONFIG.read_text(encoding="utf-8"))
