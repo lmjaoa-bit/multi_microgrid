@@ -22,7 +22,7 @@ ALGORITHM_SPEC = AlgorithmSpec(
         "action_design": "single_dispatch_dr",
         "ess_sharing": {
             "control_mode": "single_dispatch",
-            "observation_mode": "cross_microgrid",
+            "observation_mode": "peer_energy_summary",
             "offer_projection": "peer_demand_cap",
         },
     },
