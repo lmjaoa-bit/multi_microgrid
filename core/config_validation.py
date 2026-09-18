@@ -119,8 +119,12 @@ def validate_config(config: Mapping[str, Any]) -> None:
     sharing = config.get("ess_sharing", {})
     if sharing.get("control_mode", "single_dispatch") != "single_dispatch":
         raise ValueError("Only single_dispatch ESS control is supported")
-    if sharing.get("observation_mode", "cross_microgrid") not in {"local", "cross_microgrid"}:
-        raise ValueError("ess_sharing.observation_mode must be local or cross_microgrid")
+    if sharing.get("observation_mode", "cross_microgrid") not in {
+        "local", "cross_microgrid", "peer_energy_summary"
+    }:
+        raise ValueError(
+            "ess_sharing.observation_mode must be local, cross_microgrid, or peer_energy_summary"
+        )
     if not isinstance(sharing.get("ess_p2p_enabled", True), bool):
         raise ValueError("ess_sharing.ess_p2p_enabled must be boolean")
     if sharing.get("offer_projection", "peer_demand_cap") != "peer_demand_cap":
