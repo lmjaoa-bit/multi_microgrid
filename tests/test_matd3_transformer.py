@@ -63,11 +63,11 @@ def test_horizon_embedding_and_forecast_tokens():
     obs, _ = env.reset(seed=42, deterministic=True)
     for mg in env.agent_ids:
         actor = model.actors[mg]
-        assert actor.horizon_embedding.weight.shape == (4, actor.embed_dim)
-        assert not torch.equal(actor.horizon_embedding.weight[0], actor.horizon_embedding.weight[3])
+        assert actor.horizon_embedding.weight.shape == (actor.forecast_horizon, actor.embed_dim)
+        assert not torch.equal(actor.horizon_embedding.weight[0], actor.horizon_embedding.weight[-1])
         batch_obs = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0).repeat(8, 1)
         components = actor.forward_components(batch_obs)
-        assert components["forecast_tokens"].shape == (8, 4, actor.embed_dim)
+        assert components["forecast_tokens"].shape == (8, actor.forecast_horizon, actor.embed_dim)
 
 
 def test_real_local_residual_and_interaction():
@@ -169,7 +169,7 @@ def test_disaggregated_peer_tokens_and_layers():
         batch_obs = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0).repeat(8, 1)
         components = actor.forward_components(batch_obs)
         assert components["peer_tokens"].shape == (8, len(actor.peers), d_model)
-        assert components["tokens"].shape == (8, 10, d_model)
+        assert components["tokens"].shape == (8, actor.num_tokens, d_model)
         p0 = actor.peer_id_embedding.weight[actor._peer_agent_indices[0]]
         p1 = actor.peer_id_embedding.weight[actor._peer_agent_indices[1]]
         assert not torch.equal(p0, p1)

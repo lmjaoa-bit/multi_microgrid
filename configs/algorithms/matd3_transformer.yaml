@@ -24,7 +24,7 @@ algorithm:
     num_heads: 4
     num_layers: 2
     hidden_dims: [64, 32]
-    forecast_horizon: 4
+    forecast_horizon: 8
 runtime:
   device: cuda
   cpu_threads: 4

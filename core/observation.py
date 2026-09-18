@@ -19,6 +19,11 @@ class ObservationBuilder:
         self.agent_ids = [str(m["id"]) for m in config["microgrids"]]
         self.cfg_by_id = {str(m["id"]): m for m in config["microgrids"]}
         self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
+        self.future_energy_features_enabled = bool(
+            config.get("observation", {})
+            .get("future_energy_features", {})
+            .get("enabled", False)
+        )
         self.include_forecast_validity = bool(
             config.get("observation", {}).get("mask_forecast_beyond_episode", False)
         )
@@ -36,6 +41,24 @@ class ObservationBuilder:
             for mg in config["microgrids"]
         }
         self.episode_length = int(config.get("time", {}).get("episode_length", 24))
+
+    def _build_future_energy_features(self, mg_id: str, t: int, k: int) -> dict[str, float]:
+        forecast = self.forecasts.combined(mg_id, t, k)
+        scale = max(float(self.norm[mg_id]["power"]), 1e-9)
+        load_kw = max(float(forecast["load_kw"]), 0.0)
+        pv_kw = max(float(forecast["pv_kw"]), 0.0)
+        wind_kw = max(float(forecast["wind_kw"]), 0.0)
+        renewable_power_kw = pv_kw + wind_kw
+        energy_balance_kw = renewable_power_kw - load_kw
+        load_den = max(load_kw, 1e-3)
+        deficit_ratio = max(-energy_balance_kw, 0.0) / load_den
+        surplus_ratio = max(energy_balance_kw, 0.0) / load_den
+        return {
+            "renewable_power": renewable_power_kw / scale,
+            "energy_balance": energy_balance_kw / scale,
+            "deficit_ratio": float(deficit_ratio),
+            "surplus_ratio": float(surplus_ratio),
+        }
 
     def _dr_schema(self, mg_id: str) -> list[str]:
         kind = str(self.cfg_by_id[mg_id].get("dr", {}).get("type", ""))
@@ -66,8 +89,17 @@ class ObservationBuilder:
         # flexible load is never forecast because it is a policy decision.
         names = ["hour_sin", "hour_cos", "load", "pv", "wind", "grid_buy_price",
                  "grid_sell_price", "soc"]
+        if self.future_energy_features_enabled:
+            names.extend(["energy_balance", "deficit_ratio", "surplus_ratio"])
         for k in range(1, self.future_h + 1):
             names.extend([f"load_t+{k}", f"pv_t+{k}", f"wind_t+{k}", f"price_t+{k}"])
+            if self.future_energy_features_enabled:
+                names.extend([
+                    f"renewable_power_t+{k}",
+                    f"energy_balance_t+{k}",
+                    f"deficit_ratio_t+{k}",
+                    f"surplus_ratio_t+{k}",
+                ])
             if self.dr_enabled and str(self.cfg_by_id[mg_id].get("dr", {}).get("type")) == "commercial_hvac":
                 names.append(f"temperature_t+{k}")
             if self.include_forecast_validity:
@@ -197,6 +229,19 @@ class ObservationBuilder:
             sell_price / n["price"],
             float(battery_soc),
         ]
+        if self.future_energy_features_enabled:
+            scale = max(float(n["power"]), 1e-9)
+            load_kw = max(float(ex["load_kw"]), 0.0)
+            pv_kw = max(float(ex["pv_kw"]), 0.0)
+            wind_kw = max(float(ex["wind_kw"]), 0.0)
+            res_kw = pv_kw + wind_kw
+            bal_kw = res_kw - load_kw
+            load_den = max(load_kw, 1e-3)
+            values.extend([
+                bal_kw / scale,
+                float(max(-bal_kw, 0.0) / load_den),
+                float(max(bal_kw, 0.0) / load_den),
+            ])
         for k in range(1, self.future_h + 1):
             f = self.forecasts.combined(mg_id, t, k)
             values.extend([
@@ -205,6 +250,14 @@ class ObservationBuilder:
                 f["wind_kw"] / n["wind"],
                 f["grid_price_per_kwh"] / n["price"],
             ])
+            if self.future_energy_features_enabled:
+                trend = self._build_future_energy_features(mg_id, t, k)
+                values.extend([
+                    trend["renewable_power"],
+                    trend["energy_balance"],
+                    trend["deficit_ratio"],
+                    trend["surplus_ratio"],
+                ])
             if self.dr_enabled and str(self.cfg_by_id[mg_id].get("dr", {}).get("type")) == "commercial_hvac":
                 values.append(float(f["temperature_c"]) / 40.0)
             if self.include_forecast_validity:

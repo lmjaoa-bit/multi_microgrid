@@ -145,6 +145,11 @@ def validate_config(config: Mapping[str, Any]) -> None:
     horizon = observation.get("future_horizon", 4)
     if isinstance(horizon, bool) or not isinstance(horizon, int) or horizon < 1:
         raise ValueError("observation.future_horizon must be a positive integer")
+    energy_features = observation.get("future_energy_features", {})
+    if energy_features and not isinstance(energy_features, Mapping):
+        raise ValueError("observation.future_energy_features must be a mapping")
+    if "enabled" in energy_features and not isinstance(energy_features["enabled"], bool):
+        raise ValueError("observation.future_energy_features.enabled must be boolean")
     for key in ("noisy_forecast", "evaluation_forecast_noise", "mask_forecast_beyond_episode"):
         if key in observation and not isinstance(observation[key], bool):
             raise ValueError(f"observation.{key} must be boolean")

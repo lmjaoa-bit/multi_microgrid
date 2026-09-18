@@ -47,7 +47,10 @@ terminal_soc:
   penalty_per_kwh: 1.5
 
 observation:
-  future_horizon: 24
+  # Future prediction horizon
+  future_horizon: 8
+  future_energy_features:
+    enabled: true
   noisy_forecast: true
   evaluation_forecast_noise: true
   mask_forecast_beyond_episode: true

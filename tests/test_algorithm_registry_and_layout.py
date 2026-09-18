@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
 
 import yaml
@@ -60,7 +61,10 @@ def test_retained_plugins_keep_isolated_configs_and_explicit_environment_generat
     # The DR environment deliberately adds private device observations/state;
     # equal observation dimensions across generations are no longer required.
     assert matd3_env.observation_dims != cross_env.observation_dims
-    assert matd3_env.global_state_dim > cross_env.global_state_dim
+    cross_aligned = deepcopy(cross_base)
+    cross_aligned["observation"]["future_horizon"] = matd3_env.obs_builder.future_h
+    aligned_cross_env = MultiMicrogridEnv(cross_spec.build_environment_config(cross_aligned))
+    assert matd3_env.global_state_dim > aligned_cross_env.global_state_dim
 
 
 def test_experiment_layout_isolates_algorithms_and_runs(tmp_path: Path) -> None:

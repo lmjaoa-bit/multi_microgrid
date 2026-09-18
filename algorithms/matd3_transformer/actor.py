@@ -80,6 +80,9 @@ class TransformerDispatchActor(nn.Module):
             if name not in schema_map:
                 raise ValueError(f"Missing required local feature: {name}")
             local_indices.append(schema_map[name])
+        for name in ("energy_balance", "deficit_ratio", "surplus_ratio"):
+            if name in schema_map:
+                local_indices.append(schema_map[name])
 
         # Peer information supports two schemas:
         #   legacy cross_microgrid: [net_load, soc]
@@ -128,6 +131,13 @@ class TransformerDispatchActor(nn.Module):
         # not exposed because it depends on the peer's unknown future actions.
         for step_idx, k in enumerate(range(1, self.forecast_horizon + 1)):
             step_feats = [f"load_t+{k}", f"pv_t+{k}", f"wind_t+{k}", f"price_t+{k}"]
+            if f"renewable_power_t+{k}" in schema_map:
+                step_feats.extend([
+                    f"renewable_power_t+{k}",
+                    f"energy_balance_t+{k}",
+                    f"deficit_ratio_t+{k}",
+                    f"surplus_ratio_t+{k}",
+                ])
             for peer in self.peers:
                 if self.peer_representation == "energy_summary":
                     step_feats.extend([

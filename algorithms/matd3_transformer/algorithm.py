@@ -62,7 +62,8 @@ class Matd3Transformer(MATD3):
         num_heads = int(net.get("num_heads", 4))
         num_layers = int(net.get("num_layers", 1))
         hidden_dims = tuple(net.get("hidden_dims", (64, 32)))
-        forecast_horizon = int(net.get("forecast_horizon", getattr(getattr(env, "obs_builder", None), "future_h", 4)))
+        env_h = getattr(getattr(env, "obs_builder", None), "future_h", None)
+        forecast_horizon = int(env_h) if env_h is not None else int(net.get("forecast_horizon", 8))
 
         self.actors = nn.ModuleDict({
             mg: TransformerDispatchActor(

@@ -61,4 +61,4 @@ def test_four_algorithm_replay_update_and_checkpoint_smoke(
 
     network = settings["algorithm"].get("network", {})
     if "transformer" in spec.slug:
-        assert network["forecast_horizon"] == 4
+        assert network["forecast_horizon"] in (4, 8)
