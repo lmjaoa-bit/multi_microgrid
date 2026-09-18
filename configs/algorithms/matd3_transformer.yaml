@@ -26,7 +26,7 @@ algorithm:
     hidden_dims: [64, 32]
     forecast_horizon: 4
 runtime:
-  device: cpu
+  device: cuda
   cpu_threads: 4
   interop_threads: 2
 training:
