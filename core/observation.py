@@ -89,6 +89,29 @@ class ObservationBuilder:
                     for peer in self.agent_ids:
                         if peer != mg_id:
                             names.append(f"{peer}_net_load_t+{k}")
+            elif self.observation_mode == "peer_energy_summary":
+                # Public coordination summary: expose what a peer can contribute/needs,
+                # not its raw private physical state (for example peer SOC or DR state).
+                for peer in self.agent_ids:
+                    if peer == mg_id:
+                        continue
+                    names.extend([
+                        f"{peer}_energy_balance",
+                        f"{peer}_deficit",
+                        f"{peer}_surplus",
+                        f"{peer}_charge_flex",
+                        f"{peer}_discharge_flex",
+                        f"{peer}_previous_p2p_net",
+                    ])
+                for k in range(1, self.future_h + 1):
+                    for peer in self.agent_ids:
+                        if peer == mg_id:
+                            continue
+                        names.extend([
+                            f"{peer}_energy_balance_t+{k}",
+                            f"{peer}_deficit_t+{k}",
+                            f"{peer}_surplus_t+{k}",
+                        ])
         if self.control_mode == "single_dispatch":
             names.extend(f"feasible_{name}_ratio" for name in (
                 "charge_min", "charge_max", "discharge_min", "discharge_max"))
@@ -217,7 +240,7 @@ class ObservationBuilder:
                         continue
                     peer_ex = self.profiles.exogenous(peer, row)
                     values.extend([
-                        # Peer summary deliberately excludes private DR states.
+                        # Legacy cross-microgrid mode retained for reproducibility.
                         (peer_ex["load_kw"] - peer_ex["renewable_kw"]) / self.norm[peer]["power"],
                         float(peer_soc.get(peer, self.initial_soc[peer])),
                     ])
@@ -228,6 +251,37 @@ class ObservationBuilder:
                         forecast = self.forecasts.combined(peer, t, k)
                         peer_net = forecast["load_kw"] - forecast["pv_kw"] - forecast["wind_kw"]
                         values.append(peer_net / self.norm[peer]["power"])
+            elif self.observation_mode == "peer_energy_summary":
+                peer_flex = battery_flex_by_microgrid or {}
+                for peer in self.agent_ids:
+                    if peer == mg_id:
+                        continue
+                    peer_ex = self.profiles.exogenous(peer, row)
+                    scale = max(float(self.norm[peer]["power"]), 1e-9)
+                    balance_kw = float(peer_ex["renewable_kw"] - peer_ex["load_kw"])
+                    peer_previous = history["by_microgrid"][peer]
+                    flex_peer = peer_flex.get(peer, {})
+                    values.extend([
+                        balance_kw / scale,
+                        max(-balance_kw, 0.0) / scale,
+                        max(balance_kw, 0.0) / scale,
+                        float(flex_peer.get("available_charge_ratio", 0.0)),
+                        float(flex_peer.get("available_discharge_ratio", 0.0)),
+                        float(peer_previous["p2p_net_kwh"]) / self.norm[peer]["trade"],
+                    ])
+                for k in range(1, self.future_h + 1):
+                    for peer in self.agent_ids:
+                        if peer == mg_id:
+                            continue
+                        forecast = self.forecasts.combined(peer, t, k)
+                        scale = max(float(self.norm[peer]["power"]), 1e-9)
+                        renewable_kw = float(forecast["pv_kw"] + forecast["wind_kw"])
+                        balance_kw = renewable_kw - float(forecast["load_kw"])
+                        values.extend([
+                            balance_kw / scale,
+                            max(-balance_kw, 0.0) / scale,
+                            max(balance_kw, 0.0) / scale,
+                        ])
         if self.control_mode == "single_dispatch":
             flex = (battery_flex_by_microgrid or {}).get(mg_id, {})
             values.extend(float(flex[f"feasible_{name}_ratio"]) for name in (
