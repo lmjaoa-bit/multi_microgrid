@@ -1,9 +1,10 @@
-# Spatio-Temporal Transformer Dispatch Actor (V2)
+# Spatio-Temporal Transformer Dispatch Actor (P0)
 # Features:
-#   - Absolute Diurnal Forecast Clock-Hour Embeddings
-#   - Learnable [DISPATCH] Decision Token with Attention Pooling
-#   - Local Battery State Skip Connection
-#   - Heterogeneous Attention Scaling (MG1 PV protection)
+#   - Microgrid x time future tokenization
+#   - Separate current local-energy / ESS / DR / peer / market tokens
+#   - Learnable [DISPATCH] decision token with temporal + spatial embeddings
+#   - Separate ESS and DR residual decision heads
+#   - Centralized MLP TwinCritic intentionally unchanged in P0
 algorithm:
   name: matd3_transformer
   hidden_dims: [128, 128]
