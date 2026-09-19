@@ -106,6 +106,7 @@ def diagnose(
     if not dates:
         raise ValueError(f"No valid days in {split} split")
     rows, paired = [], []
+    skipped_physically_identical = 0
     for date_index, day in enumerate(dates):
         for trial in range(seeds_per_day):
             seed = 900_000 + date_index * 100 + trial
@@ -124,6 +125,26 @@ def diagnose(
                 )
                 if abs(requested[1] - requested[0]) < 1e-7:
                     continue
+                # Different raw commands can project to the same physical action
+                # at ESS/DR limits. They are not meaningful candidate comparisons.
+                with torch.no_grad():
+                    s = torch.as_tensor(baseline_state, dtype=torch.float32, device=algorithm.device)[None]
+                    effective = []
+                    for value in requested:
+                        candidate = {
+                            mg: action.copy() for mg, action in base_action.items()
+                        }
+                        candidate[focal][channel] = np.float32(value)
+                        raw = torch.as_tensor(
+                            np.stack([candidate[mg] for mg in algorithm.agent_ids]),
+                            dtype=torch.float32, device=algorithm.device,
+                        )[None]
+                        projected, _ = algorithm.project_actions(s, raw)
+                        effective.append(projected)
+                    distance = float((effective[1] - effective[0]).abs().max())
+                if distance < 1e-7:
+                    skipped_physically_identical += 1
+                    continue
                 pair = []
                 for candidate_index, value in enumerate(requested):
                     predictions, realized, _, _ = _rollout(
@@ -136,7 +157,8 @@ def diagnose(
                             "day": day, "scenario_seed": seed, "anchor_step": step,
                             "focal": focal, "channel": "ess" if channel == 0 else "dr",
                             "candidate": candidate_index,
-                            "raw_action": value, "critic_mg": critic_mg,
+                            "raw_action": value, "effective_action_distance": distance,
+                            "critic_mg": critic_mg,
                             "q1": q1, "q2": q2, "qmin": qmin,
                             "realized_discounted_team_reward": realized,
                             "qmin_absolute_error": abs(qmin - realized),
@@ -186,6 +208,14 @@ def diagnose(
         "q_return_rank_agreement": mean([x["same_preference"] for x in paired]),
         "q_samples": len(rows),
         "paired_cases": len(paired),
+        "skipped_physically_identical_candidate_pairs": skipped_physically_identical,
+        "by_critic": {
+            mg: {
+                "q_return_mae": mean([x["qmin_absolute_error"] for x in rows if x["critic_mg"] == mg]),
+                "q_action_gap_mae": mean([x["action_gap_absolute_error"] for x in paired if x["critic_mg"] == mg]),
+                "q_return_rank_agreement": mean([x["same_preference"] for x in paired if x["critic_mg"] == mg]),
+            } for mg in algorithm.agent_ids
+        },
     }
     with (run_dir / "critic_q_accuracy_cases.csv").open("w", newline="", encoding="utf-8") as fp:
         writer = csv.DictWriter(fp, fieldnames=list(rows[0]))
