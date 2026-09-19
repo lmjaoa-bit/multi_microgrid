@@ -253,6 +253,132 @@ def test_spatiotemporal_microgrid_time_tokens():
             assert not torch.equal(first_horizon[:, 0], first_horizon[:, 1])
 
 
+
+def test_invalid_future_spatiotemporal_tokens_are_attention_masked():
+    _, env, _, model = build_matd3_transformer()
+    observations, _ = env.reset(seed=42, deterministic=True)
+    for mg in env.agent_ids:
+        actor = model.actors[mg].eval()
+        horizon = actor.forecast_horizon
+        schema = list(actor.schema)
+        assert horizon >= 4
+        sample = torch.tensor(observations[mg], dtype=torch.float32)
+
+        # Simulate an episode boundary in a batch: the first sample has only
+        # three valid future hours, while the second has two.
+        batch = sample.unsqueeze(0).repeat(2, 1)
+        for k in range(4, horizon + 1):
+            batch[:, schema.index(f"forecast_valid_t+{k}")] = 0.0
+        batch[1, schema.index("forecast_valid_t+3")] = 0.0
+
+        components = actor.forward_components(batch, collect_diagnostics=False)
+        mask = components["attention_padding_mask"]
+        prefix = 5 + len(actor.peers)
+        entities = 1 + len(actor.peers)
+        assert mask.shape == (2, actor.num_tokens)
+        assert mask.dtype == torch.bool
+        assert not mask[:, :prefix].any()
+        assert not mask[:, -1].any()  # market token
+        assert not mask[0, prefix:prefix + 3 * entities].any()
+        assert mask[0, prefix + 3 * entities:-1].all()
+        assert not mask[1, prefix:prefix + 2 * entities].any()
+        assert mask[1, prefix + 2 * entities:-1].all()
+
+        # Invalid local AND peer forecasts may contain arbitrary data without
+        # changing the ESS or DR action; their spatial/time embeddings must
+        # also be excluded from attention.
+        original = batch[0].clone()
+        changed = original.clone()
+        for k in range(4, horizon + 1):
+            suffix = f"_t+{k}"
+            for i, name in enumerate(schema):
+                if name.endswith(suffix) and not name.startswith("forecast_valid_"):
+                    changed[i] += 25.0 + k
+        with torch.no_grad():
+            expected = actor(original, collect_diagnostics=False)
+            actual = actor(changed, collect_diagnostics=False)
+        torch.testing.assert_close(actual, expected, atol=1e-6, rtol=1e-6)
+
+
+def test_invalid_future_inputs_have_zero_action_gradients():
+    _, env, _, model = build_matd3_transformer()
+    observations, _ = env.reset(seed=42, deterministic=True)
+    for mg in env.agent_ids:
+        actor = model.actors[mg].eval()
+        schema = list(actor.schema)
+        obs = torch.tensor(observations[mg], dtype=torch.float32)
+        invalid_step = actor.forecast_horizon
+        obs[schema.index(f"forecast_valid_t+{invalid_step}")] = 0.0
+        obs.requires_grad_(True)
+        actor(obs, collect_diagnostics=False).sum().backward()
+        assert obs.grad is not None
+        for index in actor._all_forecast_indices.tolist():
+            if schema[index].endswith(f"_t+{invalid_step}"):
+                assert obs.grad[index].item() == 0.0
+        for index in actor._all_peer_future_indices.tolist():
+            if schema[index].endswith(f"_t+{invalid_step}"):
+                assert obs.grad[index].item() == 0.0
+
+
+def test_ess_dr_behavior_diagnostics_aggregate_hourly_and_terminal_penalty():
+    from evaluation.evaluate_matd3 import build_dispatch_behavior_diagnostics
+
+    def hourly_row(day: str, hour: int, ess: float, dr: float) -> dict:
+        return {
+            "date": day,
+            "hour": hour,
+            "mg1_raw_ess_action": ess,
+            "mg1_raw_dr_action": dr,
+            "mg1_battery_charge_kw": 2.0,
+            "mg1_battery_discharge_kw": 3.0,
+            "mg1_ess_to_local_load_kw": 1.0,
+            "mg1_ess_p2p_offer_kw": 3.0,
+            "mg1_ess_p2p_sell_kw": 2.0,
+            "mg1_ess_p2p_unmatched_kw": 1.0,
+            "mg1_flexible_load_kw": 4.0,
+            "mg1_soc": 0.4,
+            "mg1_ess_projected": 0,
+            "mg1_dr_projected": 1,
+        }
+
+    hourly = {
+        "day1": [hourly_row("day1", 0, 0.96, 0.5)],
+        "day2": [hourly_row("day2", 0, 0.2, -0.96)],
+    }
+    daily = [
+        {
+            "soc_statistics_by_microgrid": {
+                "mg1": {"terminal_soc": 0.4, "terminal_soc_target": 0.5}
+            },
+            "economic_breakdown_by_microgrid": {
+                "mg1": {"terminal_soc_penalty": 7.0}
+            },
+        },
+        {
+            "soc_statistics_by_microgrid": {
+                "mg1": {"terminal_soc": 0.3, "terminal_soc_target": 0.5}
+            },
+            "economic_breakdown_by_microgrid": {
+                "mg1": {"terminal_soc_penalty": 9.0}
+            },
+        },
+    ]
+    diagnostics = build_dispatch_behavior_diagnostics(
+        hourly, daily, ["mg1"], delta_t_hours=0.5
+    )
+    mg = diagnostics["by_microgrid"]["mg1"]
+    assert diagnostics["days_count"] == 2
+    assert diagnostics["steps_count"] == 2
+    assert np.isclose(mg["ess_raw_action_saturation_rate"], 0.5)
+    assert np.isclose(mg["dr_raw_action_saturation_rate"], 0.5)
+    assert np.isclose(mg["ess_charge_energy_kwh_per_day"], 1.0)
+    assert np.isclose(mg["ess_p2p_offer_energy_kwh_per_day"], 1.5)
+    assert np.isclose(mg["ess_p2p_accepted_energy_kwh_per_day"], 1.0)
+    assert np.isclose(mg["terminal_soc_mean"], 0.35)
+    assert np.isclose(mg["terminal_soc_penalty_mean_per_day"], 8.0)
+    assert len(mg["hourly_profile"]) == 1
+    assert np.isclose(mg["hourly_profile"][0]["dr_projection_rate"], 1.0)
+
 def test_peer_energy_summary_replaces_raw_peer_soc():
     _, env, _, model = build_matd3_transformer()
     assert env.ess_sharing_observation_mode == "peer_energy_summary"
