@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import math
 from pathlib import Path
 
 import numpy as np
@@ -67,11 +66,15 @@ class Matd3TransformerCritic(Matd3Dispatch):
 
     @staticmethod
     def _module_grad_norm(module: nn.Module) -> float:
-        squared = sum(
-            float(parameter.grad.detach().square().sum())
+        terms = [
+            parameter.grad.detach().square().sum()
             for parameter in module.parameters() if parameter.grad is not None
-        )
-        return math.sqrt(squared)
+        ]
+        if not terms:
+            return 0.0
+        # A single GPU-to-CPU synchronization per module, only on diagnostic
+        # boundaries, rather than one synchronization for each parameter.
+        return float(torch.stack(terms).sum().sqrt().item())
 
     def update(self, batch_size):
         metrics = fast_plain_matd3_update(self, batch_size)
