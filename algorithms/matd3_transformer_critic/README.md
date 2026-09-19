@@ -60,6 +60,9 @@ Outputs within the same run directory:
 - critic_q_accuracy_cases.csv: scenario, action, Q1, Q2, min-Q and realized
   discounted team reward.
 - critic_q_action_pairs.csv: predicted and realized candidate action gaps.
+- critic_future_action_probe.csv: separate peer-forecast input perturbation test
+  of the **predicted action gap**; this is model sensitivity, NOT realized
+  return accuracy or a physically consistent forecast counterfactual.
 
 Interpretation: realized return is a noisy sample of the Q expectation.
 Repeated matched seeds reduce variance; first-action changes propagate
