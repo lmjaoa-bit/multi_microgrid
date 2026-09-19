@@ -279,6 +279,22 @@ class TransformerDispatchActor(nn.Module):
             ),
             persistent=False,
         )
+        # Forecast validity is shared by the local microgrid and all peers:
+        # when an episode ends, the entire microgrid x time slice is invalid.
+        valid_names = [
+            f"forecast_valid_t+{k}" for k in range(1, self.forecast_horizon + 1)
+        ]
+        valid_present = [name in schema_map for name in valid_names]
+        if any(valid_present) and not all(valid_present):
+            raise ValueError("Forecast validity must be provided for every horizon step")
+        self.register_buffer(
+            "_forecast_valid_indices",
+            torch.tensor(
+                [schema_map[name] for name in valid_names] if all(valid_present) else [],
+                dtype=torch.long,
+            ),
+            persistent=False,
+        )
         self.register_buffer(
             "_step_offsets",
             torch.arange(1, self.forecast_horizon + 1, dtype=torch.long),
@@ -554,7 +570,41 @@ class TransformerDispatchActor(nn.Module):
             ],
             dim=1,
         )
-        attended = self.transformer(tokens)
+        # PyTorch's padding mask suppresses invalid *keys/values*. Merely
+        # filling forecast fields with zeros does NOT remove their learned
+        # spatial/temporal embeddings from the attention mechanism.
+        if self._forecast_valid_indices.numel():
+            valid_by_step = observation.index_select(
+                -1, self._forecast_valid_indices
+            ) >= 0.5
+            future_padding = (~valid_by_step).repeat_interleave(
+                self.num_spatial_entities, dim=1
+            )
+            current_padding = torch.zeros(
+                batch_size, 5 + len(self.peers),
+                dtype=torch.bool, device=observation.device,
+            )
+            market_padding = torch.zeros(
+                batch_size, 1, dtype=torch.bool, device=observation.device,
+            )
+            attention_padding_mask = torch.cat(
+                [current_padding, future_padding, market_padding], dim=1
+            )
+            assert attention_padding_mask.shape == tokens.shape[:2]
+            attended = self.transformer(
+                tokens, src_key_padding_mask=attention_padding_mask
+            )
+        else:
+            # Legacy observations without forecast_valid_t+k retain their
+            # historical unmasked behavior.
+            valid_by_step = torch.ones(
+                batch_size, self.forecast_horizon,
+                dtype=torch.bool, device=observation.device,
+            )
+            attention_padding_mask = torch.zeros(
+                tokens.shape[:2], dtype=torch.bool, device=observation.device
+            )
+            attended = self.transformer(tokens)
         dispatch_rep = attended[:, 0, :]
 
         ess_interact = self.ess_interact_norm(dispatch_rep * ess_rep)
@@ -618,6 +668,8 @@ class TransformerDispatchActor(nn.Module):
             "peer_tokens": peer_tokens,
             "peer_future_tokens": peer_future_tokens,
             "spatiotemporal_tokens": spatiotemporal_tokens,
+            "attention_padding_mask": attention_padding_mask,
+            "valid_forecast_steps": valid_by_step,
         }
 
         if is_single:
