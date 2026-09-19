@@ -41,22 +41,17 @@ ESS_FEATURES = (
 
 
 class TransformerDispatchActor(nn.Module):
-    """Spatio-temporal dispatch actor with explicit ESS and DR decision heads.
+    """Spatial-only ablation: MG x time forecasts with ONE shared ESS/DR decoder.
 
-    P0 architecture:
-      1. Future information is tokenized as a microgrid x time grid instead of
-         mixing all peers into one token per horizon.
-      2. The active microgrid has a rich local future token at each t+k.
-      3. Every peer has an independent future energy-summary token at each t+k.
-      4. Current local energy, ESS state, DR state, peers, market and clock each
-         receive dedicated tokens.
-      5. A shared Transformer produces the dispatch representation.
-      6. ESS and DR actions are decoded by separate residual branches/heads.
-
-    The centralized critic is intentionally unchanged in this P0 step.
+    Current-state tokenization and the shared two-action dispatch head follow
+    the historical Transformer actor; only its mixed future token is separated
+    into local + peer tokens for each time step. Episode-end invalid forecasts
+    are masked. The centralized TwinCritic, reward and action interface remain
+    unchanged.
     """
 
-    native_dr_split_heads = True
+    native_dr_action_dim = 2
+    native_dr_split_heads = False
 
     def __init__(
         self,
@@ -225,6 +220,18 @@ class TransformerDispatchActor(nn.Module):
                             "Peer future feature width must be constant across peers/horizons"
                         )
 
+        # Match the historical DR-adapted Actor's single LOCAL token: all
+        # current local ESS, heterogeneous DR, physical and constraint fields
+        # excluding clock, market, current peers and every future field.
+        excluded = set(hour_indices + market_indices)
+        excluded.update(i for indices in peer_indices for i in indices)
+        combined_local_names = [
+            name for i, name in enumerate(self.schema)
+            if i not in excluded and "_t+" not in name
+        ]
+        local_energy_indices = [schema_map[name] for name in combined_local_names]
+        local_energy_names = combined_local_names
+
         # Fast index buffers.
         self.register_buffer(
             "_hour_indices", torch.tensor(hour_indices, dtype=torch.long),
@@ -232,14 +239,6 @@ class TransformerDispatchActor(nn.Module):
         )
         self.register_buffer(
             "_local_indices", torch.tensor(local_energy_indices, dtype=torch.long),
-            persistent=False,
-        )
-        self.register_buffer(
-            "_ess_indices", torch.tensor(ess_indices, dtype=torch.long),
-            persistent=False,
-        )
-        self.register_buffer(
-            "_dr_indices", torch.tensor(dr_indices, dtype=torch.long),
             persistent=False,
         )
         self.register_buffer(
@@ -326,17 +325,6 @@ class TransformerDispatchActor(nn.Module):
             nn.Linear(len(local_energy_indices), self.embed_dim),
             nn.LayerNorm(self.embed_dim),
         )
-        self.ess_encoder = nn.Sequential(
-            nn.Linear(len(ess_indices), self.embed_dim),
-            nn.LayerNorm(self.embed_dim),
-            nn.GELU(),
-        )
-        self.dr_encoder = nn.Sequential(
-            nn.Linear(len(dr_indices), self.embed_dim),
-            nn.LayerNorm(self.embed_dim),
-            nn.GELU(),
-        )
-
         # Current peer tokenizers.
         self.peer_encoder = nn.Sequential(
             nn.Linear(self.peer_feature_dim, self.embed_dim),
@@ -372,13 +360,13 @@ class TransformerDispatchActor(nn.Module):
         self.peer_future_norm = nn.LayerNorm(self.embed_dim)
 
         # Sequence:
-        # [DISPATCH, HOUR, LOCAL_ENERGY, ESS, DR, current peers,
+        # [DISPATCH, HOUR, one LOCAL state, current peers,
         #  (active + peers) x H future grid, MARKET]
         self.num_spatial_entities = 1 + len(self.peers)
         self.num_future_tokens = (
             self.forecast_horizon * self.num_spatial_entities
         )
-        self.num_tokens = 6 + len(self.peers) + self.num_future_tokens
+        self.num_tokens = 4 + len(self.peers) + self.num_future_tokens
 
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=self.embed_dim,
@@ -396,36 +384,24 @@ class TransformerDispatchActor(nn.Module):
             enable_nested_tensor=False,
         )
 
-        # Head-specific residual interactions.
-        self.ess_interact_norm = nn.LayerNorm(self.embed_dim)
-        self.dr_interact_norm = nn.LayerNorm(self.embed_dim)
-
-        fused_dim = self.embed_dim * 4
-
-        def make_backbone() -> nn.Sequential:
-            layers: list[nn.Module] = []
-            width = fused_dim
-            for hidden in hidden_dims:
-                layers.extend([
-                    nn.Linear(width, hidden),
-                    nn.LayerNorm(hidden),
-                    nn.ReLU(),
-                ])
-                width = hidden
-            return nn.Sequential(*layers)
-
-        self.ess_backbone = make_backbone()
-        self.dr_backbone = make_backbone()
-        final_width = hidden_dims[-1] if hidden_dims else fused_dim
-
-        ess_linear = nn.Linear(final_width, 1)
-        dr_linear = nn.Linear(final_width, 1)
-        nn.init.uniform_(ess_linear.weight, -3e-3, 3e-3)
-        nn.init.uniform_(ess_linear.bias, -3e-3, 3e-3)
-        nn.init.uniform_(dr_linear.weight, -3e-3, 3e-3)
-        nn.init.uniform_(dr_linear.bias, -3e-3, 3e-3)
-        self.ess_head = nn.Sequential(ess_linear, nn.Tanh())
-        self.dr_head = nn.Sequential(dr_linear, nn.Tanh())
+        # Shared residual decoder, as in the original Transformer actor:
+        # both ESS/DR intents come from the same hidden representation.
+        self.interact_norm = nn.LayerNorm(self.embed_dim)
+        fused_dim = self.embed_dim * 3
+        layers: list[nn.Module] = []
+        width = fused_dim
+        for hidden in hidden_dims:
+            layers.extend([
+                nn.Linear(width, hidden),
+                nn.LayerNorm(hidden),
+                nn.ReLU(),
+            ])
+            width = hidden
+        self.dispatch_backbone = nn.Sequential(*layers)
+        last = nn.Linear(width, 2)
+        nn.init.uniform_(last.weight, -3e-3, 3e-3)
+        nn.init.uniform_(last.bias, -3e-3, 3e-3)
+        self.dispatch_head = nn.Sequential(last, nn.Tanh())
 
         self._parameter_count = sum(p.numel() for p in self.parameters())
         self.last_diagnostics: dict[str, float] = {}
@@ -458,8 +434,6 @@ class TransformerDispatchActor(nn.Module):
         batch_size = observation.shape[0]
         hour_feats = observation.index_select(-1, self._hour_indices)
         local_feats = observation.index_select(-1, self._local_indices)
-        ess_feats = observation.index_select(-1, self._ess_indices)
-        dr_feats = observation.index_select(-1, self._dr_indices)
         market_feats = observation.index_select(-1, self._market_indices)
 
         dispatch_token = self.dispatch_norm(
@@ -478,19 +452,7 @@ class TransformerDispatchActor(nn.Module):
         ].unsqueeze(0)
 
         local_rep = self.local_encoder(local_feats)
-        local_token = self.peer_norm(
-            local_rep + active_spatial
-        ).unsqueeze(1)
-
-        ess_rep = self.ess_encoder(ess_feats)
-        ess_token = self.peer_norm(
-            ess_rep + active_spatial
-        ).unsqueeze(1)
-
-        dr_rep = self.dr_encoder(dr_feats)
-        dr_token = self.peer_norm(
-            dr_rep + active_spatial
-        ).unsqueeze(1)
+        local_token = local_rep.unsqueeze(1)
 
         # Current peer tokens.
         peer_all = observation.index_select(
@@ -562,8 +524,6 @@ class TransformerDispatchActor(nn.Module):
                 dispatch_token,
                 hour_token,
                 local_token,
-                ess_token,
-                dr_token,
                 peer_tokens,
                 future_grid,
                 market_token,
@@ -581,7 +541,7 @@ class TransformerDispatchActor(nn.Module):
                 self.num_spatial_entities, dim=1
             )
             current_padding = torch.zeros(
-                batch_size, 5 + len(self.peers),
+                batch_size, 3 + len(self.peers),
                 dtype=torch.bool, device=observation.device,
             )
             market_padding = torch.zeros(
@@ -607,62 +567,31 @@ class TransformerDispatchActor(nn.Module):
             attended = self.transformer(tokens)
         dispatch_rep = attended[:, 0, :]
 
-        ess_interact = self.ess_interact_norm(dispatch_rep * ess_rep)
-        dr_interact = self.dr_interact_norm(dispatch_rep * dr_rep)
-
-        ess_fused = torch.cat(
-            [dispatch_rep, local_rep, ess_rep, ess_interact], dim=-1
-        )
-        dr_fused = torch.cat(
-            [dispatch_rep, local_rep, dr_rep, dr_interact], dim=-1
-        )
-        ess_features = self.ess_backbone(ess_fused)
-        dr_features = self.dr_backbone(dr_fused)
-        ess_action = self.ess_head(ess_features)
-        dr_action = self.dr_head(dr_features)
-        action = torch.cat([ess_action, dr_action], dim=-1)
+        interact = self.interact_norm(dispatch_rep * local_rep)
+        fused = torch.cat([dispatch_rep, local_rep, interact], dim=-1)
+        action = self.dispatch_head(self.dispatch_backbone(fused))
 
         if collect_diagnostics:
-            d_norm = float(
-                dispatch_rep.norm(dim=-1).mean().detach().cpu()
-            )
+            d_norm = float(dispatch_rep.norm(dim=-1).mean().detach().cpu())
             l_norm = float(local_rep.norm(dim=-1).mean().detach().cpu())
-            ess_norm = float(ess_rep.norm(dim=-1).mean().detach().cpu())
-            dr_norm = float(dr_rep.norm(dim=-1).mean().detach().cpu())
-            ess_i_norm = float(
-                ess_interact.norm(dim=-1).mean().detach().cpu()
-            )
-            dr_i_norm = float(
-                dr_interact.norm(dim=-1).mean().detach().cpu()
-            )
+            i_norm = float(interact.norm(dim=-1).mean().detach().cpu())
             self.last_diagnostics = {
                 "dispatch_norm": d_norm,
                 "local_norm": l_norm,
-                "ess_norm": ess_norm,
-                "dr_norm": dr_norm,
-                "ess_interact_norm": ess_i_norm,
-                "dr_interact_norm": dr_i_norm,
-                "interact_norm": 0.5 * (ess_i_norm + dr_i_norm),
+                "interact_norm": i_norm,
                 "norm_ratio": d_norm / (l_norm + 1e-8),
             }
 
         result = {
             "action": action,
-            "ess_action": ess_action,
-            "dr_action": dr_action,
+            "ess_action": action[..., :1],
+            "dr_action": action[..., 1:2],
             "dispatch_rep": dispatch_rep,
             "local_rep": local_rep,
-            "ess_rep": ess_rep,
-            "dr_rep": dr_rep,
-            "ess_interact": ess_interact,
-            "dr_interact": dr_interact,
-            "interact": 0.5 * (ess_interact + dr_interact),
-            "ess_fused": ess_fused,
-            "dr_fused": dr_fused,
-            "fused": torch.cat([ess_fused, dr_fused], dim=-1),
+            "interact": interact,
+            "fused": fused,
             "attended": attended,
             "tokens": tokens,
-            # Backward-compatible name: active-microgrid future tokens.
             "forecast_tokens": local_future_tokens,
             "local_future_tokens": local_future_tokens,
             "peer_tokens": peer_tokens,
@@ -693,18 +622,12 @@ class TransformerDispatchActor(nn.Module):
     def branch_modules(
         self,
     ) -> dict[str, tuple[nn.Module, ...] | tuple[nn.Parameter, ...]]:
-        # Aggregate legacy branch names are retained for existing diagnostics.
         return {
             "dispatch_token": (self.dispatch_token,),
             "hour_tokenizer": (
                 self.hour_embedding, self.hour_linear, self.hour_norm,
             ),
-            "local_tokenizer": (
-                self.local_encoder, self.ess_encoder, self.dr_encoder,
-            ),
-            "local_energy_tokenizer": (self.local_encoder,),
-            "ess_tokenizer": (self.ess_encoder,),
-            "dr_tokenizer": (self.dr_encoder,),
+            "local_tokenizer": (self.local_encoder,),
             "forecast_tokenizer": (
                 self.forecast_encoder,
                 self.horizon_embedding,
@@ -721,15 +644,7 @@ class TransformerDispatchActor(nn.Module):
             ),
             "market_tokenizer": (self.market_encoder,),
             "transformer": (self.transformer,),
-            "interact_norm": (
-                self.ess_interact_norm, self.dr_interact_norm,
-            ),
-            "ess_interact_norm": (self.ess_interact_norm,),
-            "dr_interact_norm": (self.dr_interact_norm,),
-            "backbone": (self.ess_backbone, self.dr_backbone),
-            "ess_backbone": (self.ess_backbone,),
-            "dr_backbone": (self.dr_backbone,),
-            "head": (self.ess_head, self.dr_head),
-            "ess_head": (self.ess_head,),
-            "dr_head": (self.dr_head,),
+            "interact_norm": (self.interact_norm,),
+            "backbone": (self.dispatch_backbone,),
+            "head": (self.dispatch_head,),
         }
