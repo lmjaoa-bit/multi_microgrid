@@ -16,13 +16,10 @@ from core.single_dispatch import SingleDispatchProjector
 
 
 class Matd3Transformer(MATD3):
-    """MATD3 with Spatio-Temporal Transformer Dispatch Actors (V2).
+    """MATD3 with P0 spatio-temporal Transformer dispatch actors.
 
-    Integrates:
-      - 24-hour diurnal periodic embeddings & absolute clock-hour forecast embeddings
-      - Learnable [DISPATCH] decision token pooling + local physical residual connection
-      - Heterogeneous microgrid attention gain scaling
-      - Single dispatch physical control projection for centralized critics
+    The actor uses microgrid x time future tokens and independent ESS/DR
+    decision heads. The centralized TwinCritic remains unchanged in P0.
     """
 
     @classmethod
@@ -216,15 +213,26 @@ class Matd3Transformer(MATD3):
                         "dispatch_token_grad_norm": branch.get("dispatch_token", 0.0),
                         "hour_tokenizer_grad_norm": branch.get("hour_tokenizer", 0.0),
                         "local_tokenizer_grad_norm": branch.get("local_tokenizer", 0.0),
+                        "local_energy_tokenizer_grad_norm": branch.get("local_energy_tokenizer", 0.0),
+                        "ess_tokenizer_grad_norm": branch.get("ess_tokenizer", 0.0),
+                        "dr_tokenizer_grad_norm": branch.get("dr_tokenizer", 0.0),
                         "forecast_tokenizer_grad_norm": branch.get("forecast_tokenizer", 0.0),
+                        "peer_future_tokenizer_grad_norm": branch.get("peer_future_tokenizer", 0.0),
                         "peer_tokenizer_grad_norm": branch.get("peer_tokenizer", 0.0),
                         "market_tokenizer_grad_norm": branch.get("market_tokenizer", 0.0),
                         "transformer_grad_norm": branch.get("transformer", 0.0),
                         "interact_norm_grad_norm": branch.get("interact_norm", 0.0),
+                        "ess_interact_norm_grad_norm": branch.get("ess_interact_norm", 0.0),
+                        "dr_interact_norm_grad_norm": branch.get("dr_interact_norm", 0.0),
                         "backbone_grad_norm": branch.get("backbone", 0.0),
+                        "ess_backbone_grad_norm": branch.get("ess_backbone", 0.0),
+                        "dr_backbone_grad_norm": branch.get("dr_backbone", 0.0),
                         "head_grad_norm": branch.get("head", 0.0),
+                        "ess_head_grad_norm": branch.get("ess_head", 0.0),
+                        "dr_head_grad_norm": branch.get("dr_head", 0.0),
                         "clip_applied": float(before > self.actor_max_grad_norm),
                         "dispatch_action_grad_rms": float(action_grad[:, 0].square().mean().sqrt()),
+                        "dr_action_grad_rms": float(action_grad[:, 1].square().mean().sqrt()),
                         "dispatch_saturation_rate": float((active_action.detach().abs() >= .95).float().mean()),
                         "offer_eligible_rate": float(plan["mask"].detach().float().mean()),
                         "local_override_kw_max": float(plan["local_priority_reserve"].detach().abs().max()),
