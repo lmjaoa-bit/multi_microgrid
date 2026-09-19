@@ -8,3 +8,9 @@ crossgate:
   policy: crossgate
   action_design: single_dispatch
   environment: cooperative_legacy_pre_dr
+
+matd3_transformer_critic:
+  algorithm: matd3_transformer_critic
+  policy: mlp
+  action_design: single_dispatch_dr
+  environment: cooperative_standard
