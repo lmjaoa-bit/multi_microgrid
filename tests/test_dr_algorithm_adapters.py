@@ -115,3 +115,16 @@ def test_variant_checkpoint_marks_dr_action_semantics(slug: str, tmp_path: Path)
 
     reloaded = get_algorithm_spec(slug).create(env, settings, seed=43)
     reloaded.load(path)
+
+
+def test_matd3_transformer_keeps_native_split_action_heads_after_dr_adapter():
+    _, env, _, model = build_variant("matd3_transformer")
+    observations, _ = env.reset(seed=42, deterministic=True)
+
+    for mg in env.agent_ids:
+        actor = model.actors[mg]
+        assert getattr(actor, "native_dr_split_heads", False)
+        assert actor.ess_head[0].out_features == 1
+        assert actor.dr_head[0].out_features == 1
+        action = actor(torch.tensor(observations[mg], dtype=torch.float32))
+        assert action.shape == (2,)
