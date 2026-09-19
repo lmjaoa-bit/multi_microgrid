@@ -41,19 +41,12 @@ ESS_FEATURES = (
 
 
 class TransformerDispatchActor(nn.Module):
-    """Spatio-temporal dispatch actor with explicit ESS and DR decision heads.
+    """Time-only forecast tokenization with independent ESS and DR heads.
 
-    P0 architecture:
-      1. Future information is tokenized as a microgrid x time grid instead of
-         mixing all peers into one token per horizon.
-      2. The active microgrid has a rich local future token at each t+k.
-      3. Every peer has an independent future energy-summary token at each t+k.
-      4. Current local energy, ESS state, DR state, peers, market and clock each
-         receive dedicated tokens.
-      5. A shared Transformer produces the dispatch representation.
-      6. ESS and DR actions are decoded by separate residual branches/heads.
-
-    The centralized critic is intentionally unchanged in this P0 step.
+    Ablation against P0.1: each future hour mixes the same local and peer
+    forecast features into ONE token, rather than one token per microgrid.
+    Current tokens, temporal embeddings, invalid-hour masking, separate
+    ESS/DR decision branches, and the centralized MLP Critic are retained.
     """
 
     native_dr_split_heads = True
@@ -193,7 +186,8 @@ class TransformerDispatchActor(nn.Module):
         if any(len(indices) != local_future_dim for indices in local_future_indices):
             raise ValueError("Local future feature width must be constant across horizons")
 
-        # Peer future tokens are independent for every (peer, horizon) pair.
+        # Peer future fields are grouped by hour, then fused with the local
+        # future fields into one token for that hour.
         peer_future_indices: list[list[list[int]]] = []
         for k in range(1, self.forecast_horizon + 1):
             step: list[list[int]] = []
@@ -353,14 +347,14 @@ class TransformerDispatchActor(nn.Module):
             nn.LayerNorm(self.embed_dim),
         )
 
-        # Spatio-temporal future tokenizers.
-        self.forecast_encoder = nn.Sequential(
-            nn.Linear(self.local_future_feature_dim, self.embed_dim),
-            nn.LayerNorm(self.embed_dim),
-            nn.GELU(),
+        # One mixed forecast token per future hour. All local and peer
+        # feature inputs remain available; only token grouping is ablated.
+        self.mixed_future_feature_dim = (
+            self.local_future_feature_dim
+            + len(self.peers) * self.peer_future_feature_dim
         )
-        self.peer_future_encoder = nn.Sequential(
-            nn.Linear(self.peer_future_feature_dim, self.embed_dim),
+        self.forecast_encoder = nn.Sequential(
+            nn.Linear(self.mixed_future_feature_dim, self.embed_dim),
             nn.LayerNorm(self.embed_dim),
             nn.GELU(),
         )
@@ -369,15 +363,11 @@ class TransformerDispatchActor(nn.Module):
         )
         nn.init.normal_(self.horizon_embedding.weight, mean=0.0, std=0.02)
         self.forecast_norm = nn.LayerNorm(self.embed_dim)
-        self.peer_future_norm = nn.LayerNorm(self.embed_dim)
 
-        # Sequence:
-        # [DISPATCH, HOUR, LOCAL_ENERGY, ESS, DR, current peers,
-        #  (active + peers) x H future grid, MARKET]
-        self.num_spatial_entities = 1 + len(self.peers)
-        self.num_future_tokens = (
-            self.forecast_horizon * self.num_spatial_entities
-        )
+        # Sequence: [DISPATCH, HOUR, LOCAL_ENERGY, ESS, DR, current peers,
+        #            one MIXED future token per horizon, MARKET].
+        self.num_spatial_entities = 1 + len(self.peers)  # informational only
+        self.num_future_tokens = self.forecast_horizon
         self.num_tokens = 6 + len(self.peers) + self.num_future_tokens
 
         encoder_layer = nn.TransformerEncoderLayer(
@@ -515,44 +505,25 @@ class TransformerDispatchActor(nn.Module):
         horizon_emb = self.horizon_embedding(horizon_ids)
         temporal_emb = future_hour_emb + horizon_emb.unsqueeze(0)
 
-        # Rich future token for the active microgrid at each horizon.
+        # The order within each hour is local fields followed by the
+        # existing peer future fields in agent order. There is no separate
+        # microgrid token in this ablation.
         local_future_all = observation.index_select(
             -1, self._all_forecast_indices
         ).reshape(
-            batch_size,
-            self.forecast_horizon,
-            self.local_future_feature_dim,
+            batch_size, self.forecast_horizon, self.local_future_feature_dim
         )
-        local_future_tokens = self.forecast_encoder(local_future_all)
-        local_future_tokens = self.forecast_norm(
-            local_future_tokens
-            + temporal_emb
-            + active_spatial.unsqueeze(1)
-        )
-
-        # Independent peer future tokens: [B, H, P, E].
         peer_future_all = observation.index_select(
             -1, self._all_peer_future_indices
         ).reshape(
-            batch_size,
-            self.forecast_horizon,
-            len(self.peers),
-            self.peer_future_feature_dim,
+            batch_size, self.forecast_horizon,
+            len(self.peers) * self.peer_future_feature_dim,
         )
-        peer_future_tokens = self.peer_future_encoder(peer_future_all)
-        peer_future_tokens = self.peer_future_norm(
-            peer_future_tokens
-            + temporal_emb.unsqueeze(2)
-            + peer_spatial.unsqueeze(0).unsqueeze(0)
+        mixed_future_all = torch.cat(
+            [local_future_all, peer_future_all], dim=-1
         )
-
-        # microgrid x time grid: local first, then each peer, for every horizon.
-        spatiotemporal_tokens = torch.cat(
-            [local_future_tokens.unsqueeze(2), peer_future_tokens],
-            dim=2,
-        )
-        future_grid = spatiotemporal_tokens.reshape(
-            batch_size, self.num_future_tokens, self.embed_dim
+        forecast_tokens = self.forecast_norm(
+            self.forecast_encoder(mixed_future_all) + temporal_emb
         )
 
         market_token = self.market_encoder(market_feats).unsqueeze(1)
@@ -565,21 +536,18 @@ class TransformerDispatchActor(nn.Module):
                 ess_token,
                 dr_token,
                 peer_tokens,
-                future_grid,
+                forecast_tokens,
                 market_token,
             ],
             dim=1,
         )
-        # PyTorch's padding mask suppresses invalid *keys/values*. Merely
-        # filling forecast fields with zeros does NOT remove their learned
-        # spatial/temporal embeddings from the attention mechanism.
+        # Mask one mixed forecast token per invalid hour. Merely zeroing
+        # forecast data does not suppress the learned temporal embedding.
         if self._forecast_valid_indices.numel():
             valid_by_step = observation.index_select(
                 -1, self._forecast_valid_indices
             ) >= 0.5
-            future_padding = (~valid_by_step).repeat_interleave(
-                self.num_spatial_entities, dim=1
-            )
+            future_padding = ~valid_by_step
             current_padding = torch.zeros(
                 batch_size, 5 + len(self.peers),
                 dtype=torch.bool, device=observation.device,
@@ -662,12 +630,8 @@ class TransformerDispatchActor(nn.Module):
             "fused": torch.cat([ess_fused, dr_fused], dim=-1),
             "attended": attended,
             "tokens": tokens,
-            # Backward-compatible name: active-microgrid future tokens.
-            "forecast_tokens": local_future_tokens,
-            "local_future_tokens": local_future_tokens,
+            "forecast_tokens": forecast_tokens,
             "peer_tokens": peer_tokens,
-            "peer_future_tokens": peer_future_tokens,
-            "spatiotemporal_tokens": spatiotemporal_tokens,
             "attention_padding_mask": attention_padding_mask,
             "valid_forecast_steps": valid_by_step,
         }
@@ -710,10 +674,8 @@ class TransformerDispatchActor(nn.Module):
                 self.horizon_embedding,
                 self.forecast_norm,
             ),
-            "peer_future_tokenizer": (
-                self.peer_future_encoder,
-                self.peer_future_norm,
-            ),
+            # Peer forecast data enters the mixed forecast encoder above.
+            "peer_future_tokenizer": (self.forecast_encoder,),
             "peer_tokenizer": (
                 self.peer_encoder,
                 self.peer_id_embedding,
