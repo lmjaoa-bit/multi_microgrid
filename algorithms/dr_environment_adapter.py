@@ -141,10 +141,13 @@ def _adapt_actor(actor: nn.Module, schema: tuple[str, ...], actor_kind: str) -> 
     if actor_kind == "pnn":
         _expand_action_head(actor)
     elif actor_kind == "transformer":
-        # P0 Transformer actors natively consume the full DR-aware schema and
-        # emit separate [ESS, DR] actions. Historical Transformer actors still
-        # use the adapter path below for backwards compatibility.
-        if not getattr(actor, "native_dr_split_heads", False):
+        # New spatial-ablation actors return native [ESS, DR] actions through
+        # a shared head. P0 actors return the same action interface via split
+        # heads. Only historical one-output actors require the DR adapter.
+        if not (
+            getattr(actor, "native_dr_action_dim", None) == RAW_ACTION_DIM
+            or getattr(actor, "native_dr_split_heads", False)
+        ):
             _adapt_transformer_features(actor, schema, pnn=False)
             _expand_action_head(actor)
     elif actor_kind == "pnn_transformer":
