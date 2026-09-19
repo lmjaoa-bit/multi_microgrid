@@ -70,7 +70,7 @@ def test_horizon_embedding_and_forecast_tokens():
         assert components["forecast_tokens"].shape == (8, actor.forecast_horizon, actor.embed_dim)
 
 
-def test_split_ess_dr_residual_branches():
+def test_shared_ess_dr_decoder_ablation():
     _, env, _, model = build_matd3_transformer()
     obs, _ = env.reset(seed=42, deterministic=True)
     for mg in env.agent_ids:
@@ -79,30 +79,18 @@ def test_split_ess_dr_residual_branches():
         batch_obs = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0).repeat(4, 1)
         components = actor.forward_components(batch_obs)
 
-        assert components["ess_fused"].shape[-1] == 4 * d_model
-        assert components["dr_fused"].shape[-1] == 4 * d_model
-        assert components["fused"].shape[-1] == 8 * d_model
-
-        assert torch.allclose(
-            components["ess_fused"][:, d_model:2 * d_model],
-            components["local_rep"],
-        )
-        assert torch.allclose(
-            components["ess_fused"][:, 2 * d_model:3 * d_model],
-            components["ess_rep"],
-        )
-        assert torch.allclose(
-            components["dr_fused"][:, 2 * d_model:3 * d_model],
-            components["dr_rep"],
-        )
-
+        assert components["fused"].shape[-1] == 5 * d_model
         assert components["ess_action"].shape == (4, 1)
         assert components["dr_action"].shape == (4, 1)
         assert torch.allclose(
             components["action"],
             torch.cat([components["ess_action"], components["dr_action"]], dim=-1),
         )
-        assert actor.ess_head[0] is not actor.dr_head[0]
+        assert actor.dispatch_head[0].out_features == 2
+        assert not hasattr(actor, "ess_head")
+        assert not hasattr(actor, "dr_head")
+        assert actor.native_dr_action_head
+        assert not actor.native_dr_split_heads
 
 
 def test_no_attention_scale_dependency():
