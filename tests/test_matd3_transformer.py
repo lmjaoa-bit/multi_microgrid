@@ -290,9 +290,9 @@ def test_invalid_future_temporal_tokens_are_attention_masked():
         assert not mask[:, :prefix].any()
         assert not mask[:, -1].any()  # market token
         assert not mask[0, prefix:prefix + 3].any()
-        assert mask[0, prefix + 3 * entities:-1].all()
+        assert mask[0, prefix + 3:-1].all()
         assert not mask[1, prefix:prefix + 2].any()
-        assert mask[1, prefix + 2 * entities:-1].all()
+        assert mask[1, prefix + 2:-1].all()
 
         # Invalid local AND peer forecasts may contain arbitrary data without
         # changing the ESS or DR action; the mixed hourly token is masked.
