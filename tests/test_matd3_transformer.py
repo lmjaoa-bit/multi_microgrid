@@ -70,39 +70,35 @@ def test_horizon_embedding_and_forecast_tokens():
         assert components["forecast_tokens"].shape == (8, actor.forecast_horizon, actor.embed_dim)
 
 
-def test_split_ess_dr_residual_branches():
+def test_shared_ess_dr_residual_head():
     _, env, _, model = build_matd3_transformer()
     obs, _ = env.reset(seed=42, deterministic=True)
     for mg in env.agent_ids:
         actor = model.actors[mg]
-        d_model = actor.embed_dim
         batch_obs = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0).repeat(4, 1)
         components = actor.forward_components(batch_obs)
-
-        assert components["ess_fused"].shape[-1] == 4 * d_model
-        assert components["dr_fused"].shape[-1] == 4 * d_model
-        assert components["fused"].shape[-1] == 8 * d_model
-
+        d_model = actor.embed_dim
+        assert actor.native_dr_action_dim == 2
+        assert not actor.native_dr_split_heads
+        assert not hasattr(actor, "ess_head")
+        assert not hasattr(actor, "dr_head")
+        assert actor.dispatch_head[0].out_features == 2
+        assert components["fused"].shape == (4, 3 * d_model)
         assert torch.allclose(
-            components["ess_fused"][:, d_model:2 * d_model],
+            components["fused"][:, d_model:2 * d_model],
             components["local_rep"],
         )
         assert torch.allclose(
-            components["ess_fused"][:, 2 * d_model:3 * d_model],
-            components["ess_rep"],
+            components["fused"][:, 2 * d_model:],
+            components["interact"],
         )
-        assert torch.allclose(
-            components["dr_fused"][:, 2 * d_model:3 * d_model],
-            components["dr_rep"],
-        )
-
         assert components["ess_action"].shape == (4, 1)
         assert components["dr_action"].shape == (4, 1)
         assert torch.allclose(
             components["action"],
             torch.cat([components["ess_action"], components["dr_action"]], dim=-1),
         )
-        assert actor.ess_head[0] is not actor.dr_head[0]
+
 
 
 def test_no_attention_scale_dependency():
@@ -213,8 +209,9 @@ def test_dr_features_are_part_of_transformer_inputs():
     expected = {"mg1": "silo_ratio", "mg2": "t_air", "mg3": "ev_soc"}
     for mg, feature in expected.items():
         actor = model.actors[mg]
-        dr_names = [actor.schema[int(i)] for i in actor._dr_indices]
-        assert feature in dr_names
+        local_names = [actor.schema[int(i)] for i in actor._local_indices]
+        assert feature in local_names
+        assert "soc" in local_names
     mg2 = model.actors["mg2"]
     forecast_names = [mg2.schema[int(i)] for i in mg2._all_forecast_indices]
     assert "temperature_t+1" in forecast_names
@@ -243,7 +240,7 @@ def test_spatiotemporal_microgrid_time_tokens():
             actor.embed_dim,
         )
         assert actor.num_future_tokens == actor.forecast_horizon * (1 + peer_count)
-        assert actor.num_tokens == 6 + peer_count + actor.num_future_tokens
+        assert actor.num_tokens == 4 + peer_count + actor.num_future_tokens
 
         # Tokens for different peers at the same horizon must have separate
         # spatial identities rather than being pre-mixed into one time token.
@@ -273,7 +270,7 @@ def test_invalid_future_spatiotemporal_tokens_are_attention_masked():
 
         components = actor.forward_components(batch, collect_diagnostics=False)
         mask = components["attention_padding_mask"]
-        prefix = 5 + len(actor.peers)
+        prefix = 3 + len(actor.peers)
         entities = 1 + len(actor.peers)
         assert mask.shape == (2, actor.num_tokens)
         assert mask.dtype == torch.bool
