@@ -141,10 +141,14 @@ def _adapt_actor(actor: nn.Module, schema: tuple[str, ...], actor_kind: str) -> 
     if actor_kind == "pnn":
         _expand_action_head(actor)
     elif actor_kind == "transformer":
-        # P0 Transformer actors natively consume the full DR-aware schema and
-        # emit separate [ESS, DR] actions. Historical Transformer actors still
-        # use the adapter path below for backwards compatibility.
-        if not getattr(actor, "native_dr_split_heads", False):
+        # New Transformer actors may natively consume the full DR-aware schema
+        # and emit the two raw actions either with split heads or one shared
+        # 2-D head. Historical actors still use the adapter path.
+        native_two_action = bool(
+            getattr(actor, "native_dr_split_heads", False)
+            or getattr(actor, "native_dr_action_head", False)
+        )
+        if not native_two_action:
             _adapt_transformer_features(actor, schema, pnn=False)
             _expand_action_head(actor)
     elif actor_kind == "pnn_transformer":
