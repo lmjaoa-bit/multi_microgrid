@@ -105,7 +105,7 @@ def diagnose(
     dates = [str(day.date()) for day in env.data.valid_days[:days]]
     if not dates:
         raise ValueError(f"No valid days in {split} split")
-    rows, paired = [], []
+    rows, paired, future_probes = [], [], []
     skipped_physically_identical = 0
     for date_index, day in enumerate(dates):
         for trial in range(seeds_per_day):
@@ -167,6 +167,38 @@ def diagnose(
                     pair.append((predictions, realized))
                 if len(pair) == 2:
                     (first_q, first_r), (second_q, second_r) = pair
+                    # Optional input-sensitivity probe: change only a valid
+                    # peer forecast within the CRITIC input. This is NOT an
+                    # environment-consistent counterfactual or return-accuracy
+                    # measure and is deliberately kept out of training.
+                    peer = next(mg for mg in algorithm.agent_ids if mg != focal)
+                    k = 3
+                    feature = f"{peer}_net_load_t+{k}"
+                    validity = f"forecast_valid_t+{k}"
+                    schema = algorithm.state_schema
+                    is_valid = validity not in schema or baseline_state[schema.index(validity)] > 0.5
+                    if feature in schema and is_valid:
+                        changed_state = baseline_state.copy()
+                        changed_state[schema.index(feature)] += 0.1
+                        changed_q = []
+                        for value in requested:
+                            candidate = {mg: action.copy() for mg, action in base_action.items()}
+                            candidate[focal][channel] = np.float32(value)
+                            changed_q.append(_prediction(algorithm, changed_state, candidate))
+                        for critic_mg in algorithm.agent_ids:
+                            original_gap = second_q[critic_mg][2] - first_q[critic_mg][2]
+                            modified_gap = (changed_q[1][critic_mg][2]
+                                            - changed_q[0][critic_mg][2])
+                            future_probes.append({
+                                "day": day, "scenario_seed": seed, "anchor_step": step,
+                                "critic_mg": critic_mg, "focal": focal,
+                                "peer_forecast": feature,
+                                "forecast_normalized_delta": 0.1,
+                                "original_action_q_gap": original_gap,
+                                "perturbed_action_q_gap": modified_gap,
+                                "future_action_interaction": modified_gap - original_gap,
+                                "interpretation": "critic-input sensitivity only; no altered environment rollout",
+                            })
                     for critic_mg in algorithm.agent_ids:
                         predicted_gap = second_q[critic_mg][2] - first_q[critic_mg][2]
                         realized_gap = second_r - first_r
@@ -208,6 +240,10 @@ def diagnose(
         "q_return_rank_agreement": mean([x["same_preference"] for x in paired]),
         "q_samples": len(rows),
         "paired_cases": len(paired),
+        "future_action_probe_cases": len(future_probes),
+        "future_action_interaction_abs_mean": mean([
+            abs(x["future_action_interaction"]) for x in future_probes
+        ]),
         "skipped_physically_identical_candidate_pairs": skipped_physically_identical,
         "by_critic": {
             mg: {
@@ -226,6 +262,11 @@ def diagnose(
             writer = csv.DictWriter(fp, fieldnames=list(paired[0]))
             writer.writeheader()
             writer.writerows(paired)
+    if future_probes:
+        with (run_dir / "critic_future_action_probe.csv").open("w", newline="", encoding="utf-8") as fp:
+            writer = csv.DictWriter(fp, fieldnames=list(future_probes[0]))
+            writer.writeheader()
+            writer.writerows(future_probes)
     (run_dir / "critic_q_accuracy.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8",
     )
