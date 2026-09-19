@@ -55,12 +55,12 @@ target and should not be used in its place.
 
 Outputs within the same run directory:
 
-- critic_q_accuracy.json: Q/return MAE, action-gap MAE, preference agreement,
+- critic_q_accuracy_<focal>_<ess-or-dr>.json: Q/return MAE, action-gap MAE, preference agreement,
   twin-Q gap and sample counts.
-- critic_q_accuracy_cases.csv: scenario, action, Q1, Q2, min-Q and realized
+- critic_q_accuracy_cases_<focal>_<ess-or-dr>.csv: scenario, action, Q1, Q2, min-Q and realized
   discounted team reward.
-- critic_q_action_pairs.csv: predicted and realized candidate action gaps.
-- critic_future_action_probe.csv: separate peer-forecast input perturbation test
+- critic_q_action_pairs_<focal>_<ess-or-dr>.csv: predicted and realized candidate action gaps.
+- critic_future_action_probe_<focal>_<ess-or-dr>.csv: separate peer-forecast input perturbation test
   of the **predicted action gap**; this is model sensitivity, NOT realized
   return accuracy or a physically consistent forecast counterfactual.
 
@@ -75,3 +75,6 @@ hyperparameters using test-split Q accuracy.
 Sampled TD errors and Q statistics remain in standard training history.
 Encoder/cross-attention gradient norms are written into q_statistics[mg] at
 existing diagnostic boundaries, NOT collected at every training step.
+
+ESS and DR checks (and different focal microgrids) use separate filenames,
+so running one check does not overwrite another.
