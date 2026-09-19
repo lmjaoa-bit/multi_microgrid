@@ -743,7 +743,8 @@ def evaluate(
     # All raw/executed ESS and DR actions are already recorded in hourly CSVs.
     # Add a compact, comparable per-device/hour diagnostic for P0 Transformers.
     if spec.slug == "matd3_transformer" and all(
-        getattr(algorithm.actors[mg], "native_dr_split_heads", False)
+        getattr(algorithm.actors[mg], "native_dr_action_dim", None) == 2
+        or getattr(algorithm.actors[mg], "native_dr_split_heads", False)
         for mg in env.agent_ids
     ):
         result["dispatch_behavior_diagnostics"] = build_dispatch_behavior_diagnostics(
