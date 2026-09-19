@@ -124,6 +124,132 @@ def _legacy_summary(episodes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+
+def build_dispatch_behavior_diagnostics(
+    hourly_by_day: Mapping[str, Sequence[Mapping[str, Any]]],
+    daily_metrics: Sequence[Mapping[str, Any]],
+    agent_ids: Sequence[str],
+    delta_t_hours: float,
+) -> dict[str, Any]:
+    """Summarize ESS/DR behavior from already-recorded test trajectories.
+
+    This is observational diagnostics only: it does not change actions,
+    rewards, environment dynamics, checkpoint selection or Critic updates.
+    Monetary terminal penalties come from the daily economic breakdown;
+    hourly power values are converted to energy using the environment step.
+    """
+    rows = [row for day_rows in hourly_by_day.values() for row in day_rows]
+    day_count = len(daily_metrics)
+    if not day_count or not rows:
+        return {"days_count": day_count, "steps_count": len(rows), "by_microgrid": {}}
+
+    def avg(values: Sequence[float]) -> float:
+        return float(sum(values) / len(values)) if values else 0.0
+
+    def value(row: Mapping[str, Any], name: str) -> float:
+        return float(row.get(name, 0.0))
+
+    result: dict[str, Any] = {
+        "days_count": day_count,
+        "steps_count": len(rows),
+        "delta_t_hours": float(delta_t_hours),
+        "by_microgrid": {},
+    }
+    for mg in agent_ids:
+        ess_raw = [value(row, f"{mg}_raw_ess_action") for row in rows]
+        dr_raw = [value(row, f"{mg}_raw_dr_action") for row in rows]
+        terminal_soc = [
+            float(day["soc_statistics_by_microgrid"][mg]["terminal_soc"])
+            for day in daily_metrics
+        ]
+        terminal_target = [
+            float(day["soc_statistics_by_microgrid"][mg]["terminal_soc_target"])
+            for day in daily_metrics
+        ]
+        terminal_penalty = [
+            float(day["economic_breakdown_by_microgrid"][mg]["terminal_soc_penalty"])
+            for day in daily_metrics
+        ]
+        hourly_profile = []
+        for hour in range(24):
+            hour_rows = [row for row in rows if int(row["hour"]) == hour]
+            if not hour_rows:
+                continue
+            hourly_profile.append({
+                "hour": hour,
+                "days_count": len(hour_rows),
+                "raw_ess_action_mean": avg([
+                    value(row, f"{mg}_raw_ess_action") for row in hour_rows
+                ]),
+                "raw_dr_action_mean": avg([
+                    value(row, f"{mg}_raw_dr_action") for row in hour_rows
+                ]),
+                "ess_charge_kw_mean": avg([
+                    value(row, f"{mg}_battery_charge_kw") for row in hour_rows
+                ]),
+                "ess_discharge_kw_mean": avg([
+                    value(row, f"{mg}_battery_discharge_kw") for row in hour_rows
+                ]),
+                "soc_after_mean": avg([
+                    value(row, f"{mg}_soc") for row in hour_rows
+                ]),
+                "ess_p2p_offer_kw_mean": avg([
+                    value(row, f"{mg}_ess_p2p_offer_kw") for row in hour_rows
+                ]),
+                "ess_p2p_accepted_kw_mean": avg([
+                    value(row, f"{mg}_ess_p2p_sell_kw") for row in hour_rows
+                ]),
+                "flexible_load_kw_mean": avg([
+                    value(row, f"{mg}_flexible_load_kw") for row in hour_rows
+                ]),
+                "dr_projection_rate": avg([
+                    value(row, f"{mg}_dr_projected") for row in hour_rows
+                ]),
+            })
+        result["by_microgrid"][mg] = {
+            "ess_raw_action_abs_mean": avg([abs(x) for x in ess_raw]),
+            "ess_raw_action_saturation_rate": avg([
+                float(abs(x) >= 0.95) for x in ess_raw
+            ]),
+            "dr_raw_action_abs_mean": avg([abs(x) for x in dr_raw]),
+            "dr_raw_action_saturation_rate": avg([
+                float(abs(x) >= 0.95) for x in dr_raw
+            ]),
+            "ess_projection_rate": avg([
+                value(row, f"{mg}_ess_projected") for row in rows
+            ]),
+            "dr_projection_rate": avg([
+                value(row, f"{mg}_dr_projected") for row in rows
+            ]),
+            "ess_charge_energy_kwh_per_day": sum(
+                value(row, f"{mg}_battery_charge_kw") for row in rows
+            ) * delta_t_hours / day_count,
+            "ess_discharge_energy_kwh_per_day": sum(
+                value(row, f"{mg}_battery_discharge_kw") for row in rows
+            ) * delta_t_hours / day_count,
+            "ess_to_local_energy_kwh_per_day": sum(
+                value(row, f"{mg}_ess_to_local_load_kw") for row in rows
+            ) * delta_t_hours / day_count,
+            "ess_p2p_offer_energy_kwh_per_day": sum(
+                value(row, f"{mg}_ess_p2p_offer_kw") for row in rows
+            ) * delta_t_hours / day_count,
+            "ess_p2p_accepted_energy_kwh_per_day": sum(
+                value(row, f"{mg}_ess_p2p_sell_kw") for row in rows
+            ) * delta_t_hours / day_count,
+            "ess_p2p_unmatched_energy_kwh_per_day": sum(
+                value(row, f"{mg}_ess_p2p_unmatched_kw") for row in rows
+            ) * delta_t_hours / day_count,
+            "flexible_load_energy_kwh_per_day": sum(
+                value(row, f"{mg}_flexible_load_kw") for row in rows
+            ) * delta_t_hours / day_count,
+            "terminal_soc_mean": avg(terminal_soc),
+            "terminal_soc_target_mean": avg(terminal_target),
+            "terminal_soc_penalty_mean_per_day": avg(terminal_penalty),
+            "hourly_profile": hourly_profile,
+        }
+    return result
+
+
 def evaluate_policy_on_days(
     env: MultiMicrogridEnv,
     days: list[str],
@@ -614,11 +740,25 @@ def evaluate(
         "idle": idle_summary, "paired_daily": paired_days,
         **joint_summary,
     }
+    # All raw/executed ESS and DR actions are already recorded in hourly CSVs.
+    # Add a compact, comparable per-device/hour diagnostic for P0 Transformers.
+    if spec.slug == "matd3_transformer" and all(
+        getattr(algorithm.actors[mg], "native_dr_split_heads", False)
+        for mg in env.agent_ids
+    ):
+        result["dispatch_behavior_diagnostics"] = build_dispatch_behavior_diagnostics(
+            hourly_by_day, matd3_daily, env.agent_ids, float(env.delta_t)
+        )
     if output_dir is not None:
         destination = Path(output_dir)
         destination.mkdir(parents=True, exist_ok=True)
         write_json(destination / "test_summary.json", result)
         write_json(destination / "test_evaluation.json", result)
+        if "dispatch_behavior_diagnostics" in result:
+            write_json(
+                destination / "test_ess_dr_diagnostics.json",
+                result["dispatch_behavior_diagnostics"],
+            )
         write_csv(destination / "test_daily_metrics.csv", daily_rows)
         trajectory_dir = destination / "test_hourly_trajectories"
         trajectory_dir.mkdir(parents=True, exist_ok=True)
