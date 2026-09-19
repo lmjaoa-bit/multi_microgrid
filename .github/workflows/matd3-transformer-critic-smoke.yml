@@ -1,0 +1,86 @@
+name: MATD3 Transformer Critic isolated smoke
+
+on:
+  push:
+    branches: [codex/matd3-transformer-critic-8h]
+    paths:
+      - '.github/workflows/matd3-transformer-critic-smoke.yml'
+      - 'algorithms/matd3_transformer_critic/**'
+      - 'configs/algorithms/matd3_transformer_critic.yaml'
+      - 'tests/test_matd3_transformer_critic.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-and-short-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install requirements
+        run: python -m pip install -r requirements.txt
+      - name: Run repository tests
+        run: pytest -q
+      - name: Prepare data (same source generation as existing DR smoke)
+        run: python scripts/build_spatial_market_data.py
+      - name: Create short algorithm-only config
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          path = Path('configs/algorithms/matd3_transformer_critic.yaml')
+          cfg = yaml.safe_load(path.read_text(encoding='utf-8'))
+          cfg['algorithm']['batch_size'] = 8
+          cfg['algorithm']['warmup_steps'] = 0
+          cfg['algorithm']['replay_capacity'] = 256
+          cfg['runtime']['device'] = 'cpu'
+          cfg['runtime']['cpu_threads'] = 1
+          cfg['training']['episodes'] = 2
+          cfg['training']['test_episodes'] = 1
+          cfg['validation']['interval'] = 1
+          cfg['validation']['max_days'] = 1
+          cfg['logging']['diagnostic_interval'] = 2
+          Path('/tmp/critic_smoke.yaml').write_text(yaml.safe_dump(cfg), encoding='utf-8')
+          PY
+      - name: Shared training, validation, test, MILP, settlement and figures
+        run: >-
+          python scripts/run_experiment.py
+          --algorithm matd3_transformer_critic
+          --algorithm-config /tmp/critic_smoke.yaml
+          --device cpu --seed 42 --no-dashboard
+          --output-root /tmp/critic_smoke
+      - name: Verify standard artifacts and selected checkpoint
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path('/tmp/critic_smoke/matd3_transformer_critic')
+          latest = json.loads((root / 'latest_run.json').read_text())
+          run = Path(latest['run_directory'])
+          history = json.loads((run / 'training_history.json').read_text())
+          summary = json.loads((run / 'summary.json').read_text())
+          assert len(history) == 2
+          assert summary['test_days_count'] == 1
+          assert (run / 'checkpoints/best_model.pt').is_file()
+          assert (run / 'checkpoints/final_model.pt').is_file()
+          assert (run / 'test_daily_metrics.csv').is_file()
+          assert (run / 'test_summary.json').is_file()
+          assert len(list((run / 'figures').glob('*.png'))) == 15
+          assert len(list((run / 'figures').glob('*.pdf'))) == 15
+          (Path('/tmp/critic_run_path')).write_text(str(run))
+          print(run)
+          PY
+      - name: Q value accuracy diagnostic smoke (best checkpoint)
+        run: >-
+          python -m algorithms.matd3_transformer_critic.q_accuracy
+          --run "$(cat /tmp/critic_run_path)"
+          --split test --days 1 --seeds-per-day 1
+          --anchor-steps 0 --action-delta 0.95
+          --channel ess --no-forecast-noise --device cpu
