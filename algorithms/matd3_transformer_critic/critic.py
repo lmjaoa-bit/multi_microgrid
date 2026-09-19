@@ -70,6 +70,17 @@ class DeviceActionQ(nn.Module):
         if embed_dim <= 0 or heads <= 0 or embed_dim % heads or layers < 1:
             raise ValueError("Invalid Transformer embedding/heads/layers")
         self.state_dim = len(schema)
+        # Keep only current, actionable state on the direct skip. Forecasts
+        # must pass through the validity-masked Transformer; otherwise a raw
+        # skip could leak masked/padded future values directly to the Q head.
+        self.state_skip_names = tuple(
+            i for i, name in enumerate(schema)
+            if "_t+" not in name and not name.startswith("forecast_valid_t+")
+        )
+        self.register_buffer(
+            "state_skip_indices", torch.tensor(self.state_skip_names, dtype=torch.long),
+            persistent=False,
+        )
         self.action_dim = len(microgrids) * 3
         names = {name: idx for idx, name in enumerate(schema)}
         def idx(name: str) -> int:
@@ -169,7 +180,7 @@ class DeviceActionQ(nn.Module):
             embed_dim, heads, dropout=0.0, batch_first=True,
         )
         self.query_norm = nn.LayerNorm(embed_dim)
-        widths = [6 * embed_dim + self.state_dim + self.action_dim, *map(int, hidden_dims), 1]
+        widths = [6 * embed_dim + len(self.state_skip_names) + self.action_dim, *map(int, hidden_dims), 1]
         head_layers: list[nn.Module] = []
         for input_width, output_width in zip(widths[:-2], widths[1:-1]):
             head_layers.extend((nn.Linear(input_width, output_width), nn.ReLU()))
@@ -246,7 +257,7 @@ class DeviceActionQ(nn.Module):
              + self.type_embedding(torch.tensor([0, 1] * 3, device=state.device))[None])
         readout, _ = self.cross_attention(q, encoded, encoded, key_padding_mask=padding, need_weights=False)
         context = self.query_norm(q + readout).flatten(1)
-        return self.value_head(torch.cat((context, state, joint_action), dim=-1))
+        return self.value_head(torch.cat((context, state.index_select(1, self.state_skip_indices), joint_action), dim=-1))
 
 
 class TwinDeviceTransformerCritic(nn.Module):
