@@ -1,10 +1,11 @@
-# Spatio-Temporal Transformer Dispatch Actor (P0)
+# Spatio-Temporal Transformer Dispatch Actor (shared-head ablation)
 # Features:
 #   - Microgrid x time future tokenization
+#   - Episode-boundary attention masking
 #   - Separate current local-energy / ESS / DR / peer / market tokens
 #   - Learnable [DISPATCH] decision token with temporal + spatial embeddings
-#   - Separate ESS and DR residual decision heads
-#   - Centralized MLP TwinCritic intentionally unchanged in P0
+#   - One shared decoder/head jointly outputs [ESS, DR] actions
+#   - Centralized MLP TwinCritic intentionally unchanged
 algorithm:
   name: matd3_transformer
   hidden_dims: [128, 128]
