@@ -16,10 +16,11 @@ from core.single_dispatch import SingleDispatchProjector
 
 
 class Matd3Transformer(MATD3):
-    """MATD3 with P0 spatio-temporal Transformer dispatch actors.
+    """MATD3 with time-only forecast-token ablation and split ESS/DR heads.
 
-    The actor uses microgrid x time future tokens and independent ESS/DR
-    decision heads. The centralized TwinCritic remains unchanged in P0.
+    Only the P0.1 future token grouping is changed: a single mixed local+peer
+    token per forecast hour replaces the microgrid-by-time future grid.
+    The independent ESS/DR heads and centralized MLP TwinCritic are retained.
     """
 
     @classmethod
