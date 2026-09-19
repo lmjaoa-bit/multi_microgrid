@@ -133,6 +133,7 @@ class DeviceActionQ(nn.Module):
         self.register_buffer("future_indices", torch.tensor(future_index, dtype=torch.long), persistent=False)
         self.register_buffer("temp_indices", torch.tensor(temp_index, dtype=torch.long), persistent=False)
         self.register_buffer("temp_present", torch.tensor(temp_present, dtype=torch.float32), persistent=False)
+        self.has_forecast_validity = all(f"forecast_valid_t+{k}" in names for k in range(1, horizon + 1))
         self.register_buffer("future_valid_indices", torch.tensor(
             [idx(f"forecast_valid_t+{k}") if f"forecast_valid_t+{k}" in names else -1
              for k in range(1, horizon + 1)], dtype=torch.long,
@@ -192,7 +193,7 @@ class DeviceActionQ(nn.Module):
         tokens.append(self.market_embedding(state.index_select(1, self.market_indices)))
         forecast = state.index_select(1, self.future_indices.flatten()).reshape(batch, -1, 2)
         temperature = state.index_select(1, self.temp_indices) * self.temp_present
-        if bool((self.future_valid_indices >= 0).all()):
+        if self.has_forecast_validity:
             valid = (state.index_select(1, self.future_valid_indices) > 0.5)
             valid = valid.repeat_interleave(3, dim=1)
         else:
