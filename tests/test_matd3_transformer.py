@@ -221,40 +221,51 @@ def test_dr_features_are_part_of_transformer_inputs():
     assert "forecast_valid_t+1" in forecast_names
 
 
-def test_spatiotemporal_microgrid_time_tokens():
+def test_temporal_mixed_future_tokens_include_local_and_peer_forecasts():
     _, env, _, model = build_matd3_transformer()
     obs, _ = env.reset(seed=42, deterministic=True)
     for mg in env.agent_ids:
-        actor = model.actors[mg]
+        actor = model.actors[mg].eval()
         batch = torch.tensor(obs[mg], dtype=torch.float32).unsqueeze(0).repeat(3, 1)
-        components = actor.forward_components(batch)
+        components = actor.forward_components(batch, collect_diagnostics=False)
         peer_count = len(actor.peers)
-
-        assert components["spatiotemporal_tokens"].shape == (
-            3,
-            actor.forecast_horizon,
-            1 + peer_count,
-            actor.embed_dim,
+        assert components["forecast_tokens"].shape == (
+            3, actor.forecast_horizon, actor.embed_dim
         )
-        assert components["peer_future_tokens"].shape == (
-            3,
-            actor.forecast_horizon,
-            peer_count,
-            actor.embed_dim,
+        assert actor.num_future_tokens == actor.forecast_horizon
+        assert actor.num_tokens == 6 + peer_count + actor.forecast_horizon
+        assert actor.forecast_encoder[0].in_features == (
+            actor.local_future_feature_dim
+            + peer_count * actor.peer_future_feature_dim
         )
-        assert actor.num_future_tokens == actor.forecast_horizon * (1 + peer_count)
-        assert actor.num_tokens == 6 + peer_count + actor.num_future_tokens
+        assert "peer_future_tokens" not in components
+        assert "spatiotemporal_tokens" not in components
 
-        # Tokens for different peers at the same horizon must have separate
-        # spatial identities rather than being pre-mixed into one time token.
-        first_horizon = components["peer_future_tokens"][:, 0]
-        assert first_horizon.shape[1] == peer_count
-        if peer_count > 1:
-            assert not torch.equal(first_horizon[:, 0], first_horizon[:, 1])
+        # Alter an available peer prediction at t+1. It must affect the
+        # corresponding mixed time token, not just the current peer tokens.
+        schema = list(actor.schema)
+        valid_peer_feature = (
+            f"{actor.peers[0]}_energy_balance_t+1"
+            if actor.peer_representation == "energy_summary"
+            else f"{actor.peers[0]}_net_load_t+1"
+        )
+        changed = batch.clone()
+        changed[:, schema.index(valid_peer_feature)] += 2.0
+        changed_components = actor.forward_components(
+            changed, collect_diagnostics=False
+        )
+        assert not torch.allclose(
+            components["forecast_tokens"][:, 0],
+            changed_components["forecast_tokens"][:, 0],
+            atol=1e-7, rtol=1e-7,
+        )
+        torch.testing.assert_close(
+            components["forecast_tokens"][:, 1:],
+            changed_components["forecast_tokens"][:, 1:],
+        )
 
 
-
-def test_invalid_future_spatiotemporal_tokens_are_attention_masked():
+def test_invalid_future_temporal_tokens_are_attention_masked():
     _, env, _, model = build_matd3_transformer()
     observations, _ = env.reset(seed=42, deterministic=True)
     for mg in env.agent_ids:
@@ -274,19 +285,17 @@ def test_invalid_future_spatiotemporal_tokens_are_attention_masked():
         components = actor.forward_components(batch, collect_diagnostics=False)
         mask = components["attention_padding_mask"]
         prefix = 5 + len(actor.peers)
-        entities = 1 + len(actor.peers)
         assert mask.shape == (2, actor.num_tokens)
         assert mask.dtype == torch.bool
         assert not mask[:, :prefix].any()
         assert not mask[:, -1].any()  # market token
-        assert not mask[0, prefix:prefix + 3 * entities].any()
+        assert not mask[0, prefix:prefix + 3].any()
         assert mask[0, prefix + 3 * entities:-1].all()
-        assert not mask[1, prefix:prefix + 2 * entities].any()
+        assert not mask[1, prefix:prefix + 2].any()
         assert mask[1, prefix + 2 * entities:-1].all()
 
         # Invalid local AND peer forecasts may contain arbitrary data without
-        # changing the ESS or DR action; their spatial/time embeddings must
-        # also be excluded from attention.
+        # changing the ESS or DR action; the mixed hourly token is masked.
         original = batch[0].clone()
         changed = original.clone()
         for k in range(4, horizon + 1):
