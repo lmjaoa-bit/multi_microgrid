@@ -41,9 +41,9 @@ ESS_FEATURES = (
 
 
 class TransformerDispatchActor(nn.Module):
-    """Spatio-temporal dispatch actor with explicit ESS and DR decision heads.
+    """Spatio-temporal dispatch actor for the shared-head ablation.
 
-    P0 architecture:
+    Architecture:
       1. Future information is tokenized as a microgrid x time grid instead of
          mixing all peers into one token per horizon.
       2. The active microgrid has a rich local future token at each t+k.
@@ -51,12 +51,15 @@ class TransformerDispatchActor(nn.Module):
       4. Current local energy, ESS state, DR state, peers, market and clock each
          receive dedicated tokens.
       5. A shared Transformer produces the dispatch representation.
-      6. ESS and DR actions are decoded by separate residual branches/heads.
+      6. ESS and DR actions are decoded jointly by one shared 2-D action head.
 
-    The centralized critic is intentionally unchanged in this P0 step.
+    The centralized critic is intentionally unchanged.
     """
 
-    native_dr_split_heads = True
+    # Native two-action output; this ablation intentionally uses one shared
+    # decoder/head for ESS and DR while keeping the P0 spatio-temporal tokens.
+    native_dr_split_heads = False
+    native_dr_action_head = True
 
     def __init__(
         self,
@@ -396,36 +399,26 @@ class TransformerDispatchActor(nn.Module):
             enable_nested_tensor=False,
         )
 
-        # Head-specific residual interactions.
-        self.ess_interact_norm = nn.LayerNorm(self.embed_dim)
-        self.dr_interact_norm = nn.LayerNorm(self.embed_dim)
+        # Shared ESS/DR decoder ablation.  The representation still contains
+        # dedicated ESS and DR state embeddings, but both actions are decoded
+        # jointly by the same backbone and final 2-D action head.
+        self.shared_interact_norm = nn.LayerNorm(self.embed_dim)
+        fused_dim = self.embed_dim * 5
+        layers: list[nn.Module] = []
+        width = fused_dim
+        for hidden in hidden_dims:
+            layers.extend([
+                nn.Linear(width, hidden),
+                nn.LayerNorm(hidden),
+                nn.ReLU(),
+            ])
+            width = hidden
+        self.dispatch_backbone = nn.Sequential(*layers)
 
-        fused_dim = self.embed_dim * 4
-
-        def make_backbone() -> nn.Sequential:
-            layers: list[nn.Module] = []
-            width = fused_dim
-            for hidden in hidden_dims:
-                layers.extend([
-                    nn.Linear(width, hidden),
-                    nn.LayerNorm(hidden),
-                    nn.ReLU(),
-                ])
-                width = hidden
-            return nn.Sequential(*layers)
-
-        self.ess_backbone = make_backbone()
-        self.dr_backbone = make_backbone()
-        final_width = hidden_dims[-1] if hidden_dims else fused_dim
-
-        ess_linear = nn.Linear(final_width, 1)
-        dr_linear = nn.Linear(final_width, 1)
-        nn.init.uniform_(ess_linear.weight, -3e-3, 3e-3)
-        nn.init.uniform_(ess_linear.bias, -3e-3, 3e-3)
-        nn.init.uniform_(dr_linear.weight, -3e-3, 3e-3)
-        nn.init.uniform_(dr_linear.bias, -3e-3, 3e-3)
-        self.ess_head = nn.Sequential(ess_linear, nn.Tanh())
-        self.dr_head = nn.Sequential(dr_linear, nn.Tanh())
+        action_linear = nn.Linear(width, 2)
+        nn.init.uniform_(action_linear.weight, -3e-3, 3e-3)
+        nn.init.uniform_(action_linear.bias, -3e-3, 3e-3)
+        self.dispatch_head = nn.Sequential(action_linear, nn.Tanh())
 
         self._parameter_count = sum(p.numel() for p in self.parameters())
         self.last_diagnostics: dict[str, float] = {}
@@ -607,20 +600,17 @@ class TransformerDispatchActor(nn.Module):
             attended = self.transformer(tokens)
         dispatch_rep = attended[:, 0, :]
 
-        ess_interact = self.ess_interact_norm(dispatch_rep * ess_rep)
-        dr_interact = self.dr_interact_norm(dispatch_rep * dr_rep)
-
-        ess_fused = torch.cat(
-            [dispatch_rep, local_rep, ess_rep, ess_interact], dim=-1
+        shared_interact = self.shared_interact_norm(
+            dispatch_rep * (ess_rep + dr_rep)
         )
-        dr_fused = torch.cat(
-            [dispatch_rep, local_rep, dr_rep, dr_interact], dim=-1
+        fused = torch.cat(
+            [dispatch_rep, local_rep, ess_rep, dr_rep, shared_interact],
+            dim=-1,
         )
-        ess_features = self.ess_backbone(ess_fused)
-        dr_features = self.dr_backbone(dr_fused)
-        ess_action = self.ess_head(ess_features)
-        dr_action = self.dr_head(dr_features)
-        action = torch.cat([ess_action, dr_action], dim=-1)
+        features = self.dispatch_backbone(fused)
+        action = self.dispatch_head(features)
+        ess_action = action[:, 0:1]
+        dr_action = action[:, 1:2]
 
         if collect_diagnostics:
             d_norm = float(
@@ -629,20 +619,15 @@ class TransformerDispatchActor(nn.Module):
             l_norm = float(local_rep.norm(dim=-1).mean().detach().cpu())
             ess_norm = float(ess_rep.norm(dim=-1).mean().detach().cpu())
             dr_norm = float(dr_rep.norm(dim=-1).mean().detach().cpu())
-            ess_i_norm = float(
-                ess_interact.norm(dim=-1).mean().detach().cpu()
-            )
-            dr_i_norm = float(
-                dr_interact.norm(dim=-1).mean().detach().cpu()
+            shared_i_norm = float(
+                shared_interact.norm(dim=-1).mean().detach().cpu()
             )
             self.last_diagnostics = {
                 "dispatch_norm": d_norm,
                 "local_norm": l_norm,
                 "ess_norm": ess_norm,
                 "dr_norm": dr_norm,
-                "ess_interact_norm": ess_i_norm,
-                "dr_interact_norm": dr_i_norm,
-                "interact_norm": 0.5 * (ess_i_norm + dr_i_norm),
+                "interact_norm": shared_i_norm,
                 "norm_ratio": d_norm / (l_norm + 1e-8),
             }
 
@@ -654,12 +639,8 @@ class TransformerDispatchActor(nn.Module):
             "local_rep": local_rep,
             "ess_rep": ess_rep,
             "dr_rep": dr_rep,
-            "ess_interact": ess_interact,
-            "dr_interact": dr_interact,
-            "interact": 0.5 * (ess_interact + dr_interact),
-            "ess_fused": ess_fused,
-            "dr_fused": dr_fused,
-            "fused": torch.cat([ess_fused, dr_fused], dim=-1),
+            "interact": shared_interact,
+            "fused": fused,
             "attended": attended,
             "tokens": tokens,
             # Backward-compatible name: active-microgrid future tokens.
@@ -721,15 +702,7 @@ class TransformerDispatchActor(nn.Module):
             ),
             "market_tokenizer": (self.market_encoder,),
             "transformer": (self.transformer,),
-            "interact_norm": (
-                self.ess_interact_norm, self.dr_interact_norm,
-            ),
-            "ess_interact_norm": (self.ess_interact_norm,),
-            "dr_interact_norm": (self.dr_interact_norm,),
-            "backbone": (self.ess_backbone, self.dr_backbone),
-            "ess_backbone": (self.ess_backbone,),
-            "dr_backbone": (self.dr_backbone,),
-            "head": (self.ess_head, self.dr_head),
-            "ess_head": (self.ess_head,),
-            "dr_head": (self.dr_head,),
+            "interact_norm": (self.shared_interact_norm,),
+            "backbone": (self.dispatch_backbone,),
+            "head": (self.dispatch_head,),
         }
