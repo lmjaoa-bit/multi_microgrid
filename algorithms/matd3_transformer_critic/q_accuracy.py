@@ -253,21 +253,22 @@ def diagnose(
             } for mg in algorithm.agent_ids
         },
     }
-    with (run_dir / "critic_q_accuracy_cases.csv").open("w", newline="", encoding="utf-8") as fp:
+    artifact_tag = f"{focal}_{'ess' if channel == 0 else 'dr'}"
+    with (run_dir / f"critic_q_accuracy_cases_{artifact_tag}.csv").open("w", newline="", encoding="utf-8") as fp:
         writer = csv.DictWriter(fp, fieldnames=list(rows[0]))
         writer.writeheader()
         writer.writerows(rows)
-    with (run_dir / "critic_q_action_pairs.csv").open("w", newline="", encoding="utf-8") as fp:
+    with (run_dir / f"critic_q_action_pairs_{artifact_tag}.csv").open("w", newline="", encoding="utf-8") as fp:
         if paired:
             writer = csv.DictWriter(fp, fieldnames=list(paired[0]))
             writer.writeheader()
             writer.writerows(paired)
     if future_probes:
-        with (run_dir / "critic_future_action_probe.csv").open("w", newline="", encoding="utf-8") as fp:
+        with (run_dir / f"critic_future_action_probe_{artifact_tag}.csv").open("w", newline="", encoding="utf-8") as fp:
             writer = csv.DictWriter(fp, fieldnames=list(future_probes[0]))
             writer.writeheader()
             writer.writerows(future_probes)
-    (run_dir / "critic_q_accuracy.json").write_text(
+    (run_dir / f"critic_q_accuracy_{artifact_tag}.json").write_text(
         json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8",
     )
     return summary
