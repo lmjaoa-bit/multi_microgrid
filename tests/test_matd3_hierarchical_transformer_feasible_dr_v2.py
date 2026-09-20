@@ -645,6 +645,95 @@ def test_diagnostic_schedule_and_keys(v2_env_and_config):
         assert np.isfinite(actor_diags["mg3"][k])
 
 
+def test_checkpoint_round_trip(v2_env_and_config, tmp_path):
+    env, config = v2_env_and_config
+    algo1 = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=42)
+
+    obs, _ = env.reset(seed=42)
+    state = env.global_state()
+    for _ in range(30):
+        actions = algo1.select_actions(obs, noise_std=0.1)
+        next_obs, rewards, done, info = env.step(actions)
+        next_state = env.global_state()
+        algo1.replay.add(obs, state, actions, sum(rewards.values()), next_obs, next_state, done)
+        obs = next_obs
+        state = next_state
+        if done:
+            obs, _ = env.reset(seed=42)
+            state = env.global_state()
+
+    algo1.update(batch_size=16)
+    ckpt_path = tmp_path / "model.pt"
+    algo1.save(ckpt_path)
+
+    algo2 = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=99)
+    algo2.load(ckpt_path)
+
+    assert algo1.update_steps == algo2.update_steps
+    assert algo1.action_semantics == algo2.action_semantics
+    assert algo1.projection_signature == algo2.projection_signature
+    assert algo1.adaptive_dr_config == algo2.adaptive_dr_config
+    assert algo1.observation_schemas == algo2.observation_schemas
+    assert algo1.state_schema == algo2.state_schema
+    assert algo1.normalizers_by_microgrid == algo2.normalizers_by_microgrid
+    assert algo1.normalizers_digest == algo2.normalizers_digest
+    assert algo1.normalization_signature == algo2.normalization_signature
+
+    for p1, p2 in zip(algo1.actors.parameters(), algo2.actors.parameters()):
+        assert torch.equal(p1, p2)
+    for p1, p2 in zip(algo1.target_actors.parameters(), algo2.target_actors.parameters()):
+        assert torch.equal(p1, p2)
+    for p1, p2 in zip(algo1.critics.parameters(), algo2.critics.parameters()):
+        assert torch.equal(p1, p2)
+    for p1, p2 in zip(algo1.target_critics.parameters(), algo2.target_critics.parameters()):
+        assert torch.equal(p1, p2)
+
+
+@pytest.mark.parametrize(
+    ("mutation_key", "mutation_val"),
+    [
+        ("algorithm_slug", "matd3_hierarchical_transformer_feasible_dr"),
+        ("action_semantics", "single_dispatch_feasible_dr_v1"),
+        ("projection_signature", "0" * 64),
+        ("adaptive_dr_config", {"hvac": {"enabled": False}}),
+        ("observation_schemas", {"mg1": ("wrong_field",)}),
+        ("state_schema", ("wrong_field",)),
+        ("normalizers_by_microgrid", {"mg1": {"load": 1.0}}),
+        ("normalization_signature", "0" * 64),
+    ],
+)
+def test_checkpoint_rejection_on_mutation(v2_env_and_config, tmp_path, mutation_key, mutation_val):
+    env, config = v2_env_and_config
+    algo = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=42)
+    ckpt_path = tmp_path / "model.pt"
+    algo.save(ckpt_path)
+
+    raw_ckpt = torch.load(ckpt_path, weights_only=False)
+    raw_ckpt[mutation_key] = mutation_val
+    mutated_path = tmp_path / f"mutated_{mutation_key}.pt"
+    torch.save(raw_ckpt, mutated_path)
+
+    algo2 = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=99)
+    with pytest.raises(ValueError, match=mutation_key):
+        algo2.load(mutated_path)
+
+
+def test_checkpoint_rejection_on_omitted_field(v2_env_and_config, tmp_path):
+    env, config = v2_env_and_config
+    algo = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=42)
+    ckpt_path = tmp_path / "model.pt"
+    algo.save(ckpt_path)
+
+    raw_ckpt = torch.load(ckpt_path, weights_only=False)
+    del raw_ckpt["normalization_signature"]
+    omitted_path = tmp_path / "omitted.pt"
+    torch.save(raw_ckpt, omitted_path)
+
+    algo2 = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=99)
+    with pytest.raises(ValueError, match="normalization_signature"):
+        algo2.load(omitted_path)
+
+
 
 
 

@@ -86,6 +86,7 @@ class Matd3HierarchicalTransformerFeasibleDRV2(Matd3HierarchicalTransformerFeasi
         normalizers_json = json.dumps(normalizers_by_microgrid, sort_keys=True, separators=(",", ":"))
         self.normalizers_by_microgrid = normalizers_by_microgrid
         self.normalizers_digest = hashlib.sha256(normalizers_json.encode("utf-8")).hexdigest()
+        self.normalization_signature = self.normalizers_digest
 
         private_config = copy.deepcopy(dict(config))
         private_algo = private_config.setdefault("algorithm", {})
@@ -155,3 +156,114 @@ class Matd3HierarchicalTransformerFeasibleDRV2(Matd3HierarchicalTransformerFeasi
 
     def update(self, batch_size: int) -> dict[str, Any]:
         return update_adaptive_dr(self, batch_size)
+
+    def save(self, path: str | Path) -> None:
+        torch.save(
+            {
+                "algorithm_slug": "matd3_hierarchical_transformer_feasible_dr_v2",
+                "action_semantics": self.action_semantics,
+                "projection_signature": self.projection_signature,
+                "adaptive_dr_config": _canonicalize_dict(self.adaptive_dr_config),
+                "observation_schemas": self.observation_schemas,
+                "state_schema": self.state_schema,
+                "normalizers_by_microgrid": self.normalizers_by_microgrid,
+                "normalization_signature": self.normalization_signature,
+                "actors": self.actors.state_dict(),
+                "target_actors": self.target_actors.state_dict(),
+                "critics": self.critics.state_dict(),
+                "target_critics": self.target_critics.state_dict(),
+                "actor_optimizers": {mg: opt.state_dict() for mg, opt in self.actor_optimizers.items()},
+                "critic_optimizers": {mg: opt.state_dict() for mg, opt in self.critic_optimizers.items()},
+                "update_steps": self.update_steps,
+            },
+            Path(path),
+        )
+
+    def load(self, path: str | Path) -> None:
+        checkpoint = torch.load(Path(path), map_location=self.device, weights_only=False)
+
+        required_fields = (
+            "algorithm_slug",
+            "action_semantics",
+            "projection_signature",
+            "adaptive_dr_config",
+            "observation_schemas",
+            "state_schema",
+            "normalizers_by_microgrid",
+            "normalization_signature",
+            "actors",
+            "target_actors",
+            "critics",
+            "target_critics",
+            "actor_optimizers",
+            "critic_optimizers",
+            "update_steps",
+        )
+        for field in required_fields:
+            if field not in checkpoint:
+                raise ValueError(f"Checkpoint missing required field: {field}")
+
+        slug = checkpoint["algorithm_slug"]
+        if slug != "matd3_hierarchical_transformer_feasible_dr_v2":
+            raise ValueError(
+                f"Incompatible algorithm_slug: expected matd3_hierarchical_transformer_feasible_dr_v2, got {slug}"
+            )
+        if checkpoint["action_semantics"] != self.action_semantics:
+            raise ValueError(
+                f"Incompatible action_semantics: expected {self.action_semantics}, got {checkpoint['action_semantics']}"
+            )
+        if checkpoint["projection_signature"] != self.projection_signature:
+            raise ValueError(
+                f"Incompatible projection_signature: expected {self.projection_signature}, got {checkpoint['projection_signature']}"
+            )
+        if _canonicalize_dict(checkpoint["adaptive_dr_config"]) != _canonicalize_dict(self.adaptive_dr_config):
+            raise ValueError(
+                f"Incompatible adaptive_dr_config: expected {self.adaptive_dr_config}, got {checkpoint['adaptive_dr_config']}"
+            )
+        if checkpoint["observation_schemas"] != self.observation_schemas:
+            raise ValueError(
+                f"Incompatible observation_schemas: expected {self.observation_schemas}, got {checkpoint['observation_schemas']}"
+            )
+        if checkpoint["state_schema"] != self.state_schema:
+            raise ValueError(
+                f"Incompatible state_schema: expected {self.state_schema}, got {checkpoint['state_schema']}"
+            )
+        if checkpoint["normalizers_by_microgrid"] != self.normalizers_by_microgrid:
+            raise ValueError(
+                f"Incompatible normalizers_by_microgrid: expected {self.normalizers_by_microgrid}, got {checkpoint['normalizers_by_microgrid']}"
+            )
+        if checkpoint["normalization_signature"] != self.normalization_signature:
+            raise ValueError(
+                f"Incompatible normalization_signature: expected {self.normalization_signature}, got {checkpoint['normalization_signature']}"
+            )
+
+        # Validate tensor keys before mutating live state
+        if set(checkpoint["actors"].keys()) != set(self.actors.state_dict().keys()):
+            raise ValueError("Incompatible actors state dict keys")
+        if set(checkpoint["target_actors"].keys()) != set(self.target_actors.state_dict().keys()):
+            raise ValueError("Incompatible target_actors state dict keys")
+        if set(checkpoint["critics"].keys()) != set(self.critics.state_dict().keys()):
+            raise ValueError("Incompatible critics state dict keys")
+        if set(checkpoint["target_critics"].keys()) != set(self.target_critics.state_dict().keys()):
+            raise ValueError("Incompatible target_critics state dict keys")
+        if set(checkpoint["actor_optimizers"].keys()) != set(self.actor_optimizers.keys()):
+            raise ValueError("Incompatible actor_optimizers keys")
+        if set(checkpoint["critic_optimizers"].keys()) != set(self.critic_optimizers.keys()):
+            raise ValueError("Incompatible critic_optimizers keys")
+
+        self.actors.load_state_dict(checkpoint["actors"])
+        self.target_actors.load_state_dict(checkpoint["target_actors"])
+        self.critics.load_state_dict(checkpoint["critics"])
+        self.target_critics.load_state_dict(checkpoint["target_critics"])
+        for mg in self.agent_ids:
+            self.actor_optimizers[mg].load_state_dict(checkpoint["actor_optimizers"][mg])
+            self.critic_optimizers[mg].load_state_dict(checkpoint["critic_optimizers"][mg])
+        self.update_steps = int(checkpoint["update_steps"])
+
+
+def _canonicalize_dict(obj: Any) -> Any:
+    if isinstance(obj, Mapping):
+        return {k: _canonicalize_dict(v) for k, v in sorted(obj.items())}
+    if isinstance(obj, list):
+        return [_canonicalize_dict(item) for item in obj]
+    return obj
