@@ -190,8 +190,14 @@ def _append_actor_diagnostics(path: Path, episode: int, record: Mapping[str, Any
         rows.append(row)
     if rows:
         exists = path.exists()
+        if exists:
+            with path.open("r", encoding="utf-8") as handle:
+                fieldnames = next(csv.reader(handle), [])
+        else:
+            fieldnames = list(dict.fromkeys(k for row in rows for k in row))
+
         with path.open("a", encoding="utf-8", newline="") as handle:
-            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+            writer = csv.DictWriter(handle, fieldnames=fieldnames, extrasaction="ignore")
             if not exists:
                 writer.writeheader()
             writer.writerows(rows)

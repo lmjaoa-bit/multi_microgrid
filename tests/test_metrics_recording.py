@@ -176,3 +176,41 @@ def test_json_writer_converts_numpy_and_rejects_nonfinite_json(tmp_path: Path) -
     assert value["bad"] is None
     assert value["serialization_warnings"][0]["field"] == "bad"
     assert distribution_statistics([1.0, 2.0, 3.0])["median"] == 2.0
+
+
+def test_append_actor_diagnostics_supports_heterogeneous_agents(tmp_path: Path) -> None:
+    from experiments.training_pipeline import _append_actor_diagnostics
+
+    csv_path = tmp_path / "actor_diagnostics.csv"
+    record1 = {
+        "actor_diagnostic_statistics": {
+            "mg1": {
+                "actor_dr_latent": {"mean": 0.1, "p95": 0.2, "max": 0.3, "count": 1, "nonfinite_count": 0},
+            },
+            "mg2": {
+                "actor_dr_latent": {"mean": 0.2, "p95": 0.3, "max": 0.4, "count": 1, "nonfinite_count": 0},
+                "actor_hvac_recovery_anchor": {"mean": 10.0, "p95": 11.0, "max": 12.0, "count": 1, "nonfinite_count": 0},
+            },
+            "mg3": {
+                "actor_dr_latent": {"mean": 0.3, "p95": 0.4, "max": 0.5, "count": 1, "nonfinite_count": 0},
+                "actor_ev_mandatory_floor": {"mean": 20.0, "p95": 21.0, "max": 22.0, "count": 1, "nonfinite_count": 0},
+            },
+        }
+    }
+    _append_actor_diagnostics(csv_path, episode=1, record=record1)
+    assert csv_path.exists()
+
+    with csv_path.open(encoding="utf-8", newline="") as f:
+        reader = list(csv.DictReader(f))
+    assert len(reader) == 3
+    assert reader[0]["microgrid"] == "mg1"
+    assert reader[1]["microgrid"] == "mg2"
+    assert reader[2]["microgrid"] == "mg3"
+    assert "actor_hvac_recovery_anchor_mean" in reader[1]
+    assert "actor_ev_mandatory_floor_mean" in reader[2]
+
+    # Append second episode
+    _append_actor_diagnostics(csv_path, episode=2, record=record1)
+    with csv_path.open(encoding="utf-8", newline="") as f:
+        reader2 = list(csv.DictReader(f))
+    assert len(reader2) == 6
