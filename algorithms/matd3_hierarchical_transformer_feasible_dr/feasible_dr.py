@@ -67,33 +67,17 @@ class FeasibleDRTransform(nn.Module):
         def idx_or_default(name: str) -> int:
             return names.get(name, -1)
 
-        self.register_buffer(
-            "hvac_min_idx", torch.tensor(idx_or_default("hvac_feasible_min"), dtype=torch.long), persistent=False
-        )
-        self.register_buffer(
-            "hvac_max_idx", torch.tensor(idx_or_default("hvac_feasible_max"), dtype=torch.long), persistent=False
-        )
-        self.register_buffer(
-            "ev_min_idx", torch.tensor(idx_or_default("ev_feasible_min"), dtype=torch.long), persistent=False
-        )
-        self.register_buffer(
-            "ev_max_idx", torch.tensor(idx_or_default("ev_feasible_max"), dtype=torch.long), persistent=False
-        )
-        self.register_buffer(
-            "ev_avail_idx", torch.tensor(idx_or_default("ev_available"), dtype=torch.long), persistent=False
-        )
-        self.register_buffer(
-            "rem_energy_idx", torch.tensor(idx_or_default("remaining_energy"), dtype=torch.long), persistent=False
-        )
-        self.register_buffer(
-            "hours_dep_idx", torch.tensor(idx_or_default("hours_to_departure"), dtype=torch.long), persistent=False
-        )
-        self.register_buffer(
-            "deadline_pressure_idx", torch.tensor(idx_or_default("deadline_pressure"), dtype=torch.long), persistent=False
-        )
-        self.register_buffer(
-            "recovery_pressure_idx", torch.tensor(idx_or_default("thermal_recovery_pressure"), dtype=torch.long), persistent=False
-        )
+        # Schema positions are Python metadata, not tensor state. Keeping them as
+        # integers avoids moving slice boundaries onto CUDA with the module.
+        self.hvac_min_idx = idx_or_default("hvac_feasible_min")
+        self.hvac_max_idx = idx_or_default("hvac_feasible_max")
+        self.ev_min_idx = idx_or_default("ev_feasible_min")
+        self.ev_max_idx = idx_or_default("ev_feasible_max")
+        self.ev_avail_idx = idx_or_default("ev_available")
+        self.rem_energy_idx = idx_or_default("remaining_energy")
+        self.hours_dep_idx = idx_or_default("hours_to_departure")
+        self.deadline_pressure_idx = idx_or_default("deadline_pressure")
+        self.recovery_pressure_idx = idx_or_default("thermal_recovery_pressure")
 
     @classmethod
     def for_test(
@@ -140,15 +124,17 @@ class FeasibleDRTransform(nn.Module):
         agents_cfg = feasible_config.get("agents", {})
         # If explicitly disabled for this microgrid type or ID
         if dr_type == "industrial_mill":
-            enabled = bool(agents_cfg.get("mg1", False))
+            enabled = enabled and bool(agents_cfg.get("mg1", False))
         elif dr_type == "commercial_hvac":
-            enabled = bool(agents_cfg.get("mg2", True))
+            enabled = enabled and bool(agents_cfg.get("mg2", True))
         elif dr_type == "ev_charging":
-            enabled = bool(agents_cfg.get("mg3", True))
+            enabled = enabled and bool(agents_cfg.get("mg3", True))
 
         interval_epsilon = float(feasible_config.get("interval_epsilon", 1e-6))
         ev_cfg = feasible_config.get("ev", {})
         hvac_cfg = feasible_config.get("hvac", {})
+        if dr_type == "commercial_hvac":
+            enabled = enabled and bool(hvac_cfg.get("interval_mapping_enabled", True))
 
         max_charge_kw = 93.6
         efficiency = 0.93

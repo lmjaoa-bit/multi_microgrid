@@ -292,4 +292,68 @@ def test_checkpoint_round_trip_and_incompatibility(env_and_config, tmp_path):
         restored.load(wrong_config)
 
 
+def test_global_disable_overrides_per_agent_enable():
+    transform = FeasibleDRTransform.from_config(
+        "commercial_hvac",
+        ("hvac_feasible_min", "hvac_feasible_max"),
+        {
+            "enabled": False,
+            "agents": {"mg2": True},
+            "hvac": {"interval_mapping_enabled": True},
+        },
+    )
+    observation = torch.tensor([[-0.5, 0.25]])
+    latent = torch.tensor([[0.8]])
+
+    assert torch.allclose(transform(observation, latent), latent)
+
+
+def test_hvac_interval_mapping_switch_disables_mapping():
+    transform = FeasibleDRTransform.from_config(
+        "commercial_hvac",
+        ("hvac_feasible_min", "hvac_feasible_max"),
+        {
+            "enabled": True,
+            "agents": {"mg2": True},
+            "hvac": {"interval_mapping_enabled": False},
+        },
+    )
+    observation = torch.tensor([[-0.5, 0.25]])
+    latent = torch.tensor([[0.8]])
+
+    assert torch.allclose(transform(observation, latent), latent)
+
+
+def test_schema_indices_remain_device_independent_python_integers():
+    transform = FeasibleDRTransform.for_test(
+        dr_type="commercial_hvac",
+        schema=("hvac_feasible_min", "hvac_feasible_max"),
+    )
+    transform.to("cpu")
+
+    assert isinstance(transform.hvac_min_idx, int)
+    assert isinstance(transform.hvac_max_idx, int)
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("exploration_in_latent_space",), False, "exploration_in_latent_space"),
+        (("target_smoothing_in_latent_space",), False, "target_smoothing_in_latent_space"),
+        (("hvac", "recovery_anchor_enabled"), True, "recovery_anchor_enabled"),
+    ],
+)
+def test_unsupported_v1_modes_are_rejected(env_and_config, path, value, message):
+    env, _, config = env_and_config
+    current = config["algorithm"]["feasible_dr"]
+    if len(path) == 1:
+        current[path[0]] = value
+    else:
+        current[path[0]][path[1]] = value
+
+    with pytest.raises(ValueError, match=message):
+        Matd3HierarchicalTransformerFeasibleDR.from_env(
+            env, config, device="cpu", seed=42
+        )
+
 

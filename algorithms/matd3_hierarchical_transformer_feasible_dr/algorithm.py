@@ -31,10 +31,10 @@ class Matd3HierarchicalTransformerFeasibleDR(Matd3HierarchicalTransformer):
         device: str = "cpu",
         seed: int = 42,
     ) -> None:
-        super().__init__(env, config, device=device, seed=seed)
-
         settings = config.get("algorithm", config)
         self.feasible_dr_config = copy.deepcopy(settings.get("feasible_dr", {}))
+        self._validate_feasible_dr_config(self.feasible_dr_config)
+        super().__init__(env, config, device=device, seed=seed)
 
         net = settings.get("network", {})
         embed_dim = int(net.get("embed_dim", 32))
@@ -96,6 +96,22 @@ class Matd3HierarchicalTransformerFeasibleDR(Matd3HierarchicalTransformer):
         self._diagnostic_plain_actor = False
         self.replay = FastReplayBuffer.from_replay(self.replay)
 
+    @staticmethod
+    def _validate_feasible_dr_config(config: Mapping[str, Any]) -> None:
+        if not bool(config.get("exploration_in_latent_space", True)):
+            raise ValueError(
+                "Feasible DR V1 requires exploration_in_latent_space=true"
+            )
+        if not bool(config.get("target_smoothing_in_latent_space", True)):
+            raise ValueError(
+                "Feasible DR V1 requires target_smoothing_in_latent_space=true"
+            )
+        hvac = config.get("hvac", {})
+        if bool(hvac.get("recovery_anchor_enabled", False)):
+            raise ValueError(
+                "Feasible DR V1 does not implement recovery_anchor_enabled=true"
+            )
+
     def select_actions(self, observations: Mapping[str, Any], noise_std: float = 0.0) -> dict[str, np.ndarray]:
         return select_feasible_actions(self, observations, noise_std=noise_std)
 
@@ -143,4 +159,3 @@ class Matd3HierarchicalTransformerFeasibleDR(Matd3HierarchicalTransformer):
         self.critics.load_state_dict(checkpoint["critics"])
         self.target_critics.load_state_dict(checkpoint["target_critics"])
         self.update_steps = int(checkpoint.get("update_steps", 0))
-
