@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
+import numpy as np
 import torch
 from torch import nn
 
+from algorithms.diagnostic_sampling import DiagnosticSchedule
 from algorithms.matd3_hierarchical_transformer.algorithm import Matd3HierarchicalTransformer
 from algorithms.matd3_hierarchical_transformer_feasible_dr.actor import FeasibleDRActor
+from algorithms.matd3_hierarchical_transformer_feasible_dr.training import (
+    select_feasible_actions,
+    update_feasible_dr,
+)
+from algorithms.runtime_helpers import FastReplayBuffer
 
 
 class Matd3HierarchicalTransformerFeasibleDR(Matd3HierarchicalTransformer):
@@ -79,3 +87,16 @@ class Matd3HierarchicalTransformerFeasibleDR(Matd3HierarchicalTransformer):
             }
             for mg, actor in self.actors.items()
         }
+
+        # Sparse diagnostic schedule & fast replay buffer (without post-mapping noise injection)
+        logging_cfg = config.get("logging", {}) if isinstance(config, Mapping) else {}
+        interval = logging_cfg.get("diagnostic_interval", 20)
+        self.diagnostic_schedule = DiagnosticSchedule(interval, self.policy_delay)
+        self._diagnostic_plain_actor = False
+        self.replay = FastReplayBuffer.from_replay(self.replay)
+
+    def select_actions(self, observations: Mapping[str, Any], noise_std: float = 0.0) -> dict[str, np.ndarray]:
+        return select_feasible_actions(self, observations, noise_std=noise_std)
+
+    def update(self, batch_size: int) -> dict[str, Any]:
+        return update_feasible_dr(self, batch_size)

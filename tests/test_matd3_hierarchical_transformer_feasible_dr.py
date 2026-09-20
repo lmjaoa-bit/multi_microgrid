@@ -14,6 +14,7 @@ from algorithms.matd3_hierarchical_transformer_feasible_dr.feasible_dr import (
     FeasibleDRTransform,
     latest_feasible_ev_floor,
 )
+from algorithms.matd3_hierarchical_transformer_feasible_dr.training import map_noisy_latent
 from algorithms.registry import get_algorithm_spec
 from envs.multi_microgrid_env import MultiMicrogridEnv
 
@@ -148,4 +149,114 @@ def test_mg2_and_mg3_actor_requests_are_feasible(env_and_config):
         remapped = algorithm.actors[mg].map_latent_actions(tensor, latent)
         assert torch.allclose(action, remapped)
         assert action.shape == (1, 2)
+
+
+def test_noisy_rollout_actions_remain_feasible(env_and_config):
+    env, _, config = env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDR.from_env(
+        env, config, device="cpu", seed=42
+    )
+    observations, _ = env.reset(seed=42)
+    for _ in range(24):
+        actions = algorithm.select_actions(observations, noise_std=2.0)
+        observations, _, done, info = env.step(actions)
+        for mg in ("mg2", "mg3"):
+            assert not info["plans"][mg]["dr_projected"]
+        if done:
+            break
+
+
+def test_select_actions_accepts_heterogeneous_observation_shapes(env_and_config):
+    env, _, config = env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDR.from_env(
+        env, config, device="cpu", seed=42
+    )
+    observations, _ = env.reset(seed=42)
+    actions = algorithm.select_actions(observations, noise_std=0.2)
+    assert set(actions) == set(env.agent_ids)
+    assert all(action.shape == (2,) for action in actions.values())
+
+
+def test_replay_stores_environment_actions_not_latent_preferences(env_and_config):
+    env, _, config = env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDR.from_env(
+        env, config, device="cpu", seed=42
+    )
+    observations, _ = env.reset(seed=42)
+    state = env.global_state()
+    actions = algorithm.select_actions(observations, noise_std=0.5)
+    next_observations, rewards, done, _ = env.step(actions)
+    algorithm.replay.add(
+        observations,
+        state,
+        actions,
+        sum(rewards.values()),
+        next_observations,
+        env.global_state(),
+        done,
+    )
+    batch = algorithm.replay.sample(1, env.agent_ids, torch.device("cpu"))
+    for mg in env.agent_ids:
+        assert torch.allclose(batch["actions"][mg][0], torch.as_tensor(actions[mg]))
+
+
+def test_target_noise_is_mapped_before_projection(env_and_config):
+    env, _, config = env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDR.from_env(
+        env, config, device="cpu", seed=42
+    )
+    observations, _ = env.reset(seed=42)
+    state = torch.as_tensor(env.global_state(), dtype=torch.float32).unsqueeze(0)
+    raw_actions = []
+    for mg in env.agent_ids:
+        observation = torch.as_tensor(
+            observations[mg], dtype=torch.float32
+        ).unsqueeze(0)
+        actor = algorithm.target_actors[mg]
+        latent = actor.forward_latent(observation)
+        extreme_noise = torch.full_like(latent, 10.0)
+        raw_actions.append(
+            map_noisy_latent(
+                actor,
+                observation,
+                latent,
+                extreme_noise,
+                noise_clip=algorithm.target_noise_clip,
+            )
+        )
+    _, plans = algorithm.project_actions(state, torch.stack(raw_actions, dim=1))
+    for index, mg in enumerate(env.agent_ids):
+        if mg in ("mg2", "mg3"):
+            assert not plans[index]["dr_projected"].any()
+
+
+def test_feasible_dr_update_and_diagnostics(env_and_config):
+    env, _, config = env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDR.from_env(
+        env, config, device="cpu", seed=42
+    )
+    obs, _ = env.reset(seed=42)
+    state = env.global_state()
+    for _ in range(10):
+        actions = algorithm.select_actions(obs, noise_std=0.1)
+        next_obs, rewards, done, info = env.step(actions)
+        next_state = env.global_state()
+        team_reward = sum(rewards.values())
+        algorithm.replay.add(obs, state, actions, team_reward, next_obs, next_state, done)
+        obs = next_obs
+        state = next_state
+        if done:
+            obs, _ = env.reset()
+            state = env.global_state()
+
+    assert len(algorithm.replay) >= 10
+    # Ordinary step returns empty dict
+    assert algorithm.update(batch_size=4) == {}
+    # Trigger diagnostic step
+    algorithm.diagnostic_schedule.next_boundary = 2
+    metrics = algorithm.update(batch_size=4)
+    assert "critic_loss" in metrics
+    assert "actor_loss" in metrics
+    assert "actor_diagnostics" in metrics
+
 
