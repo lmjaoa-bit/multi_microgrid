@@ -379,6 +379,106 @@ def test_normalization_reconstruction_computes_exact_physical_signals():
     assert bool(valid[0, 1].item()) is True
 
 
+def test_shared_interface_and_action_shapes(v2_env_and_config):
+    env, config = v2_env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=42)
+    required = ("select_actions", "update", "save", "load", "replay")
+    assert all(hasattr(algorithm, name) for name in required)
+    obs, _ = env.reset(seed=42)
+    actions = algorithm.select_actions(obs, noise_std=0.0)
+    assert set(actions) == set(env.agent_ids)
+    for agent in env.agent_ids:
+        assert actions[agent].shape == (2,)
+
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.actor import AdaptiveDRActor
+    for mg in env.agent_ids:
+        assert isinstance(algorithm.actors[mg], AdaptiveDRActor)
+
+
+def test_exact_mg1_parity_with_v1(v2_env_and_config):
+    from algorithms.matd3_hierarchical_transformer_feasible_dr.algorithm import (
+        Matd3HierarchicalTransformerFeasibleDR,
+    )
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.actor import AdaptiveDRActor
+
+    env, config = v2_env_and_config
+    v1_config = _load("matd3_hierarchical_transformer_feasible_dr.yaml")
+    v1_algo = Matd3HierarchicalTransformerFeasibleDR.from_env(env, v1_config, device="cpu", seed=42)
+    v2_algo = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=42)
+
+    v2_algo.actors["mg1"].load_state_dict(v1_algo.actors["mg1"].state_dict())
+
+    obs, _ = env.reset(seed=42)
+    obs_tensor = torch.tensor([obs["mg1"]], dtype=torch.float32)
+
+    with torch.no_grad():
+        v1_action = v1_algo.actors["mg1"](obs_tensor)
+        v2_action = v2_algo.actors["mg1"](obs_tensor)
+
+    assert torch.equal(v1_action, v2_action)
+    assert v2_algo.actors["mg1"].adaptive_dr is None
+
+
+def test_deterministic_feasible_actions_for_mg2_and_mg3(v2_env_and_config):
+    env, config = v2_env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=42)
+
+    for mg in ("mg2", "mg3"):
+        actor = algorithm.actors[mg]
+        schema = algorithm.observation_schemas[mg]
+        obs_dim = len(schema)
+        generator = torch.Generator().manual_seed(42)
+        obs = torch.randn(256, obs_dim, generator=generator)
+        latent = torch.rand(256, 2, generator=generator) * 2 - 1
+        latent[:64, 1] = -1.0
+        latent[64:128, 1] = 1.0
+        latent[128:192, 1] = 0.0
+
+        if mg == "mg2":
+            min_idx = actor.adaptive_dr.hvac_min_idx
+            max_idx = actor.adaptive_dr.hvac_max_idx
+            obs[:, min_idx] = obs[:, min_idx].clamp(-1.0, 0.0)
+            obs[:, max_idx] = obs[:, max_idx].clamp(0.0, 1.0)
+            mapped = actor.map_latent_actions(obs, latent)
+            feasible_min = obs[:, min_idx : min_idx + 1]
+            feasible_max = obs[:, max_idx : max_idx + 1]
+            assert torch.all(mapped[:, 1:2] >= feasible_min - 1e-6)
+            assert torch.all(mapped[:, 1:2] <= feasible_max + 1e-6)
+        elif mg == "mg3":
+            min_idx = actor.adaptive_dr.ev_min_idx
+            max_idx = actor.adaptive_dr.ev_max_idx
+            avail_idx = actor.adaptive_dr.ev_avail_idx
+            obs[:, min_idx] = obs[:, min_idx].clamp(0.0, 0.5)
+            obs[:, max_idx] = obs[:, max_idx].clamp(0.5, 1.0)
+            obs[:128, avail_idx] = 1.0
+            obs[128:, avail_idx] = 0.0
+            mapped = actor.map_latent_actions(obs, latent)
+            avail_mask = obs[:, avail_idx] > 0.5
+            raw_min = obs[:, min_idx : min_idx + 1] * 2.0 - 1.0
+            raw_max = obs[:, max_idx : max_idx + 1] * 2.0 - 1.0
+            assert torch.all(mapped[avail_mask, 1:2] >= raw_min[avail_mask] - 1e-6)
+            assert torch.all(mapped[avail_mask, 1:2] <= raw_max[avail_mask] + 1e-6)
+            assert torch.allclose(mapped[~avail_mask, 1:2], torch.tensor([-1.0]))
+
+    obs, _ = env.reset(seed=42)
+    done = False
+    mg2_projections = 0
+    mg3_projections = 0
+    while not done:
+        actions = algorithm.select_actions(obs, noise_std=0.0)
+        obs, rewards, done, info = env.step(actions)
+        step_infos = info.get("step_info", [info])
+        for sub_info in step_infos:
+            constraints = sub_info.get("constraints", {})
+            dr_constraints = constraints.get("dr_by_microgrid", {})
+            mg2_projections += int(dr_constraints.get("mg2", 0.0) > 0)
+            mg3_projections += int(dr_constraints.get("mg3", 0.0) > 0)
+    assert mg2_projections == 0
+    assert mg3_projections == 0
+
+
+
+
 
 
 
