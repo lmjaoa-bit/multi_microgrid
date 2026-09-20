@@ -18,6 +18,10 @@ from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.actor import Adapt
 from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
     validate_adaptive_dr_config,
 )
+from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.training import (
+    select_adaptive_actions,
+    update_adaptive_dr,
+)
 
 
 class Matd3HierarchicalTransformerFeasibleDRV2(Matd3HierarchicalTransformerFeasibleDR):
@@ -141,3 +145,13 @@ class Matd3HierarchicalTransformerFeasibleDRV2(Matd3HierarchicalTransformerFeasi
             }
             for mg, actor in self.actors.items()
         }
+
+    def select_actions(
+        self,
+        observations: Mapping[str, Any],
+        noise_std: float = 0.0,
+    ) -> dict[str, np.ndarray]:
+        return select_adaptive_actions(self, observations, noise_std=noise_std)
+
+    def update(self, batch_size: int) -> dict[str, Any]:
+        return update_adaptive_dr(self, batch_size)

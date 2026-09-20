@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 import yaml
@@ -475,6 +476,174 @@ def test_deterministic_feasible_actions_for_mg2_and_mg3(v2_env_and_config):
             mg3_projections += int(dr_constraints.get("mg3", 0.0) > 0)
     assert mg2_projections == 0
     assert mg3_projections == 0
+
+
+def test_extreme_noise_feasibility(v2_env_and_config):
+    env, config = v2_env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=42)
+
+    observations, info = env.reset(seed=42, deterministic=True)
+    state = torch.as_tensor(info["global_state"], dtype=torch.float32).unsqueeze(0)
+    raw_actions = []
+    for mg in env.agent_ids:
+        obs_tensor = torch.as_tensor(observations[mg], dtype=torch.float32).unsqueeze(0)
+        actor = algorithm.target_actors[mg]
+        latent = actor.forward_latent(obs_tensor)
+        extreme_noise = torch.full_like(latent, 10.0)
+        from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.training import map_noisy_adaptive_latent
+        mapped = map_noisy_adaptive_latent(
+            actor,
+            obs_tensor,
+            latent,
+            noise=extreme_noise,
+            noise_clip=algorithm.target_noise_clip,
+        )
+        assert torch.isfinite(mapped).all()
+        assert (mapped >= -1.0 - 1e-6).all()
+        assert (mapped <= 1.0 + 1e-6).all()
+        raw_actions.append(mapped)
+
+    _, plans = algorithm.project_actions(state, torch.stack(raw_actions, dim=1))
+    for index, mg in enumerate(env.agent_ids):
+        if mg in ("mg2", "mg3"):
+            assert not plans[index]["dr_projected"].any()
+
+    # Also test zero-width intervals and unavailable EV rows on batch
+    ev_actor = algorithm.actors["mg3"]
+    schema = algorithm.observation_schemas["mg3"]
+    obs_unavail = torch.zeros(10, len(schema))
+    obs_unavail[:, ev_actor.adaptive_dr.ev_avail_idx] = 0.0
+    latent = torch.tensor([[-1.0, -1.0], [0.0, 0.0], [1.0, 1.0]]).repeat(4, 1)[:10]
+    mapped_unavail = map_noisy_adaptive_latent(
+        ev_actor,
+        obs_unavail,
+        latent,
+        noise_std=2.0,
+        noise_clip=1.5,
+    )
+    assert torch.isfinite(mapped_unavail).all()
+    assert torch.allclose(mapped_unavail[:, 1:2], torch.tensor([-1.0]))
+
+    # Zero-width interval for HVAC
+    hvac_actor = algorithm.actors["mg2"]
+    schema2 = algorithm.observation_schemas["mg2"]
+    obs_zero = torch.zeros(10, len(schema2))
+    obs_zero[:, hvac_actor.adaptive_dr.hvac_min_idx] = 0.25
+    obs_zero[:, hvac_actor.adaptive_dr.hvac_max_idx] = 0.25
+    mapped_zero = map_noisy_adaptive_latent(
+        hvac_actor,
+        obs_zero,
+        latent,
+        noise_std=2.0,
+        noise_clip=1.5,
+    )
+    assert torch.isfinite(mapped_zero).all()
+    assert torch.allclose(mapped_zero[:, 1:2], torch.tensor([0.25]), atol=1e-5)
+
+
+def test_ev_available_boundary_statistics_mask_unavailable_rows(v2_env_and_config):
+    env, config = v2_env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=42)
+    ev_actor = algorithm.actors["mg3"]
+    schema = algorithm.observation_schemas["mg3"]
+    obs_dim = len(schema)
+
+    # Case 1: All rows unavailable
+    obs_all_unavail = torch.zeros(10, obs_dim)
+    obs_all_unavail[:, ev_actor.adaptive_dr.ev_avail_idx] = 0.0
+    latent = torch.full((10, 2), -1.0)
+    ev_actor.map_latent_actions(obs_all_unavail, latent, collect_diagnostics=True)
+    assert ev_actor.last_diagnostics["ev_available_rate"] == 0.0
+    assert ev_actor.last_diagnostics["ev_available_boundary_rate"] == 0.0
+    assert not np.isnan(ev_actor.last_diagnostics["ev_available_boundary_rate"])
+
+    # Case 2: Mixed batch: 1 available row at lower boundary (-1.0), 9 unavailable rows
+    obs_mixed = torch.zeros(10, obs_dim)
+    obs_mixed[0, ev_actor.adaptive_dr.ev_avail_idx] = 1.0
+    obs_mixed[0, ev_actor.adaptive_dr.hours_dep_idx] = 0.5
+    obs_mixed[0, ev_actor.adaptive_dr.ev_min_idx] = 0.1
+    obs_mixed[0, ev_actor.adaptive_dr.ev_max_idx] = 0.8
+    ev_actor.map_latent_actions(obs_mixed, latent, collect_diagnostics=True)
+    assert ev_actor.last_diagnostics["ev_available_rate"] == pytest.approx(0.1)
+    assert ev_actor.last_diagnostics["ev_available_boundary_rate"] == pytest.approx(1.0)
+
+
+def test_diagnostic_schedule_and_keys(v2_env_and_config):
+    env, config = v2_env_and_config
+    config["logging"]["diagnostic_interval"] = 2
+    config["algorithm"]["policy_delay"] = 2
+    algorithm = Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=42)
+
+    obs, _ = env.reset(seed=42)
+    state = env.global_state()
+    for _ in range(50):
+        actions = algorithm.select_actions(obs, noise_std=0.1)
+        next_obs, rewards, done, info = env.step(actions)
+        next_state = env.global_state()
+        team_reward = sum(rewards.values())
+        algorithm.replay.add(obs, state, actions, team_reward, next_obs, next_state, done)
+        obs = next_obs
+        state = next_state
+        if done:
+            obs, _ = env.reset(seed=42)
+            state = env.global_state()
+
+    result1 = algorithm.update(batch_size=16)
+    assert "actor_diagnostics" not in result1
+
+    result2 = algorithm.update(batch_size=16)
+    assert "actor_diagnostics" in result2
+    actor_diags = result2["actor_diagnostics"]
+    assert "mg2" in actor_diags
+    assert "mg3" in actor_diags
+
+    COMMON_KEYS = {
+        "actor_dr_latent_mean",
+        "actor_dr_latent_std",
+        "actor_dr_mapped_mean",
+        "actor_dr_feasible_min_mean",
+        "actor_dr_feasible_max_mean",
+        "actor_dr_interval_width_mean",
+        "actor_dr_lower_boundary_rate",
+        "actor_dr_upper_boundary_rate",
+        "actor_dr_effective_boundary_rate",
+        "dr_projection_rate",
+        "dr_projection_delta_mean",
+    }
+    MG2_KEYS = {
+        "actor_hvac_recovery_anchor_mean",
+        "actor_hvac_recovery_gate_mean",
+        "actor_hvac_recovery_gate_active_rate",
+        "actor_hvac_recovery_gate_full_rate",
+        "actor_hvac_terminal_air_gap_mean_c",
+        "actor_hvac_terminal_mass_gap_mean_c",
+        "actor_hvac_terminal_recovery_pressure_mean",
+    }
+    MG3_KEYS = {
+        "actor_ev_mandatory_floor_mean",
+        "actor_ev_mandatory_floor_active_rate",
+        "actor_ev_economic_reference_mean",
+        "actor_ev_reference_above_floor_mean",
+        "actor_ev_latent_reference_deviation_mean",
+        "actor_ev_deadline_pressure_mean",
+        "actor_ev_available_rate",
+        "actor_ev_available_boundary_rate",
+    }
+
+    for k in COMMON_KEYS:
+        assert k in actor_diags["mg2"], f"Missing {k} in mg2 diagnostics"
+        assert k in actor_diags["mg3"], f"Missing {k} in mg3 diagnostics"
+        assert np.isfinite(actor_diags["mg2"][k])
+        assert np.isfinite(actor_diags["mg3"][k])
+
+    for k in MG2_KEYS:
+        assert k in actor_diags["mg2"], f"Missing {k} in mg2 diagnostics"
+        assert np.isfinite(actor_diags["mg2"][k])
+
+    for k in MG3_KEYS:
+        assert k in actor_diags["mg3"], f"Missing {k} in mg3 diagnostics"
+        assert np.isfinite(actor_diags["mg3"][k])
+
 
 
 

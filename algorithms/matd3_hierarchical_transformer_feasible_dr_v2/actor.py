@@ -111,17 +111,17 @@ class AdaptiveDRActor(FeasibleDRActor):
             if self.active_agent == "mg3":
                 avail = details.available > 0.5
                 if avail.any():
-                    eff_lower = (dr[avail] - details.lower[avail] <= 1e-4).float()
-                    eff_upper = (details.upper[avail] - dr[avail] <= 1e-4).float()
-                    effective_boundary = float((eff_lower | eff_upper).mean().item())
+                    eff_lower = dr[avail] - details.lower[avail] <= 1e-4
+                    eff_upper = details.upper[avail] - dr[avail] <= 1e-4
+                    effective_boundary = float((eff_lower | eff_upper).float().mean().item())
                     avail_boundary = effective_boundary
                 else:
                     effective_boundary = 0.0
                     avail_boundary = 0.0
             else:
-                eff_lower = (dr - details.lower <= 1e-4).float()
-                eff_upper = (details.upper - dr <= 1e-4).float()
-                effective_boundary = float((eff_lower | eff_upper).mean().item())
+                eff_lower = dr - details.lower <= 1e-4
+                eff_upper = details.upper - dr <= 1e-4
+                effective_boundary = float((eff_lower | eff_upper).float().mean().item())
                 avail_boundary = 0.0
 
             diagnostics = {
