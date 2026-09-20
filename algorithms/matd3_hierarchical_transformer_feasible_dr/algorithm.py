@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -100,3 +101,46 @@ class Matd3HierarchicalTransformerFeasibleDR(Matd3HierarchicalTransformer):
 
     def update(self, batch_size: int) -> dict[str, Any]:
         return update_feasible_dr(self, batch_size)
+
+    def save(self, path: str | Path) -> None:
+        torch.save(
+            {
+                "algorithm_slug": "matd3_hierarchical_transformer_feasible_dr",
+                "action_semantics": self.action_semantics,
+                "projection_signature": self.projection_signature,
+                "feasible_dr_config": self.feasible_dr_config,
+                "observation_schemas": self.observation_schemas,
+                "state_schema": self.state_schema,
+                "actors": self.actors.state_dict(),
+                "target_actors": self.target_actors.state_dict(),
+                "critics": self.critics.state_dict(),
+                "target_critics": self.target_critics.state_dict(),
+                "update_steps": self.update_steps,
+            },
+            Path(path),
+        )
+
+    def load(self, path: str | Path) -> None:
+        checkpoint = torch.load(Path(path), map_location=self.device, weights_only=False)
+        slug = checkpoint.get("algorithm_slug")
+        if slug != "matd3_hierarchical_transformer_feasible_dr":
+            raise ValueError(
+                f"Incompatible algorithm checkpoint: expected matd3_hierarchical_transformer_feasible_dr, got {slug}"
+            )
+        if checkpoint.get("action_semantics") != self.action_semantics:
+            raise ValueError("Incompatible action semantics")
+        if checkpoint.get("projection_signature") != self.projection_signature:
+            raise ValueError("Projection signature mismatch")
+
+        ckpt_feasible_cfg = checkpoint.get("feasible_dr_config")
+        if ckpt_feasible_cfg != self.feasible_dr_config:
+            raise ValueError(
+                f"Incompatible feasible DR configuration: expected {self.feasible_dr_config}, got {ckpt_feasible_cfg}"
+            )
+
+        self.actors.load_state_dict(checkpoint["actors"])
+        self.target_actors.load_state_dict(checkpoint["target_actors"])
+        self.critics.load_state_dict(checkpoint["critics"])
+        self.target_critics.load_state_dict(checkpoint["target_critics"])
+        self.update_steps = int(checkpoint.get("update_steps", 0))
+

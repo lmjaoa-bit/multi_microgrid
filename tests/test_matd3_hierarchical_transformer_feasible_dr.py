@@ -260,3 +260,36 @@ def test_feasible_dr_update_and_diagnostics(env_and_config):
     assert "actor_diagnostics" in metrics
 
 
+def test_checkpoint_round_trip_and_incompatibility(env_and_config, tmp_path):
+    env, _, config = env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDR.from_env(
+        env, config, device="cpu", seed=42
+    )
+    observations, _ = env.reset(seed=42)
+    before = algorithm.select_actions(observations, noise_std=0.0)
+    path = tmp_path / "model.pt"
+    algorithm.save(path)
+    restored = Matd3HierarchicalTransformerFeasibleDR.from_env(
+        env, config, device="cpu", seed=42
+    )
+    restored.load(path)
+    after = restored.select_actions(observations, noise_std=0.0)
+    for mg in env.agent_ids:
+        assert torch.allclose(torch.as_tensor(before[mg]), torch.as_tensor(after[mg]))
+
+    payload = torch.load(path, map_location="cpu", weights_only=False)
+    payload["algorithm_slug"] = "matd3_hierarchical_transformer"
+    wrong_slug = tmp_path / "wrong_slug.pt"
+    torch.save(payload, wrong_slug)
+    with pytest.raises(ValueError, match="Incompatible algorithm checkpoint"):
+        restored.load(wrong_slug)
+
+    payload["algorithm_slug"] = "matd3_hierarchical_transformer_feasible_dr"
+    payload["feasible_dr_config"] = {"enabled": False}
+    wrong_config = tmp_path / "wrong_config.pt"
+    torch.save(payload, wrong_config)
+    with pytest.raises(ValueError, match="feasible DR configuration"):
+        restored.load(wrong_config)
+
+
+
