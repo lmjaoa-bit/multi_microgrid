@@ -110,3 +110,114 @@ def test_invalid_adaptive_config_is_rejected(v2_env_and_config, section, field, 
     with pytest.raises(ValueError, match=message):
         Matd3HierarchicalTransformerFeasibleDRV2.from_env(env, config, device="cpu", seed=42)
 
+
+HVAC_PHYSICS = {
+    "c_air_kwh_per_c": 15.0,
+    "c_mass_kwh_per_c": 250.0,
+    "cop_heat": 3.3,
+    "cop_cool": 3.2,
+    "heating_max_kw": 35.0,
+    "cooling_max_kw": 35.0,
+    "delta_t": 1.0,
+}
+
+
+def test_hvac_recovery_anchor_uses_gap_energy_and_direction():
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
+        hvac_recovery_anchor,
+    )
+
+    anchor = hvac_recovery_anchor(
+        air_gap_c=torch.tensor([[1.0], [-1.0], [0.0]]),
+        mass_gap_c=torch.tensor([[0.2], [-0.2], [0.0]]),
+        remaining_hours=torch.tensor([[5.0], [5.0], [5.0]]),
+        lower=torch.full((3, 1), -1.0),
+        upper=torch.full((3, 1), 1.0),
+        **HVAC_PHYSICS,
+    )
+    heating_kw = (1.0 * 15.0 + 0.2 * 250.0) / 5.0 / 3.3
+    cooling_kw = (-1.0 * 15.0 - 0.2 * 250.0) / 5.0 / 3.2
+    assert anchor[0, 0].item() == pytest.approx(heating_kw / 35.0)
+    assert anchor[1, 0].item() == pytest.approx(cooling_kw / 35.0)
+    assert anchor[2, 0].item() == pytest.approx(0.0)
+
+
+def test_hvac_recovery_gate_limits_and_monotonicity():
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
+        hvac_recovery_gate,
+    )
+
+    pressure = torch.tensor([[0.1], [0.5], [1.0]])
+    hours = torch.tensor([[8.0], [4.0], [1.0]])
+    gate = hvac_recovery_gate(
+        pressure,
+        hours,
+        pressure_start=0.35,
+        pressure_full=0.85,
+        start_hours=6.0,
+        full_hours=2.0,
+    )
+    assert gate[0, 0].item() == pytest.approx(0.0)
+    assert 0.0 < gate[1, 0].item() < 1.0
+    assert gate[2, 0].item() == pytest.approx(1.0)
+    assert torch.all(gate[1:] >= gate[:-1])
+
+
+HVAC_SCHEMA = (
+    "terminal_air_gap", "terminal_mass_gap", "time_remaining",
+    "thermal_recovery_pressure", "hvac_feasible_min", "hvac_feasible_max",
+)
+
+
+def make_hvac_v2_transform():
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
+        AdaptiveDRTransform,
+    )
+
+    return AdaptiveDRTransform.for_hvac_test(
+        HVAC_SCHEMA,
+        c_air_kwh_per_c=15.0,
+        c_mass_kwh_per_c=250.0,
+        cop_heat=3.3,
+        cop_cool=3.2,
+        heating_max_kw=35.0,
+        cooling_max_kw=35.0,
+        delta_t=1.0,
+        episode_length=24,
+        recovery_pressure_start=0.35,
+        recovery_pressure_full=0.85,
+        recovery_start_hours=6.0,
+        recovery_full_hours=2.0,
+    )
+
+
+def test_hvac_zero_gate_matches_v1_and_full_gate_selects_anchor():
+    observation = torch.tensor([
+        [1.0 / 40.0, 0.2 / 40.0, 8.0 / 24.0, 0.1, -0.5, 0.8],
+        [1.0 / 40.0, 0.2 / 40.0, 1.0 / 24.0, 1.0, -0.5, 0.8],
+    ])
+    latent = torch.tensor([[0.2], [0.2]])
+    transform = make_hvac_v2_transform()
+    details = transform.map_with_details(observation, latent)
+
+    v1_free = -0.5 + ((0.2 + 1.0) / 2.0) * (0.8 - -0.5)
+    assert details.action[0, 0].item() == pytest.approx(v1_free)
+    assert details.recovery_gate[0, 0].item() == pytest.approx(0.0)
+    assert details.recovery_gate[1, 0].item() == pytest.approx(1.0)
+    assert details.action[1, 0].item() == pytest.approx(details.recovery_anchor[1, 0].item())
+
+
+def test_random_hvac_actions_remain_within_feasible_interval():
+    generator = torch.Generator().manual_seed(42)
+    obs = torch.rand(10_000, len(HVAC_SCHEMA), generator=generator)
+    obs[:, 4] = obs[:, 4] * 2 - 1
+    obs[:, 5] = obs[:, 4] + torch.rand(10_000, generator=generator) * (1 - obs[:, 4])
+    latent = torch.rand(10_000, 1, generator=generator) * 2 - 1
+    transform = make_hvac_v2_transform()
+    details = transform.map_with_details(obs, latent)
+    assert torch.all(details.action >= obs[:, 4:5] - 1e-6)
+    assert torch.all(details.action <= obs[:, 5:6] + 1e-6)
+    assert torch.isfinite(details.action).all()
+
+
+
