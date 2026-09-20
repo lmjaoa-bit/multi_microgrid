@@ -220,4 +220,166 @@ def test_random_hvac_actions_remain_within_feasible_interval():
     assert torch.isfinite(details.action).all()
 
 
+def test_equal_economic_signals_produce_uniform_weights():
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
+        economic_slot_weights,
+    )
+
+    weights = economic_slot_weights(
+        prices=torch.tensor([[0.4, 0.4, 0.4]]),
+        system_net_load_kw=torch.tensor([[100.0, 100.0, 100.0]]),
+        valid=torch.tensor([[True, True, True]]),
+        price_weight=2.0,
+        net_load_weight=1.0,
+        temperature=1.0,
+    )
+    assert torch.allclose(weights, torch.full((1, 3), 1.0 / 3.0))
+
+
+def test_lower_price_and_net_load_receive_more_weight():
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
+        economic_slot_weights,
+    )
+
+    weights = economic_slot_weights(
+        prices=torch.tensor([[0.4, 0.8, 0.8]]),
+        system_net_load_kw=torch.tensor([[50.0, 100.0, 150.0]]),
+        valid=torch.tensor([[True, True, True]]),
+        price_weight=2.0,
+        net_load_weight=1.0,
+        temperature=1.0,
+    )
+    assert weights[0, 0] > weights[0, 1] > weights[0, 2]
+
+
+def test_economic_weights_mask_invalid_and_post_departure_slots():
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
+        economic_slot_weights,
+    )
+
+    weights = economic_slot_weights(
+        prices=torch.tensor([[0.8, 0.4, 0.1, 0.1]]),
+        system_net_load_kw=torch.tensor([[100.0, 100.0, 0.0, 0.0]]),
+        valid=torch.tensor([[True, True, False, False]]),
+        price_weight=2.0,
+        net_load_weight=1.0,
+        temperature=1.0,
+    )
+    assert weights[0, 2:].sum().item() == pytest.approx(0.0)
+    assert weights[0, :2].sum().item() == pytest.approx(1.0)
+
+
+def test_ev_reference_respects_floor_upper_and_one_slot_case():
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
+        ev_economic_reference,
+    )
+
+    reference = ev_economic_reference(
+        remaining_battery_kwh=torch.tensor([[30.0]]),
+        efficiency=1.0,
+        delta_t=1.0,
+        max_charge_kw=20.0,
+        current_weight=torch.tensor([[1.0]]),
+        lower=torch.tensor([[0.5]]),
+        upper=torch.tensor([[1.0]]),
+    )
+    assert torch.allclose(reference, torch.tensor([[1.0]]))
+
+
+def test_ev_reference_never_weakens_latest_feasible_floor():
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
+        ev_economic_reference,
+    )
+
+    reference = ev_economic_reference(
+        remaining_battery_kwh=torch.tensor([[10.0]]),
+        efficiency=1.0,
+        delta_t=1.0,
+        max_charge_kw=20.0,
+        current_weight=torch.tensor([[0.01]]),
+        lower=torch.tensor([[0.4]]),
+        upper=torch.tensor([[0.8]]),
+    )
+    assert reference.item() == pytest.approx(0.4)
+
+
+def test_ev_unavailable_produces_negative_one_action_and_zero_reference():
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
+        AdaptiveDRTransform,
+    )
+
+    schema = (
+        "ev_available", "ev_feasible_min", "ev_feasible_max",
+        "remaining_energy", "hours_to_departure",
+    )
+    transform = AdaptiveDRTransform(
+        dr_type="ev_charging",
+        schema=schema,
+        enabled=True,
+    )
+    obs = torch.tensor([[0.0, 0.2, 0.8, 0.5, 0.5]])
+    latent = torch.tensor([[0.5]])
+    details = transform.map_with_details(obs, latent)
+    assert details.action.item() == pytest.approx(-1.0)
+    assert details.reference.item() == pytest.approx(0.0)
+    assert details.available.item() == pytest.approx(0.0)
+
+
+def test_normalization_reconstruction_computes_exact_physical_signals():
+    from algorithms.matd3_hierarchical_transformer_feasible_dr_v2.adaptive_dr import (
+        AdaptiveDRTransform,
+    )
+
+    normalizers = {
+        "mg1": {"load": 100.0, "pv": 200.0, "wind": 1.0, "power": 250.0, "price": 2.0},
+        "mg2": {"load": 80.0, "pv": 1.0, "wind": 300.0, "power": 320.0, "price": 2.0},
+        "mg3": {"load": 60.0, "pv": 120.0, "wind": 1.0, "power": 150.0, "price": 1.5},
+    }
+    schema = (
+        "ev_available", "ev_feasible_min", "ev_feasible_max", "remaining_energy", "hours_to_departure",
+        "grid_buy_price", "load", "pv", "wind", "mg1_net_load", "mg2_net_load",
+        "price_t+1", "load_t+1", "pv_t+1", "wind_t+1", "mg1_net_load_t+1", "mg2_net_load_t+1",
+        "forecast_valid_t+1",
+    )
+    obs_map = {
+        "ev_available": 1.0,
+        "ev_feasible_min": 0.0,
+        "ev_feasible_max": 1.0,
+        "remaining_energy": 0.5,
+        "hours_to_departure": 5.0 / 24.0,
+        "grid_buy_price": 0.8,
+        "load": 0.5,
+        "pv": 0.5,
+        "wind": 0.0,
+        "mg1_net_load": 0.4,
+        "mg2_net_load": -0.2,
+        "price_t+1": 0.6,
+        "load_t+1": 0.8,
+        "pv_t+1": 0.2,
+        "wind_t+1": 0.0,
+        "mg1_net_load_t+1": 0.2,
+        "mg2_net_load_t+1": 0.1,
+        "forecast_valid_t+1": 1.0,
+    }
+    obs_tensor = torch.tensor([[obs_map[k] for k in schema]])
+    transform = AdaptiveDRTransform(
+        dr_type="ev_charging",
+        schema=schema,
+        normalizers_by_microgrid=normalizers,
+        active_agent="mg3",
+        forecast_horizon=1,
+    )
+    prices, sys_net, valid = transform.reconstruct_economic_signals(obs_tensor)
+
+    assert prices[0, 0].item() == pytest.approx(1.2)
+    assert prices[0, 1].item() == pytest.approx(0.9)
+    assert sys_net[0, 0].item() == pytest.approx(6.0)
+    assert sys_net[0, 1].item() == pytest.approx(106.0)
+    assert bool(valid[0, 0].item()) is True
+    assert bool(valid[0, 1].item()) is True
+
+
+
+
+
 
