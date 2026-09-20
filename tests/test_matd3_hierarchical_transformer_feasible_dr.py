@@ -6,11 +6,28 @@ import pytest
 import torch
 import yaml
 
+from algorithms.matd3_hierarchical_transformer.algorithm import Matd3HierarchicalTransformer
+from algorithms.matd3_hierarchical_transformer_feasible_dr.algorithm import (
+    Matd3HierarchicalTransformerFeasibleDR,
+)
 from algorithms.matd3_hierarchical_transformer_feasible_dr.feasible_dr import (
     FeasibleDRTransform,
     latest_feasible_ev_floor,
 )
 from algorithms.registry import get_algorithm_spec
+from envs.multi_microgrid_env import MultiMicrogridEnv
+
+
+@pytest.fixture
+def env_and_config():
+    config_path = Path("configs/cooperative.yaml")
+    parent_cfg_path = Path("configs/algorithms/matd3_hierarchical_transformer.yaml")
+    feasible_cfg_path = Path("configs/algorithms/matd3_hierarchical_transformer_feasible_dr.yaml")
+    env_cfg = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    parent_cfg = yaml.safe_load(parent_cfg_path.read_text(encoding="utf-8"))
+    feasible_cfg = yaml.safe_load(feasible_cfg_path.read_text(encoding="utf-8"))
+    env = MultiMicrogridEnv(env_cfg, split="train")
+    return env, parent_cfg, feasible_cfg
 
 
 def test_feasible_dr_plugin_uses_its_own_config():
@@ -102,3 +119,33 @@ def test_non_degenerate_transform_has_nonzero_finite_gradient():
     assert latent.grad is not None
     assert torch.isfinite(latent.grad).all()
     assert latent.grad.abs().item() > 0.0
+
+
+def test_mg1_feasible_actor_matches_parent_actor(env_and_config):
+    env, parent_config, feasible_config = env_and_config
+    parent = Matd3HierarchicalTransformer.from_env(env, parent_config, device="cpu", seed=42)
+    feasible = Matd3HierarchicalTransformerFeasibleDR.from_env(
+        env, feasible_config, device="cpu", seed=42
+    )
+    feasible.actors["mg1"].load_state_dict(parent.actors["mg1"].state_dict(), strict=False)
+    observation, _ = env.reset(seed=42)
+    tensor = torch.as_tensor(observation["mg1"], dtype=torch.float32).unsqueeze(0)
+    expected = parent.actors["mg1"](tensor)
+    actual = feasible.actors["mg1"](tensor)
+    assert torch.allclose(actual, expected, atol=1.0e-7)
+
+
+def test_mg2_and_mg3_actor_requests_are_feasible(env_and_config):
+    env, _, config = env_and_config
+    algorithm = Matd3HierarchicalTransformerFeasibleDR.from_env(
+        env, config, device="cpu", seed=42
+    )
+    observations, _ = env.reset(seed=42)
+    for mg in ("mg2", "mg3"):
+        tensor = torch.as_tensor(observations[mg], dtype=torch.float32).unsqueeze(0)
+        action = algorithm.actors[mg](tensor)
+        latent = algorithm.actors[mg].forward_latent(tensor)
+        remapped = algorithm.actors[mg].map_latent_actions(tensor, latent)
+        assert torch.allclose(action, remapped)
+        assert action.shape == (1, 2)
+
