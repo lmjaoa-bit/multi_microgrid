@@ -1,0 +1,68 @@
+# Hierarchical Categorized-Token Spatio-Temporal Transformer Actor (H=8)
+# Features:
+#   - 14 Physically Categorized Semantic Tokens (ESS, DR, Supply, Trade, Peer1, Peer2, 8xForecast)
+#   - 8-Hour Lookahead Forecast Horizon with Diurnal Clock Embeddings
+#   - Heterogeneous DR Encoders (Mill, HVAC, EV with Pacing Rate)
+#   - Explicit Supply-Demand Balance Token B = PV + WT - Load
+#   - P2P Trade & System Grid Margin Token for Peak Shaving Coordination
+#   - Three Independent Decentralized Actors (MG1, MG2, MG3)
+#   - Decoupled Dual Readout Heads with Bilinear Physical Skip / Gate
+algorithm:
+  name: matd3_hierarchical_transformer_feasible_dr
+  hidden_dims: [128, 128]
+  actor_lr: 0.0002
+  actor_max_grad_norm: 1.0
+  critic_lr: 0.0003
+  gamma: 0.99
+  tau: 0.005
+  policy_delay: 2
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  batch_size: 128
+  replay_capacity: 200000
+  warmup_steps: 1000
+  exploration_noise: 0.15
+  network:
+    embed_dim: 32
+    num_heads: 4
+    num_layers: 2
+    hidden_dim: 64
+    forecast_horizon: 8
+  feasible_dr:
+    enabled: true
+    agents:
+      mg1: false
+      mg2: true
+      mg3: true
+    interval_epsilon: 1.0e-6
+    exploration_in_latent_space: true
+    target_smoothing_in_latent_space: true
+    ev:
+      catchup_floor_enabled: true
+      reliability_margin: 0.0
+    hvac:
+      interval_mapping_enabled: true
+      recovery_anchor_enabled: false
+  diagnostics:
+    log_feasible_interval: true
+    log_latent_action: true
+    log_mandatory_floor: true
+runtime:
+  device: cuda
+  cpu_threads: 4
+  interop_threads: 2
+training:
+  episodes: 5000
+  test_episodes: 55
+validation:
+  enabled: true
+  interval: 100
+  deterministic_policy: true
+  fixed_scenarios: true
+logging:
+  diagnostic_interval: 20
+  incremental_history: true
+  history_snapshot_interval: 500
+  dashboard: true
+  dashboard_refresh_hz: 4
+  rolling_windows: [50, 100, 500]
