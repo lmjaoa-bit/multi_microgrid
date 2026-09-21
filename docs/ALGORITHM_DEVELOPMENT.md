@@ -124,19 +124,26 @@ outputs/working_runs/<algorithm>/
         │   ├── best_model.pt
         │   └── final_model.pt
         ├── figures/
+        ├── dr_reference_hourly_trajectories/
         ├── test_hourly_trajectories/
         ├── config_snapshot.yaml
         ├── run_metadata.json
         ├── training_history.json
         ├── validation_history.json
         ├── training_summary.json
+        ├── dr_reference_daily_metrics.csv
+        ├── dr_reference_summary.json
+        ├── dr_shift_metrics.csv
         ├── test_daily_metrics.csv
         ├── test_summary.json
         └── summary.json
 ```
 
 Every registered algorithm follows the same training, best-checkpoint validation, formal test,
-MILP coalition evaluation, Equal/Shapley settlement, summary generation, and plotting sequence.
+deterministic rule-reference test, MILP coalition evaluation, Equal/Shapley settlement, summary
+generation, and saved-result-only plotting sequence. The rule reference uses neutral ESS dispatch,
+constant material-balanced MG1 production, minimum-intervention MG2 comfort control, and immediate
+MG3 EV charging to its departure target.
 
 ## Current methods
 

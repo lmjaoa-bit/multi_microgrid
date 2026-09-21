@@ -554,6 +554,7 @@ class EpisodeMetricsCollector:
                 f"{mg}_p2p_purchase_cost": economics[mg]["p2p_purchase_cost"],
                 f"{mg}_p2p_sale_revenue": economics[mg]["p2p_sale_revenue"],
                 f"{mg}_battery_degradation_cost": economics[mg]["battery_degradation_cost"],
+                f"{mg}_terminal_constraint_penalty": economics[mg]["terminal_soc_penalty"],
                 f"{mg}_hourly_profit": economics[mg]["physical_profit"],
                 f"{mg}_soc_violation": constraints["soc_by_microgrid"][mg],
                 f"{mg}_battery_power_violation": constraints["battery_by_microgrid"][mg],
@@ -609,6 +610,8 @@ class EpisodeMetricsCollector:
                         f"{mg}_t_mass_c": float(dr_state.get("t_mass_c", dr_plan.get("t_mass_after_c", 0.0))),
                         f"{mg}_t_out_c": float(dr_state.get("t_out_c", 0.0)),
                         f"{mg}_occupied": float(dr_state.get("occupied", 0.0)),
+                        f"{mg}_terminal_air_gap_c": float(dr_state.get("terminal_air_gap_c", 0.0)),
+                        f"{mg}_terminal_mass_gap_c": float(dr_state.get("terminal_mass_gap_c", 0.0)),
                         f"{mg}_comfort_infeasible": int(bool(dr_plan.get("comfort_infeasible", False))),
                         f"{mg}_terminal_thermal_infeasible": int(bool(dr_plan.get("terminal_thermal_infeasible", False))),
                     })

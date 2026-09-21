@@ -124,6 +124,160 @@ def _legacy_summary(episodes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _extract_rollout_constraint_metrics(
+    env: MultiMicrogridEnv,
+    daily_metrics: Sequence[Mapping[str, Any]],
+    hourly_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, float]:
+    """Extract constraint metrics from in-memory rollout matching formal reporting."""
+    from evaluation.service_reliability import (
+        DEFAULT_TOLERANCE,
+        _aggregate_service_metrics,
+        _daily_service_metrics,
+    )
+
+    if not daily_metrics or not hourly_rows:
+        return {
+            "strict_feasible_day_rate": 1.0,
+            "unmet_energy_mean_kwh": 0.0,
+            "hvac_terminal_joint_success_rate": 1.0,
+            "hvac_comfort_rate": 1.0,
+            "mill_terminal_success_rate": 1.0,
+            "ev_departure_success_rate": 1.0,
+            "mg2_projection_rate": 0.0,
+            "mg3_projection_rate": 0.0,
+        }
+
+    rows_by_date: dict[str, list[Mapping[str, Any]]] = {}
+    for r in hourly_rows:
+        date_str = str(r.get("date", ""))
+        rows_by_date.setdefault(date_str, []).append(r)
+
+    # 1. Service reliability: strict_feasible_day_rate and unmet_energy_mean_kwh
+    daily_service_list = []
+    for day in daily_metrics:
+        d_date = str(day.get("date", ""))
+        d_rows = rows_by_date.get(d_date, [])
+        feasible_episode = bool(day.get("constraint_statistics", {}).get("feasible_episode", True))
+        d_service = _daily_service_metrics(
+            d_rows,
+            env.agent_ids,
+            delta_t=float(getattr(env, "delta_t", 1.0)),
+            feasible_day=feasible_episode,
+            tolerance=DEFAULT_TOLERANCE,
+        )
+        daily_service_list.append(d_service)
+    agg_service = _aggregate_service_metrics(daily_service_list, env.agent_ids)
+    strict_feasible_day_rate = float(agg_service.get("strict_feasible_day_rate", 1.0))
+    unmet_energy_mean_kwh = float(agg_service.get("unmet_energy_mean_kwh", 0.0))
+
+    # 2. MG2 HVAC metrics: joint terminal thermal success and comfort compliance
+    hvac_cfg = env.cfg_by_id.get("mg2", {}).get("dr")
+    if hvac_cfg and str(hvac_cfg.get("type")) == "commercial_hvac":
+        air_tol = float(hvac_cfg.get("terminal_air_tolerance_c", 1.0))
+        mass_tol = float(hvac_cfg.get("terminal_mass_tolerance_c", 0.5))
+        comfort_bounds = hvac_cfg.get("occupied_comfort_c", [21.0, 25.0])
+        comfort_low, comfort_high = float(comfort_bounds[0]), float(comfort_bounds[1])
+
+        joint_successes: list[bool] = []
+        for day in daily_metrics:
+            d_date = str(day.get("date", ""))
+            d_rows = rows_by_date.get(d_date, [])
+            if not d_rows:
+                continue
+            last_row = d_rows[-1]
+            first_row = d_rows[0]
+            if "mg2_terminal_air_gap_c" in last_row and "mg2_terminal_mass_gap_c" in last_row:
+                air_gap = abs(float(last_row["mg2_terminal_air_gap_c"]))
+                mass_gap = abs(float(last_row["mg2_terminal_mass_gap_c"]))
+            else:
+                first_out = float(first_row.get("mg2_t_out_c", 23.0))
+                init_air = float(np.clip(23.0 + 0.20 * (first_out - 23.0), 18.0, 28.0))
+                init_mass = float(np.clip(23.0 + 0.10 * (first_out - 23.0), 18.0, 28.0))
+                air_gap = abs(float(last_row.get("mg2_t_air_c", 23.0)) - init_air)
+                mass_gap = abs(float(last_row.get("mg2_t_mass_c", 23.0)) - init_mass)
+            joint_success = bool((air_gap <= air_tol + 1e-12) and (mass_gap <= mass_tol + 1e-12))
+            joint_successes.append(joint_success)
+        hvac_joint_success_rate = float(np.mean(joint_successes)) if joint_successes else 1.0
+
+        occupied_successes: list[bool] = []
+        for r in hourly_rows:
+            if float(r.get("mg2_occupied", 0.0)) > 0.5:
+                t_air = float(r.get("mg2_t_air_c", 23.0))
+                viol = max(0.0, comfort_low - t_air) + max(0.0, t_air - comfort_high)
+                occupied_successes.append(viol <= 1e-9)
+        hvac_comfort_rate = float(np.mean(occupied_successes)) if occupied_successes else 1.0
+    else:
+        hvac_joint_success_rate = 1.0
+        hvac_comfort_rate = 1.0
+
+    # 3. MG1 Industrial Mill metric: terminal silo success rate
+    mill_cfg = env.cfg_by_id.get("mg1", {}).get("dr")
+    if mill_cfg and str(mill_cfg.get("type")) == "industrial_mill":
+        init_silo = float(mill_cfg.get("silo_initial_t", 20.0))
+        silo_tol = float(mill_cfg.get("terminal_tolerance_t", 1.0))
+        mill_successes: list[bool] = []
+        for day in daily_metrics:
+            d_date = str(day.get("date", ""))
+            d_rows = rows_by_date.get(d_date, [])
+            if not d_rows:
+                continue
+            last_row = d_rows[-1]
+            silo_last = float(last_row.get("mg1_silo_level_t", init_silo))
+            silo_gap = abs(silo_last - init_silo)
+            mill_successes.append(bool(silo_gap <= silo_tol + 1e-12))
+        mill_terminal_success_rate = float(np.mean(mill_successes)) if mill_successes else 1.0
+    else:
+        mill_terminal_success_rate = 1.0
+
+    # 4. MG3 EV metric: departure SOC target success rate
+    ev_cfg = env.cfg_by_id.get("mg3", {}).get("dr")
+    if ev_cfg and str(ev_cfg.get("type")) == "ev_charging":
+        dep_hour = int(ev_cfg.get("departure_hour", 18))
+        target_soc = float(ev_cfg.get("target_soc", 0.85))
+        ev_successes: list[bool] = []
+        for day in daily_metrics:
+            d_date = str(day.get("date", ""))
+            d_rows = rows_by_date.get(d_date, [])
+            dep_rows = [r for r in d_rows if int(r.get("hour", -1)) == dep_hour - 1]
+            if dep_rows:
+                dep_soc = float(dep_rows[0].get("mg3_ev_soc", 0.0))
+                ev_successes.append(bool(dep_soc >= target_soc - 1e-7))
+            else:
+                ev_successes.append(False)
+        ev_departure_success_rate = float(np.mean(ev_successes)) if ev_successes else 1.0
+    else:
+        ev_departure_success_rate = 1.0
+
+    # 5. Projection rates for MG2 and MG3
+    mg2_proj_vals = [float(r.get("mg2_dr_projected", 0.0)) for r in hourly_rows]
+    mg2_projection_rate = float(np.mean(mg2_proj_vals)) if mg2_proj_vals else 0.0
+
+    if ev_cfg and str(ev_cfg.get("type")) == "ev_charging":
+        avail_start = int(ev_cfg.get("available_start_hour", 0))
+        dep_h = int(ev_cfg.get("departure_hour", 18))
+        mg3_proj_rows = [
+            float(r.get("mg3_dr_projected", 0.0))
+            for r in hourly_rows
+            if avail_start <= int(r.get("hour", -1)) <= dep_h - 1
+        ]
+        mg3_projection_rate = float(np.mean(mg3_proj_rows)) if mg3_proj_rows else 0.0
+    else:
+        mg3_proj_vals = [float(r.get("mg3_dr_projected", 0.0)) for r in hourly_rows]
+        mg3_projection_rate = float(np.mean(mg3_proj_vals)) if mg3_proj_vals else 0.0
+
+    return {
+        "strict_feasible_day_rate": strict_feasible_day_rate,
+        "unmet_energy_mean_kwh": unmet_energy_mean_kwh,
+        "hvac_terminal_joint_success_rate": hvac_joint_success_rate,
+        "hvac_comfort_rate": hvac_comfort_rate,
+        "mill_terminal_success_rate": mill_terminal_success_rate,
+        "ev_departure_success_rate": ev_departure_success_rate,
+        "mg2_projection_rate": mg2_projection_rate,
+        "mg3_projection_rate": mg3_projection_rate,
+    }
+
+
 def evaluate_policy_on_days(
     env: MultiMicrogridEnv,
     days: list[str],
@@ -137,6 +291,7 @@ def evaluate_policy_on_days(
     """Evaluate fixed day/seed pairs so policies receive common random numbers."""
     daily_metrics: list[dict[str, Any]] = []
     hourly_by_day: dict[str, list[dict[str, Any]]] = {}
+    all_hourly_rows: list[dict[str, Any]] = []
     for index, day in enumerate(days):
         observations, _ = env.reset(
             day=day,
@@ -144,7 +299,7 @@ def evaluate_policy_on_days(
             deterministic=bool(deterministic_environment),
             forecast_noise=forecast_noise,
         )
-        collector = EpisodeMetricsCollector(env, capture_hourly=capture_hourly)
+        collector = EpisodeMetricsCollector(env, capture_hourly=True)
         done = False
         while not done:
             actions = policy_fn(observations)
@@ -154,10 +309,14 @@ def evaluate_policy_on_days(
         metrics["date"] = day
         metrics["test_seed"] = int(seed) + index
         daily_metrics.append(metrics)
+        all_hourly_rows.extend(collector.hourly_rows)
         if capture_hourly:
             hourly_by_day[day] = collector.hourly_rows
 
     summary = _legacy_summary(daily_metrics)
+    constraint_metrics = _extract_rollout_constraint_metrics(env, daily_metrics, all_hourly_rows)
+    summary.update(constraint_metrics)
+
     if capture_hourly:
         return summary, daily_metrics, hourly_by_day
     return summary, daily_metrics
@@ -487,6 +646,15 @@ def evaluate(
         env, days, matd3_policy, seed=test_seed, deterministic_environment=True,
         forecast_noise=evaluation_forecast_noise, capture_hourly=True,
     )
+    from evaluation.dr_reference import evaluate_and_save_dr_reference
+    reference_summary, reference_daily, _ = evaluate_and_save_dr_reference(
+        env_config,
+        split=split,
+        days=days,
+        seed=test_seed,
+        forecast_noise=evaluation_forecast_noise,
+        output_dir=output_dir,
+    )
     idle_env = MultiMicrogridEnv(env_config, split=split)
     idle_policy = lambda obs: {
         mg: np.zeros(idle_env.action_dim, dtype=np.float32) for mg in idle_env.agent_ids
@@ -497,9 +665,18 @@ def evaluate(
     )
 
     matd3_values = np.asarray([day["team_profit"] for day in matd3_daily], dtype=np.float64)
+    reference_values = np.asarray(
+        [day["team_profit"] for day in reference_daily], dtype=np.float64
+    )
     idle_values = np.asarray([day["team_profit"] for day in idle_daily], dtype=np.float64)
     comparisons = {
         "vs_idle": _paired_comparison(matd3_values, idle_values, "Idle", spec.display_name),
+        "vs_dr_reference": _paired_comparison(
+            matd3_values,
+            reference_values,
+            "Deterministic rule-based DR reference",
+            spec.display_name,
+        ),
     }
 
     daily_rows: list[dict[str, Any]] = []
@@ -516,10 +693,21 @@ def evaluate(
                     stacklevel=2,
                 )
         row = _daily_row(day, idle_daily[index], coalition, algorithm_slug=spec.slug)
+        reference_profit = float(reference_daily[index]["team_profit"])
+        reference_gain = float(day["team_profit"]) - reference_profit
+        row.update({
+            "dr_reference_team_profit": reference_profit,
+            "gain_vs_dr_reference_abs": reference_gain,
+            "gain_vs_dr_reference_pct": (
+                100.0 * reference_gain / abs(reference_profit)
+                if abs(reference_profit) > 1e-12 else None
+            ),
+        })
         daily_rows.append(row)
         paired = {
             "day": day["date"], "matd3_profit": day["team_profit"],
             "idle_profit": idle_daily[index]["team_profit"],
+            "dr_reference_profit": reference_profit,
             "matd3_terminal_soc": {mg: values["terminal_soc"] for mg, values in
                                     day["soc_statistics_by_microgrid"].items()},
         }
@@ -611,7 +799,9 @@ def evaluate(
         "comparison": legacy_comparison,
         "algorithm": matd3_summary,
         "matd3": matd3_summary,
-        "idle": idle_summary, "paired_daily": paired_days,
+        "idle": idle_summary,
+        "dr_reference": reference_summary,
+        "paired_daily": paired_days,
         **joint_summary,
     }
     if output_dir is not None:

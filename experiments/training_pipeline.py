@@ -23,6 +23,7 @@ from algorithms.registry import get_algorithm_spec
 from envs.multi_microgrid_env import MultiMicrogridEnv
 from evaluation.evaluate_matd3 import evaluate, evaluate_policy_on_days
 from evaluation.plotting import generate_figures
+from experiments.checkpoint_selector import CheckpointCandidate, CheckpointSelector
 from experiments.layout import ExperimentLayout
 from experiments.profiles import resolve_training_args, experiment_contract
 from utils.metrics_collector import EpisodeMetricsCollector, write_json
@@ -203,9 +204,14 @@ def _append_actor_diagnostics(path: Path, episode: int, record: Mapping[str, Any
             writer.writerows(rows)
 
 
-def _validation_record(summary: Mapping[str, Any], episode: int, is_best: bool) -> dict[str, Any]:
+def _validation_record(
+    summary: Mapping[str, Any],
+    episode: int,
+    candidate: CheckpointCandidate | None = None,
+    is_best: bool = False,
+) -> dict[str, Any]:
     stats = summary["team_profit_statistics"]
-    return {
+    rec: dict[str, Any] = {
         "episode": int(episode),
         "team_profit_mean": stats["mean"],
         "team_profit_std": stats["std"],
@@ -216,6 +222,15 @@ def _validation_record(summary: Mapping[str, Any], episode: int, is_best: bool) 
         "feasible_rate": summary["feasible_rate"],
         "is_best": bool(is_best),
     }
+    if candidate is not None and candidate.selection_mode != "profit_only":
+        rec.update({
+            "selection_mode": candidate.selection_mode,
+            "constraint_eligible": candidate.eligible,
+            "constraint_violation_total": candidate.total_violation,
+            "constraint_values": candidate.constraint_values,
+            "constraint_failures": candidate.constraint_failures,
+        })
+    return rec
 
 
 def train(args: argparse.Namespace) -> dict[str, object]:
@@ -334,6 +349,8 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                        if incremental_history else None)
     validation_history: list[dict[str, Any]] = []
     total_steps = 0
+    selector = CheckpointSelector(validation_cfg.get("selection"))
+    best_candidate: CheckpointCandidate | None = None
     best_validation_score = -float("inf")
     best_episode: int | None = None
     train_started = time.perf_counter()
@@ -433,15 +450,17 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                         )
                     ),
                 )
-                score = float(val_summary["team_profit_mean"])
-                is_best = score > best_validation_score
+                candidate = selector.evaluate(val_summary, episode=episode_index + 1)
+                is_best = selector.is_better(candidate, best_candidate)
+                candidate.is_best = is_best
                 if is_best:
-                    best_validation_score = score
+                    best_candidate = candidate
+                    best_validation_score = candidate.objective_value
                     best_episode = episode_index + 1
                     algorithm.save(best_checkpoint)
-                    dashboard.notify_checkpoint(best_episode, score, str(best_checkpoint))
+                    dashboard.notify_checkpoint(best_episode, candidate.objective_value, str(best_checkpoint))
                 validation_history.append(_validation_record(
-                    val_summary, episode_index + 1, is_best,
+                    val_summary, episode_index + 1, candidate=candidate, is_best=is_best,
                 ))
                 write_json(run_dir / "validation_history.json", validation_history)
                 ep_record["best_validation_profit"] = best_validation_score
@@ -476,13 +495,23 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         best_validation_score = float(history[-1]["team_profit"])
     training_seconds = time.perf_counter() - train_started
     checkpoint_selection = {
-        "selection_metric": "validation_team_profit_mean" if validation_enabled
-                            else "final_model_fallback_validation_disabled",
+        "selection_mode": selector.mode,
+        "selection_metric": (
+            "validation_team_profit_mean"
+            if selector.mode == "profit_only" and validation_enabled
+            else (selector.objective_key if validation_enabled else "final_model_fallback_validation_disabled")
+        ),
         "best_episode": best_episode,
         "best_validation_score": best_validation_score,
         "best_checkpoint": "checkpoints/best_model.pt",
         "final_checkpoint": "checkpoints/final_model.pt",
     }
+    if selector.mode != "profit_only":
+        checkpoint_selection.update({
+            "constraint_eligible": best_candidate.eligible if best_candidate is not None else False,
+            "constraint_violation_total": best_candidate.total_violation if best_candidate is not None else float("inf"),
+            "constraint_failures": best_candidate.constraint_failures if best_candidate is not None else ["no_validation_run"],
+        })
     profits = np.asarray([item["team_profit"] for item in history], dtype=np.float64)
     final_100 = profits[-100:]
     final_500 = profits[-500:]

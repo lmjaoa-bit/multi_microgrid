@@ -1,0 +1,86 @@
+# Hierarchical Categorized-Token Spatio-Temporal Transformer Actor (H=8) with Predictive HVAC DR (HVAC ablation)
+algorithm:
+  name: matd3_hierarchical_transformer_predictive_dr
+  hidden_dims: [128, 128]
+  actor_lr: 0.0002
+  actor_max_grad_norm: 1.0
+  critic_lr: 0.0003
+  gamma: 0.99
+  tau: 0.005
+  policy_delay: 2
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  batch_size: 128
+  replay_capacity: 200000
+  warmup_steps: 1000
+  exploration_noise: 0.15
+  network:
+    embed_dim: 32
+    num_heads: 4
+    num_layers: 2
+    hidden_dim: 64
+    forecast_horizon: 8
+  predictive_hvac:
+    enabled: true
+    recovery_horizon_hours: 6.0
+    reference_transition_full_hours: 4.0
+    final_air_priority_hours: 2.0
+    early_air_weight: 1.0
+    early_mass_weight: 1.0
+    final_air_weight: 10.0
+    final_mass_weight: 0.1
+    mass_assist_extra_c: 1.0
+    solar_forecast_mode: zero
+    invalid_forecast_fallback: air_only
+    residual_reference_mapping: true
+    detach_physical_reference: true
+  feasible_dr:
+    enabled: true
+    agents: {mg1: false, mg2: true, mg3: true}
+    interval_epsilon: 1.0e-6
+    exploration_in_latent_space: true
+    target_smoothing_in_latent_space: true
+    ev:
+      catchup_floor_enabled: true
+      reliability_margin: 0.0
+      economic_reference_enabled: false
+      price_weight: 2.0
+      net_load_weight: 1.0
+      softmax_temperature: 1.0
+  diagnostics:
+    log_feasible_interval: true
+    log_latent_action: true
+    log_mandatory_floor: true
+    log_adaptive_reference: true
+    mask_unavailable_ev_saturation: true
+runtime:
+  device: cuda
+  cpu_threads: 4
+  interop_threads: 2
+training:
+  episodes: 5000
+  test_episodes: 55
+validation:
+  enabled: true
+  interval: 100
+  deterministic_policy: true
+  fixed_scenarios: true
+  selection:
+    mode: constrained_profit
+    objective: team_profit_mean
+    constraints:
+      strict_feasible_day_rate: {min: 1.0}
+      unmet_energy_mean_kwh: {max: 0.0, atol: 1.0e-9}
+      hvac_terminal_joint_success_rate: {min: 0.4545454545}
+      hvac_comfort_rate: {min: 0.995}
+      mill_terminal_success_rate: {min: 0.995}
+      ev_departure_success_rate: {min: 1.0}
+      mg2_projection_rate: {max: 0.0, atol: 1.0e-9}
+      mg3_projection_rate: {max: 0.0, atol: 1.0e-9}
+logging:
+  diagnostic_interval: 20
+  incremental_history: true
+  history_snapshot_interval: 500
+  dashboard: true
+  dashboard_refresh_hz: 4
+  rolling_windows: [50, 100, 500]

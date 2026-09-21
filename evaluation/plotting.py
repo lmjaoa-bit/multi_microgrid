@@ -8,6 +8,8 @@ import numpy as np
 import pandas as pd
 import yaml
 
+from evaluation.paper_artifacts import generate_paper_artifacts
+
 
 BLUE = "#2F6B9A"
 GOLD = "#D5A021"
@@ -553,4 +555,5 @@ def generate_figures(
         fig.axes[0].text(0.01, 0.02, "Positive = receives payment; negative = pays into coalition",
                          transform=fig.axes[0].transAxes, fontsize=8, color="#59636A")
     written += _save(fig, figure_dir, "14_transfer_payments", formats)
+    written += generate_paper_artifacts(root, formats=formats)
     return written
