@@ -28,7 +28,7 @@ class Matd3HierarchicalTransformerPredictiveDr(Matd3HierarchicalTransformerFeasi
     """Hierarchical Transformer Actor with finite-horizon predictive HVAC reference."""
 
     action_semantics = "single_dispatch_dr_predictive_reference"
-    predictive_contract_version = "1.0"
+    predictive_contract_version = "1.1"
 
     def __init__(
         self,
@@ -39,7 +39,8 @@ class Matd3HierarchicalTransformerPredictiveDr(Matd3HierarchicalTransformerFeasi
     ) -> None:
         settings = config.get("algorithm", config)
         self.predictive_hvac_config = copy.deepcopy(settings.get("predictive_hvac", {}))
-        self.feasible_dr_config = copy.deepcopy(settings.get("feasible_dr", {}))
+        requested_feasible_dr_config = copy.deepcopy(settings.get("feasible_dr", {}))
+        self.feasible_dr_config = requested_feasible_dr_config
 
         net = settings.get("network", {})
         embed_dim = int(net.get("embed_dim", 32))
@@ -85,6 +86,10 @@ class Matd3HierarchicalTransformerPredictiveDr(Matd3HierarchicalTransformerFeasi
 
         super().__init__(env, private_config, device=device, seed=seed)
 
+        # The feasible-DR parent reads the private bootstrap configuration and
+        # stores it on self. Restore the user-requested configuration before
+        # constructing the predictive actors.
+        self.feasible_dr_config = requested_feasible_dr_config
         self.actor_predictive_config = copy.deepcopy(settings)
         self.actor_predictive_config["predictive_hvac"] = self.predictive_hvac_config
         self.actor_predictive_config["feasible_dr"] = self.feasible_dr_config
@@ -164,11 +169,13 @@ class Matd3HierarchicalTransformerPredictiveDr(Matd3HierarchicalTransformerFeasi
         target = Path(path).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
         canonical_cfg = self.canonical_predictive_config(self.predictive_hvac_config)
+        canonical_feasible_cfg = self.canonical_predictive_config(self.feasible_dr_config)
         state: dict[str, Any] = {
             "algorithm_slug": "matd3_hierarchical_transformer_predictive_dr",
             "action_semantics": self.action_semantics,
             "predictive_hvac_contract_version": self.predictive_contract_version,
             "predictive_hvac_config": canonical_cfg,
+            "feasible_dr_config": canonical_feasible_cfg,
             "observation_schema_by_agent": {
                 mg: list(self.observation_schemas[mg]) for mg in self.agent_ids
             },
@@ -208,6 +215,14 @@ class Matd3HierarchicalTransformerPredictiveDr(Matd3HierarchicalTransformerFeasi
         if saved_cfg != current_cfg:
             raise ValueError(
                 f"Checkpoint predictive_hvac_config mismatch: expected {current_cfg}, got {saved_cfg}"
+            )
+
+        saved_feasible_cfg = state.get("feasible_dr_config")
+        current_feasible_cfg = self.canonical_predictive_config(self.feasible_dr_config)
+        if saved_feasible_cfg != current_feasible_cfg:
+            raise ValueError(
+                "Checkpoint feasible_dr_config mismatch: "
+                f"expected {current_feasible_cfg}, got {saved_feasible_cfg}"
             )
 
         saved_schema = state.get("observation_schema_by_agent", {})

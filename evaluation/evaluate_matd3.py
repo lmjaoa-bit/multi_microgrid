@@ -143,6 +143,8 @@ def _extract_rollout_constraint_metrics(
             "hvac_terminal_joint_success_rate": 1.0,
             "hvac_comfort_rate": 1.0,
             "mill_terminal_success_rate": 1.0,
+            "mill_production_completion_rate": 1.0,
+            "mill_terminal_or_production_success_rate": 1.0,
             "ev_departure_success_rate": 1.0,
             "mg2_projection_rate": 0.0,
             "mg3_projection_rate": 0.0,
@@ -217,6 +219,13 @@ def _extract_rollout_constraint_metrics(
         init_silo = float(mill_cfg.get("silo_initial_t", 20.0))
         silo_tol = float(mill_cfg.get("terminal_tolerance_t", 1.0))
         mill_successes: list[bool] = []
+        production_completion: list[float] = []
+        delta_t = float(getattr(env, "delta_t", 1.0))
+        required_production = (
+            float(mill_cfg.get("downstream_consumption_tph", 0.0))
+            * float(getattr(env, "episode_length", 24))
+            * delta_t
+        )
         for day in daily_metrics:
             d_date = str(day.get("date", ""))
             d_rows = rows_by_date.get(d_date, [])
@@ -226,9 +235,24 @@ def _extract_rollout_constraint_metrics(
             silo_last = float(last_row.get("mg1_silo_level_t", init_silo))
             silo_gap = abs(silo_last - init_silo)
             mill_successes.append(bool(silo_gap <= silo_tol + 1e-12))
+            produced = sum(
+                float(row.get("mg1_mill_production_tph", 0.0)) * delta_t
+                for row in d_rows
+            )
+            production_completion.append(
+                produced / required_production if required_production > 0.0 else 1.0
+            )
         mill_terminal_success_rate = float(np.mean(mill_successes)) if mill_successes else 1.0
+        mill_production_completion_rate = (
+            float(np.mean(production_completion)) if production_completion else 1.0
+        )
     else:
         mill_terminal_success_rate = 1.0
+        mill_production_completion_rate = 1.0
+    mill_terminal_or_production_success_rate = max(
+        mill_terminal_success_rate,
+        mill_production_completion_rate,
+    )
 
     # 4. MG3 EV metric: departure SOC target success rate
     ev_cfg = env.cfg_by_id.get("mg3", {}).get("dr")
@@ -272,6 +296,8 @@ def _extract_rollout_constraint_metrics(
         "hvac_terminal_joint_success_rate": hvac_joint_success_rate,
         "hvac_comfort_rate": hvac_comfort_rate,
         "mill_terminal_success_rate": mill_terminal_success_rate,
+        "mill_production_completion_rate": mill_production_completion_rate,
+        "mill_terminal_or_production_success_rate": mill_terminal_or_production_success_rate,
         "ev_departure_success_rate": ev_departure_success_rate,
         "mg2_projection_rate": mg2_projection_rate,
         "mg3_projection_rate": mg3_projection_rate,

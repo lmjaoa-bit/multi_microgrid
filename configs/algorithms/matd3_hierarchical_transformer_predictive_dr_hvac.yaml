@@ -73,7 +73,7 @@ validation:
       unmet_energy_mean_kwh: {max: 0.0, atol: 1.0e-9}
       hvac_terminal_joint_success_rate: {min: 0.4545454545}
       hvac_comfort_rate: {min: 0.995}
-      mill_terminal_success_rate: {min: 0.995}
+      mill_terminal_or_production_success_rate: {min: 0.995}
       ev_departure_success_rate: {min: 1.0}
       mg2_projection_rate: {max: 0.0, atol: 1.0e-9}
       mg3_projection_rate: {max: 0.0, atol: 1.0e-9}

@@ -444,6 +444,7 @@ def test_checkpoint_round_trip(env_and_config, tmp_path):
         ("algorithm_slug", "matd3_hierarchical_transformer_feasible_dr_v2", "algorithm mismatch"),
         ("predictive_hvac_contract_version", 999, "version mismatch"),
         ("predictive_hvac_config", {"enabled": False}, "predictive_hvac_config mismatch"),
+        ("feasible_dr_config", {"enabled": False}, "feasible_dr_config mismatch"),
         ("observation_schema_by_agent", {"mg1": ("wrong",)}, "schema mismatch"),
     ],
 )
@@ -480,3 +481,30 @@ def test_parent_preservation_mg1_mg3(env_and_config):
     assert torch.isfinite(out_mg3).all()
     assert (out_mg1 >= -1.0).all() and (out_mg1 <= 1.0).all()
     assert (out_mg3 >= -1.0).all() and (out_mg3 <= 1.0).all()
+
+    # MG1 remains the parent's unmapped DR branch, while MG3 must retain the
+    # feasible EV mapper configured by the V2 parent.
+    assert algo.actors["mg1"].feasible_dr.enabled is False
+    assert algo.actors["mg3"].feasible_dr.enabled is True
+    assert torch.allclose(out_mg1[:, 1], latent[:, 1])
+
+    # An unavailable EV has the exact environment-compatible raw action -1.0.
+    transform = algo.actors["mg3"].feasible_dr
+    unavailable_obs = mg3_obs.clone()
+    unavailable_obs[:, transform.ev_avail_idx] = 0.0
+    unavailable_obs[:, transform.ev_min_idx] = 0.0
+    unavailable_obs[:, transform.ev_max_idx] = 0.0
+    unavailable_obs[:, transform.rem_energy_idx] = 0.0
+    unavailable_obs[:, transform.hours_dep_idx] = 0.0
+    unavailable = algo.actors["mg3"].map_latent_actions(
+        unavailable_obs,
+        torch.tensor([[0.5, 0.25]]),
+    )
+    assert unavailable[0, 1].item() == pytest.approx(-1.0)
+
+
+def test_validation_uses_mill_terminal_or_production_constraint(env_and_config):
+    _, config = env_and_config
+    constraints = config["validation"]["selection"]["constraints"]
+    assert "mill_terminal_or_production_success_rate" in constraints
+    assert "mill_terminal_success_rate" not in constraints
