@@ -228,7 +228,8 @@ def update_p2p_value(self: Any, batch_size: int) -> dict[str, Any]:
                         payload["dr_projection_delta_mean"] = float(
                             plan["dr_projection_delta"].detach().abs().mean().item()
                         )
-                    payload["p2p_auxiliary_diagnostics"] = p2p_diagnostics_by_agent[active]
+                    for diag_key, diag_val in p2p_diagnostics_by_agent[active].items():
+                        payload[diag_key] = diag_val
                     actor_diagnostics[active] = payload
 
                 self._soft_update(actor, self.target_actors[active])
@@ -255,6 +256,7 @@ def update_p2p_value(self: Any, batch_size: int) -> dict[str, Any]:
         actor_branch_grad_norms=actor_branch_norms,
         actor_layer_grad_norms=actor_layer_norms,
         actor_diagnostics=actor_diagnostics,
+        p2p_auxiliary_diagnostics=p2p_diagnostics_by_agent,
     )
 
     if p2p_diagnostics_by_agent:
