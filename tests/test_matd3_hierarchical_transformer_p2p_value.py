@@ -348,3 +348,128 @@ def test_child_actor_missing_p2p_schema_fields(env_and_config):
     with pytest.raises(ValueError, match="previous_ess_p2p_accepted"):
         P2PValueActor(**kwargs, p2p_auxiliary_config=aux)
 
+
+from algorithms.registry import get_algorithm_spec
+from algorithms.matd3_hierarchical_transformer_predictive_dr import (
+    Matd3HierarchicalTransformerPredictiveDr,
+)
+from algorithms.matd3_hierarchical_transformer_p2p_value.algorithm import (
+    Matd3HierarchicalTransformerP2PValue,
+    ALGORITHM_SLUG,
+    PARENT_PREDICTIVE_CONTRACT_VERSION,
+    P2P_AUXILIARY_CONTRACT_VERSION,
+)
+
+
+def test_registry_resolves_p2p_value_algorithm():
+    spec = get_algorithm_spec("matd3_hierarchical_transformer_p2p_value")
+    assert spec.slug == "matd3_hierarchical_transformer_p2p_value"
+    assert spec.algorithm_class is Matd3HierarchicalTransformerP2PValue
+    assert spec.default_config_path == CONFIG_PATH.resolve()
+
+
+def test_algorithm_from_env_constructs_p2p_value_actors_and_normalizers(env_and_config):
+    env, config = env_and_config
+    algo = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+    assert algo.slug == "matd3_hierarchical_transformer_p2p_value"
+    for mg in env.agent_ids:
+        assert isinstance(algo.actors[mg], P2PValueActor)
+        assert isinstance(algo.target_actors[mg], P2PValueActor)
+        norm = algo.normalizers_by_microgrid[mg]
+        assert "trade" in norm
+        assert norm["trade"] > 0.0
+
+
+def test_algorithm_select_actions_matches_parent_with_identical_weights(env_and_config):
+    env, config = env_and_config
+    parent = Matd3HierarchicalTransformerPredictiveDr.from_env(env, config, "cpu", 42)
+    child = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+
+    for mg in env.agent_ids:
+        child.actors[mg].load_state_dict(parent.actors[mg].state_dict(), strict=False)
+
+    obs, _ = env.reset(seed=42)
+    parent_actions = parent.select_actions(obs, noise_std=0.0)
+    child_actions = child.select_actions(obs, noise_std=0.0)
+
+    for mg in env.agent_ids:
+        np.testing.assert_allclose(parent_actions[mg], child_actions[mg], atol=1e-6)
+
+
+def test_checkpoint_roundtrip_and_exact_equality(env_and_config, tmp_path):
+    env, config = env_and_config
+    algo = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+    algo.update_steps = 123
+    ckpt_path = tmp_path / "test_ckpt.pt"
+    algo.save(ckpt_path)
+
+    loaded_algo = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 999)
+    loaded_algo.load(ckpt_path)
+
+    assert loaded_algo.update_steps == 123
+    for mg in env.agent_ids:
+        for p1, p2 in zip(algo.actors[mg].parameters(), loaded_algo.actors[mg].parameters()):
+            assert torch.equal(p1, p2)
+        for p1, p2 in zip(algo.critics[mg].parameters(), loaded_algo.critics[mg].parameters()):
+            assert torch.equal(p1, p2)
+
+
+@pytest.mark.parametrize(
+    ("field", "bad_value", "err_match"),
+    [
+        ("algorithm_slug", "matd3_hierarchical_transformer_predictive_dr", "algorithm_slug"),
+        ("action_semantics", "wrong", "action_semantics"),
+        ("parent_predictive_contract_version", "9.9", "parent_predictive_contract_version"),
+        ("p2p_auxiliary_contract_version", "9.9", "p2p_auxiliary_contract_version"),
+        ("predictive_hvac_config", {"enabled": False}, "predictive_hvac_config"),
+        ("feasible_dr_config", {"enabled": False}, "feasible_dr_config"),
+        ("p2p_auxiliary_config", {"enabled": False}, "p2p_auxiliary_config"),
+        ("observation_schema_by_agent", {"mg1": ["wrong"]}, "observation_schema_by_agent"),
+        ("normalizers_by_microgrid", {"mg1": {"trade": 1.0}}, "normalizers_by_microgrid"),
+    ],
+)
+def test_checkpoint_mutations_rejected(env_and_config, tmp_path, field, bad_value, err_match):
+    env, config = env_and_config
+    algo = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+    ckpt_path = tmp_path / "mutate.pt"
+    algo.save(ckpt_path)
+
+    payload = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    payload[field] = bad_value
+    torch.save(payload, ckpt_path)
+
+    loaded = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+    with pytest.raises(ValueError, match=err_match):
+        loaded.load(ckpt_path)
+
+
+def test_parent_checkpoint_rejected_by_child(env_and_config, tmp_path):
+    env, config = env_and_config
+    parent = Matd3HierarchicalTransformerPredictiveDr.from_env(env, config, "cpu", 42)
+    parent_path = tmp_path / "parent_ckpt.pt"
+    parent.save(parent_path)
+
+    child = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+    with pytest.raises(ValueError, match="algorithm_slug"):
+        child.load(parent_path)
+
+
+def test_deterministic_closed_loop_preservation(env_and_config):
+    env, config = env_and_config
+    parent = Matd3HierarchicalTransformerPredictiveDr.from_env(env, config, "cpu", 42)
+    child = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+
+    for mg in env.agent_ids:
+        child.actors[mg].load_state_dict(parent.actors[mg].state_dict(), strict=False)
+
+    obs, _ = env.reset(seed=42)
+    for _ in range(24):
+        a_parent = parent.select_actions(obs, noise_std=0.0)
+        a_child = child.select_actions(obs, noise_std=0.0)
+        for mg in env.agent_ids:
+            np.testing.assert_allclose(a_parent[mg], a_child[mg], atol=1e-6)
+        obs, _, done, _ = env.step(a_child)
+        if done:
+            break
+
+
