@@ -229,3 +229,122 @@ def test_validate_p2p_auxiliary_config_require_enabled():
         validate_p2p_auxiliary_config(cfg, require_enabled=True)
     res = validate_p2p_auxiliary_config(cfg, require_enabled=False)
     assert res["enabled"] is False
+
+
+from algorithms.matd3_hierarchical_transformer_predictive_dr.actor import PredictiveDRActor
+from algorithms.matd3_hierarchical_transformer_p2p_value.actor import P2PValueActor
+
+
+def actor_constructor_kwargs(env, config, mg):
+    settings = config["algorithm"]
+    net = settings["network"]
+    normalizers = {
+        agent: dict(env.global_state_builder.norm[agent]) for agent in env.agent_ids
+    }
+    return {
+        "schema": env.obs_builder.schema(mg),
+        "agent_ids": env.agent_ids,
+        "active_agent": mg,
+        "mg_config": env.cfg_by_id[mg],
+        "predictive_config": settings,
+        "normalizers_by_microgrid": normalizers,
+        "embed_dim": net["embed_dim"],
+        "num_heads": net["num_heads"],
+        "num_layers": net["num_layers"],
+        "forecast_horizon": net["forecast_horizon"],
+        "hidden_dim": net["hidden_dim"],
+        "delta_t": env.delta_t,
+        "episode_length": env.episode_length,
+    }
+
+
+def make_parent_actor(env_and_config, mg):
+    env, config = env_and_config
+    return PredictiveDRActor(**actor_constructor_kwargs(env, config, mg))
+
+
+def make_child_actor(env_and_config, mg, *, enabled):
+    env, config = env_and_config
+    aux = copy.deepcopy(config["algorithm"]["p2p_auxiliary"])
+    aux["enabled"] = enabled
+    return P2PValueActor(
+        **actor_constructor_kwargs(env, config, mg), p2p_auxiliary_config=aux
+    )
+
+
+def make_child_actor_and_batch(env_and_config, mg, *, batch):
+    env, _ = env_and_config
+    actor = make_child_actor(env_and_config, mg, enabled=True)
+    observations, _ = env.reset(seed=42)
+    observation = torch.as_tensor(observations[mg], dtype=torch.float32).unsqueeze(0)
+    return actor, observation.repeat(batch, 1)
+
+
+def module_grad_norm(module):
+    squared = [
+        parameter.grad.detach().square().sum()
+        for parameter in module.parameters()
+        if parameter.grad is not None
+    ]
+    return 0.0 if not squared else float(torch.stack(squared).sum().sqrt().item())
+
+
+@pytest.mark.parametrize("mg", ["mg1", "mg2", "mg3"])
+@pytest.mark.parametrize("enabled", [False, True])
+def test_child_actor_policy_path_exactly_matches_parent(env_and_config, mg, enabled):
+    torch.manual_seed(42)
+    parent = make_parent_actor(env_and_config, mg)
+    torch.manual_seed(42)
+    child = make_child_actor(env_and_config, mg, enabled=enabled)
+    incompatible = child.load_state_dict(parent.state_dict(), strict=False)
+    assert incompatible.unexpected_keys == []
+    assert all(key.startswith("p2p_value_head.") for key in incompatible.missing_keys)
+    env, _ = env_and_config
+    observations, _ = env.reset(seed=42)
+    obs = torch.as_tensor(observations[mg], dtype=torch.float32).unsqueeze(0).repeat(4, 1)
+    assert torch.equal(parent.forward_latent(obs), child.forward_latent(obs))
+    assert torch.equal(parent(obs), child(obs))
+
+
+def test_p2p_head_shapes_and_ratio_bounds(env_and_config):
+    actor, obs = make_child_actor_and_batch(env_and_config, "mg2", batch=8)
+    latent, reps = actor.forward_latent_with_representations(obs)
+    pred = actor.predict_p2p_value(reps, torch.linspace(-1, 1, 8).unsqueeze(-1))
+    assert latent.shape == (8, 2)
+    assert pred.any_fill_logit.shape == (8, 1)
+    assert pred.conditional_fill_ratio.shape == (8, 1)
+    assert torch.all((pred.conditional_fill_ratio >= 0) & (pred.conditional_fill_ratio <= 1))
+
+
+def test_auxiliary_only_gradient_boundaries(env_and_config):
+    actor, obs = make_child_actor_and_batch(env_and_config, "mg2", batch=8)
+    behavior = torch.zeros(8, 1, requires_grad=True)
+    _, reps = actor.forward_latent_with_representations(obs)
+    pred = actor.predict_p2p_value(reps, behavior)
+    (pred.any_fill_logit.mean() + pred.conditional_fill_ratio.mean()).backward()
+    assert module_grad_norm(actor.p2p_value_head) > 0
+    assert module_grad_norm(actor.trade_encoder) > 0
+    assert module_grad_norm(actor.transformer) > 0
+    assert module_grad_norm(actor.ess_head) == 0
+    assert module_grad_norm(actor.ess_linear_skip) == 0
+    assert module_grad_norm(actor.dr_head) == 0
+    assert module_grad_norm(actor.dr_linear_skip) == 0
+    assert behavior.grad is None
+
+
+def test_child_actor_observation_shape_validation(env_and_config):
+    actor, _ = make_child_actor_and_batch(env_and_config, "mg2", batch=1)
+    with pytest.raises(ValueError, match=r"Expected observation shape \[batch_size,"):
+        actor.forward_latent_with_representations(torch.zeros(len(actor.schema)))
+
+
+def test_child_actor_missing_p2p_schema_fields(env_and_config):
+    env, config = env_and_config
+    kwargs = actor_constructor_kwargs(env, config, "mg2")
+    # Drop one of the p2p fields from schema
+    bad_schema = [c for c in kwargs["schema"] if c != "previous_ess_p2p_accepted"]
+    kwargs["schema"] = bad_schema
+    aux = copy.deepcopy(config["algorithm"]["p2p_auxiliary"])
+    with pytest.raises(ValueError, match="previous_ess_p2p_accepted"):
+        P2PValueActor(**kwargs, p2p_auxiliary_config=aux)
+
