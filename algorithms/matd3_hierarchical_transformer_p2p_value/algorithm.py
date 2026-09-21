@@ -242,6 +242,12 @@ class Matd3HierarchicalTransformerP2PValue(Matd3HierarchicalTransformerPredictiv
                 f"Checkpoint normalizers_by_microgrid mismatch: expected {self.normalizers_by_microgrid}, got {saved_norm}"
             )
 
+        saved_norm_sig = state.get("normalization_signature")
+        if not saved_norm_sig or saved_norm_sig != self.normalization_signature:
+            raise ValueError(
+                f"Checkpoint normalization_signature mismatch: expected '{self.normalization_signature}', got '{saved_norm_sig}'"
+            )
+
         for mg in self.agent_ids:
             self.actors[mg].load_state_dict(state["actors"][mg])
             self.target_actors[mg].load_state_dict(state["target_actors"][mg])

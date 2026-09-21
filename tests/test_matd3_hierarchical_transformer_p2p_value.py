@@ -730,3 +730,41 @@ def test_nonfinite_prediction_raises_error(env_and_config):
     assert not parameters_changed(before, algo.actors["mg2"])
 
 
+def test_scaled_float32_roundoff_does_not_abort_label_extraction():
+    # Reproduce the observed 1.1920928955078125e-05 kWh residual.
+    scale = 901.0
+    schema = ["previous_ess_p2p_offer", "previous_ess_p2p_accepted", "previous_ess_p2p_unmatched"]
+    offer = torch.tensor([0.1234567], dtype=torch.float32)
+    accepted = torch.tensor([0.1000000], dtype=torch.float32)
+    unmatched = offer - accepted + torch.tensor([1.1920928955078125e-05 / scale])
+    obs = torch.stack([offer, accepted, unmatched], dim=1)
+    labels = extract_p2p_labels(
+        obs, schema, trade_scale=scale, consistency_tolerance_kwh=1e-5
+    )
+    assert labels.consistency_residual_kwh.abs().max() < 2e-5
+
+
+def test_material_p2p_inconsistency_still_fails():
+    scale = 901.0
+    schema = ["previous_ess_p2p_offer", "previous_ess_p2p_accepted", "previous_ess_p2p_unmatched"]
+    obs = torch.tensor([[10.0 / scale, 4.0 / scale, 5.999 / scale]], dtype=torch.float32)
+    with pytest.raises(ValueError, match="P2P consistency error"):
+        extract_p2p_labels(
+            obs, schema, trade_scale=scale, consistency_tolerance_kwh=1e-5
+        )
+
+
+def test_checkpoint_load_validates_normalization_signature(tmp_path, env_and_config):
+    env, config = env_and_config
+    algo = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+    ckpt_path = tmp_path / "checkpoint.pt"
+    algo.save(ckpt_path)
+
+    checkpoint = torch.load(ckpt_path, weights_only=False)
+    checkpoint["normalization_signature"] = "0" * 64
+    torch.save(checkpoint, ckpt_path)
+
+    with pytest.raises(ValueError, match="normalization_signature"):
+        algo.load(ckpt_path)
+
+

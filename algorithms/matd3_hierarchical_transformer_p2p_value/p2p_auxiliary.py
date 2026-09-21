@@ -128,6 +128,26 @@ def validate_p2p_auxiliary_config(
     return validated
 
 
+def physical_consistency_tolerance(
+    values: torch.Tensor,
+    scale_kwh: float,
+    absolute_tolerance_kwh: float,
+) -> torch.Tensor:
+    """Compute scale- and dtype-aware numerical consistency tolerance."""
+    eps = torch.finfo(values.dtype).eps
+    if values.ndim >= 2:
+        magnitude = values.detach().abs().amax(dim=-1, keepdim=True) * float(scale_kwh)
+    else:
+        magnitude = values.detach().abs().amax() * float(scale_kwh)
+    roundoff = 8.0 * eps * torch.maximum(
+        magnitude, torch.ones_like(magnitude) * float(scale_kwh)
+    )
+    return torch.maximum(
+        roundoff,
+        torch.full_like(roundoff, float(absolute_tolerance_kwh)),
+    )
+
+
 def extract_p2p_labels(
     next_observation: torch.Tensor,
     schema: list[str],
@@ -173,7 +193,8 @@ def extract_p2p_labels(
     accepted_kwh = raw_accepted * scale
     unmatched_kwh = raw_unmatched * scale
 
-    tol = float(consistency_tolerance_kwh)
+    raw_p2p = torch.cat([raw_offer, raw_accepted, raw_unmatched], dim=-1)
+    tol = physical_consistency_tolerance(raw_p2p, scale, consistency_tolerance_kwh)
     eps = float(offer_epsilon_kwh)
 
     if (offer_kwh < -tol).any():
@@ -197,7 +218,7 @@ def extract_p2p_labels(
     residual = offer_kwh - accepted_kwh - unmatched_kwh
     if (residual.abs() > tol + 1e-7).any():
         raise ValueError(
-            f"P2P consistency error exceeds tolerance: max residual={residual.abs().max().item()} > {tol}"
+            f"P2P consistency error exceeds tolerance: max residual={residual.abs().max().item()} > {tol.max().item()}"
         )
 
     offered = offer_kwh > eps
