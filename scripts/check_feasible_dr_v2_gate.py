@@ -182,15 +182,7 @@ def evaluate_v2_gate(
     mode: Literal["hvac", "ev", "combined"] = "combined",
 ) -> dict[str, Any]:
     """Evaluate V2 gate on saved run artifacts."""
-    slug_prefix = (
-        "matd3_hierarchical_transformer_feasible_dr_v2_hvac"
-        if mode == "hvac"
-        else (
-            "matd3_hierarchical_transformer_feasible_dr_v2_ev"
-            if mode == "ev"
-            else "matd3_hierarchical_transformer_feasible_dr_v2"
-        )
-    )
+    slug_prefix = "matd3_hierarchical_transformer_feasible_dr_v2"
     data = read_run_artifacts(run_dir, expected_slug_prefix=slug_prefix)
     pm = data["paper_metrics"]
     ts = data["test_summary"]

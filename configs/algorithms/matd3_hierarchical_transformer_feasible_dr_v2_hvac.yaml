@@ -29,8 +29,8 @@ algorithm:
     hvac:
       interval_mapping_enabled: true
       recovery_anchor_enabled: true
-      recovery_pressure_start: 0.35
-      recovery_pressure_full: 0.85
+      recovery_pressure_start: 0.02
+      recovery_pressure_full: 0.20
       recovery_start_hours: 6.0
       recovery_full_hours: 2.0
     ev:

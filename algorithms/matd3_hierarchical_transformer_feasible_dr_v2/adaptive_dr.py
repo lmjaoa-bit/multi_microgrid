@@ -63,7 +63,7 @@ def validate_adaptive_dr_config(
         raise ValueError("interval_epsilon must be positive")
 
     hvac = config.get("hvac", {})
-    if not 0 <= float(hvac.get("recovery_pressure_start", 0.35)) < float(hvac.get("recovery_pressure_full", 0.85)):
+    if not 0 <= float(hvac.get("recovery_pressure_start", 0.02)) < float(hvac.get("recovery_pressure_full", 0.20)):
         raise ValueError("recovery_pressure_start must be below recovery_pressure_full")
     if not 0 <= float(hvac.get("recovery_full_hours", 2.0)) < float(hvac.get("recovery_start_hours", 6.0)):
         raise ValueError("recovery_full_hours must be below recovery_start_hours")
@@ -192,8 +192,8 @@ class AdaptiveDRTransform(FeasibleDRTransform):
         cop_cool: float = 3.2,
         heating_max_kw: float = 35.0,
         cooling_max_kw: float = 35.0,
-        recovery_pressure_start: float = 0.35,
-        recovery_pressure_full: float = 0.85,
+        recovery_pressure_start: float = 0.02,
+        recovery_pressure_full: float = 0.20,
         recovery_start_hours: float = 6.0,
         recovery_full_hours: float = 2.0,
         recovery_anchor_enabled: bool = True,
@@ -262,8 +262,8 @@ class AdaptiveDRTransform(FeasibleDRTransform):
         cooling_max_kw: float = 35.0,
         delta_t: float = 1.0,
         episode_length: int = 24,
-        recovery_pressure_start: float = 0.35,
-        recovery_pressure_full: float = 0.85,
+        recovery_pressure_start: float = 0.02,
+        recovery_pressure_full: float = 0.20,
         recovery_start_hours: float = 6.0,
         recovery_full_hours: float = 2.0,
         recovery_anchor_enabled: bool = True,
@@ -359,8 +359,8 @@ class AdaptiveDRTransform(FeasibleDRTransform):
             cop_cool=cop_c,
             heating_max_kw=heat_max,
             cooling_max_kw=cool_max,
-            recovery_pressure_start=float(hvac_cfg.get("recovery_pressure_start", 0.35)),
-            recovery_pressure_full=float(hvac_cfg.get("recovery_pressure_full", 0.85)),
+            recovery_pressure_start=float(hvac_cfg.get("recovery_pressure_start", 0.02)),
+            recovery_pressure_full=float(hvac_cfg.get("recovery_pressure_full", 0.20)),
             recovery_start_hours=float(hvac_cfg.get("recovery_start_hours", 6.0)),
             recovery_full_hours=float(hvac_cfg.get("recovery_full_hours", 2.0)),
             recovery_anchor_enabled=bool(hvac_cfg.get("recovery_anchor_enabled", True)),
