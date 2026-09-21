@@ -473,3 +473,246 @@ def test_deterministic_closed_loop_preservation(env_and_config):
             break
 
 
+def clone_parameters(module):
+    return {name: value.detach().clone() for name, value in module.named_parameters()}
+
+
+def parameters_changed(before, module):
+    return any(
+        not torch.equal(before[name], value.detach())
+        for name, value in module.named_parameters()
+    )
+
+
+def add_replay_rows(algo, env, *, count, outcome_kwh):
+    observations, reset_info = env.reset(seed=123)
+    state = reset_info["global_state"]
+    for row_index in range(count):
+        actions = {
+            mg: np.zeros(env.action_dim, dtype=np.float32) for mg in env.agent_ids
+        }
+        next_observations, rewards, done, info = env.step(actions)
+        patched = {mg: value.copy() for mg, value in next_observations.items()}
+        for mg in env.agent_ids:
+            scale = float(env.global_state_builder.norm[mg]["trade"])
+            schema = algo.observation_schemas[mg]
+            for name, physical in zip(
+                (
+                    "previous_ess_p2p_offer",
+                    "previous_ess_p2p_accepted",
+                    "previous_ess_p2p_unmatched",
+                ),
+                outcome_kwh,
+            ):
+                patched[mg][schema.index(name)] = physical / scale
+        algo.replay.add(
+            observations,
+            state,
+            actions,
+            float(rewards[env.agent_ids[0]]),
+            patched,
+            info["global_state_after"],
+            done,
+        )
+        if done and row_index + 1 < count:
+            observations, reset_info = env.reset(seed=124 + row_index)
+            state = reset_info["global_state"]
+        else:
+            observations, state = next_observations, info["global_state_after"]
+
+
+def test_update_changes_auxiliary_and_shared_parameters_on_actor_step(env_and_config):
+    env, config = env_and_config
+    config = copy.deepcopy(config)
+    config["algorithm"]["policy_delay"] = 1
+    config.setdefault("logging", {})["diagnostic_interval"] = 1
+    algo = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+    add_replay_rows(algo, env, count=4, outcome_kwh=(10.0, 4.0, 6.0))
+    algo.policy_delay = 1
+    before_head = clone_parameters(algo.actors["mg2"].p2p_value_head)
+    before_trade = clone_parameters(algo.actors["mg2"].trade_encoder)
+    metrics = algo.update(batch_size=4)
+    assert parameters_changed(before_head, algo.actors["mg2"].p2p_value_head)
+    assert parameters_changed(before_trade, algo.actors["mg2"].trade_encoder)
+    assert algo.update_steps == 1
+    assert metrics["p2p_aux_offered_sample_count"] == pytest.approx(4.0)
+
+
+def test_no_offer_training_batch_is_finite(env_and_config):
+    env, config = env_and_config
+    config = copy.deepcopy(config)
+    config["algorithm"]["policy_delay"] = 1
+    config.setdefault("logging", {})["diagnostic_interval"] = 1
+    algo = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+    add_replay_rows(algo, env, count=4, outcome_kwh=(0.0, 0.0, 0.0))
+    metrics = algo.update(batch_size=4)
+    assert metrics["p2p_aux_total_loss"] == pytest.approx(0.0)
+    assert metrics["p2p_aux_offered_sample_count"] == pytest.approx(0.0)
+    assert all(torch.isfinite(p).all() for p in algo.actors.parameters())
+
+
+def test_zero_weight_parent_equivalence(env_and_config):
+    env, config = env_and_config
+    cfg_parent = copy.deepcopy(config)
+    cfg_child = copy.deepcopy(config)
+    cfg_child["algorithm"]["p2p_auxiliary"]["loss_weight_max"] = 0.0
+    cfg_parent["algorithm"]["policy_delay"] = 1
+    cfg_child["algorithm"]["policy_delay"] = 1
+
+    torch.manual_seed(42)
+    parent = Matd3HierarchicalTransformerPredictiveDr.from_env(env, cfg_parent, "cpu", 42)
+    torch.manual_seed(42)
+    child = Matd3HierarchicalTransformerP2PValue.from_env(env, cfg_child, "cpu", 42)
+
+    for mg in env.agent_ids:
+        child.actors[mg].load_state_dict(parent.actors[mg].state_dict(), strict=False)
+        child.target_actors[mg].load_state_dict(parent.target_actors[mg].state_dict(), strict=False)
+        child.critics[mg].load_state_dict(parent.critics[mg].state_dict())
+        child.target_critics[mg].load_state_dict(parent.target_critics[mg].state_dict())
+
+    add_replay_rows(parent, env, count=8, outcome_kwh=(10.0, 4.0, 6.0))
+    # mirror replay into child
+    for i in range(len(parent.replay)):
+        entry = parent.replay.storage[i]
+        child.replay.add(
+            entry.observations,
+            entry.global_state,
+            entry.actions,
+            entry.team_reward,
+            entry.next_observations,
+            entry.next_global_state,
+            entry.done,
+        )
+
+    rng_state = torch.random.get_rng_state()
+    parent.update(batch_size=4)
+    torch.random.set_rng_state(rng_state)
+    child.update(batch_size=4)
+
+    for mg in env.agent_ids:
+        for name, p_param in parent.actors[mg].named_parameters():
+            c_param = dict(child.actors[mg].named_parameters())[name]
+            torch.testing.assert_close(c_param, p_param)
+
+
+def test_diagnostic_non_interference(env_and_config):
+    env, config = env_and_config
+    c1 = copy.deepcopy(config)
+    c2 = copy.deepcopy(config)
+    c1["logging"] = {"diagnostic_interval": 0}
+    c2["logging"] = {"diagnostic_interval": 1}
+    c1["algorithm"]["policy_delay"] = 1
+    c2["algorithm"]["policy_delay"] = 1
+
+    torch.manual_seed(42)
+    a1 = Matd3HierarchicalTransformerP2PValue.from_env(env, c1, "cpu", 42)
+    torch.manual_seed(42)
+    a2 = Matd3HierarchicalTransformerP2PValue.from_env(env, c2, "cpu", 42)
+
+    add_replay_rows(a1, env, count=6, outcome_kwh=(10.0, 4.0, 6.0))
+    for i in range(len(a1.replay)):
+        e = a1.replay.storage[i]
+        a2.replay.add(e.observations, e.global_state, e.actions, e.team_reward, e.next_observations, e.next_global_state, e.done)
+
+    rng = torch.random.get_rng_state()
+    a1.update(batch_size=4)
+    torch.random.set_rng_state(rng)
+    a2.update(batch_size=4)
+
+    for left, right in zip(a1.actors.parameters(), a2.actors.parameters()):
+        assert torch.equal(left, right)
+    for left, right in zip(a1.critics.parameters(), a2.critics.parameters()):
+        assert torch.equal(left, right)
+
+
+def test_critic_equivalence(env_and_config):
+    env, config = env_and_config
+    cp = copy.deepcopy(config)
+    cc = copy.deepcopy(config)
+    cc["algorithm"]["p2p_auxiliary"]["loss_weight_max"] = 0.0
+    cp["algorithm"]["policy_delay"] = 2
+    cc["algorithm"]["policy_delay"] = 2
+
+    torch.manual_seed(42)
+    parent = Matd3HierarchicalTransformerPredictiveDr.from_env(env, cp, "cpu", 42)
+    torch.manual_seed(42)
+    child = Matd3HierarchicalTransformerP2PValue.from_env(env, cc, "cpu", 42)
+
+    for mg in env.agent_ids:
+        child.actors[mg].load_state_dict(parent.actors[mg].state_dict(), strict=False)
+        child.target_actors[mg].load_state_dict(parent.target_actors[mg].state_dict(), strict=False)
+        child.critics[mg].load_state_dict(parent.critics[mg].state_dict())
+        child.target_critics[mg].load_state_dict(parent.target_critics[mg].state_dict())
+
+    add_replay_rows(parent, env, count=8, outcome_kwh=(10.0, 4.0, 6.0))
+    for i in range(len(parent.replay)):
+        e = parent.replay.storage[i]
+        child.replay.add(e.observations, e.global_state, e.actions, e.team_reward, e.next_observations, e.next_global_state, e.done)
+
+    rng = torch.random.get_rng_state()
+    parent.update(batch_size=4)  # step 1: critic only
+    torch.random.set_rng_state(rng)
+    child.update(batch_size=4)   # step 1: critic only
+
+    for mg in env.agent_ids:
+        for p1, p2 in zip(parent.critics[mg].parameters(), child.critics[mg].parameters()):
+            assert torch.equal(p1, p2)
+        for p1, p2 in zip(parent.target_critics[mg].parameters(), child.target_critics[mg].parameters()):
+            assert torch.equal(p1, p2)
+
+
+def test_diagnostics_produced_at_cadence(env_and_config):
+    env, config = env_and_config
+    c = copy.deepcopy(config)
+    c["algorithm"]["policy_delay"] = 1
+    c["logging"] = {"diagnostic_interval": 1}
+
+    algo = Matd3HierarchicalTransformerP2PValue.from_env(env, c, "cpu", 42)
+    add_replay_rows(algo, env, count=6, outcome_kwh=(10.0, 4.0, 6.0))
+    metrics = algo.update(batch_size=4)
+
+    required_keys = [
+        "p2p_auxiliary_weight",
+        "p2p_aux_any_fill_loss",
+        "p2p_aux_fill_ratio_loss",
+        "p2p_aux_total_loss",
+        "p2p_aux_offered_sample_rate",
+        "p2p_aux_offered_sample_count",
+        "p2p_aux_positive_fill_rate",
+        "p2p_aux_fill_ratio_mae",
+        "p2p_aux_predicted_fill_mean",
+        "p2p_aux_actual_fill_mean",
+        "p2p_aux_offer_consistency_error_mean",
+        "p2p_aux_shared_gradient_norm",
+        "p2p_aux_head_gradient_norm",
+    ]
+    for key in required_keys:
+        assert key in metrics, f"Missing {key} in metrics"
+        assert math.isfinite(metrics[key])
+
+
+def test_nonfinite_prediction_raises_error(env_and_config):
+    env, config = env_and_config
+    c = copy.deepcopy(config)
+    c["algorithm"]["policy_delay"] = 1
+    c["logging"] = {"diagnostic_interval": 1}
+
+    algo = Matd3HierarchicalTransformerP2PValue.from_env(env, c, "cpu", 42)
+    add_replay_rows(algo, env, count=4, outcome_kwh=(10.0, 4.0, 6.0))
+
+    def nonfinite_prediction(representations, behavior_ess_action):
+        batch = behavior_ess_action.shape[0]
+        device = behavior_ess_action.device
+        return P2PPrediction(
+            torch.full((batch, 1), float("nan"), device=device),
+            torch.zeros((batch, 1), device=device),
+        )
+
+    algo.actors["mg2"].p2p_value_head.forward = nonfinite_prediction
+    before = clone_parameters(algo.actors["mg2"])
+    with pytest.raises(FloatingPointError):
+        algo.update(batch_size=4)
+    assert not parameters_changed(before, algo.actors["mg2"])
+
+
+

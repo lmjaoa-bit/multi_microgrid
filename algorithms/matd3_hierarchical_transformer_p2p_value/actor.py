@@ -96,7 +96,14 @@ class P2PValueActor(PredictiveDRActor):
         a_dr = self.dr_head(dr_input)
 
         if collect_diagnostics:
-            self._record_diagnostics(observation, token_tensor, attended, a_ess, a_dr)
+            self.last_diagnostics = {
+                "dispatch_norm": float(torch.norm(a_ess).item()),
+                "local_norm": float(torch.norm(a_dr).item()),
+                "interact_norm": float(torch.norm(attended).item()),
+                "norm_ratio": float(
+                    torch.norm(a_ess).item() / max(torch.norm(a_dr).item(), 1e-6)
+                ),
+            }
 
         latent = torch.cat([a_ess, a_dr], dim=-1)
         reps = P2PRepresentations(

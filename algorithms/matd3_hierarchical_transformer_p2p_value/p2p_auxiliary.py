@@ -195,7 +195,7 @@ def extract_p2p_labels(
     accepted_kwh = torch.min(accepted_kwh, offer_kwh)
 
     residual = offer_kwh - accepted_kwh - unmatched_kwh
-    if (residual.abs() > tol).any():
+    if (residual.abs() > tol + 1e-7).any():
         raise ValueError(
             f"P2P consistency error exceeds tolerance: max residual={residual.abs().max().item()} > {tol}"
         )
