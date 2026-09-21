@@ -121,6 +121,27 @@ class Matd3HierarchicalTransformerP2PValue(Matd3HierarchicalTransformerPredictiv
             mg: torch.optim.Adam(self.actors[mg].parameters(), lr=actor_lr)
             for mg in self.agent_ids
         }
+        self._actor_parameters = {
+            mg: tuple(actor.parameters()) for mg, actor in self.actors.items()
+        }
+        self._actor_branch_parameters = {
+            mg: {
+                name: tuple(
+                    parameter
+                    for module in modules
+                    for parameter in module.parameters()
+                )
+                for name, modules in actor.branch_modules().items()
+            }
+            for mg, actor in self.actors.items()
+        }
+        self._actor_layer_parameters = {
+            mg: {
+                f"layer_{index}": tuple(layer.parameters())
+                for index, layer in enumerate(actor.transformer.layers)
+            }
+            for mg, actor in self.actors.items()
+        }
 
     def update(self, batch_size: int) -> dict[str, Any]:
         from algorithms.matd3_hierarchical_transformer_p2p_value.training import update_p2p_value

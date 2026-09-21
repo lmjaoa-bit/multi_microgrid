@@ -380,6 +380,21 @@ def test_algorithm_from_env_constructs_p2p_value_actors_and_normalizers(env_and_
         assert norm["trade"] > 0.0
 
 
+def test_actor_diagnostic_caches_reference_live_p2p_value_actors(env_and_config):
+    env, config = env_and_config
+    algo = Matd3HierarchicalTransformerP2PValue.from_env(env, config, "cpu", 42)
+
+    for mg in env.agent_ids:
+        live_parameter_ids = {id(parameter) for parameter in algo.actors[mg].parameters()}
+        cached_parameter_ids = {id(parameter) for parameter in algo._actor_parameters[mg]}
+        assert cached_parameter_ids == live_parameter_ids
+        assert "p2p_auxiliary" in algo._actor_branch_parameters[mg]
+        assert {
+            id(parameter)
+            for parameter in algo._actor_branch_parameters[mg]["p2p_auxiliary"]
+        } <= live_parameter_ids
+
+
 def test_algorithm_select_actions_matches_parent_with_identical_weights(env_and_config):
     env, config = env_and_config
     parent = Matd3HierarchicalTransformerPredictiveDr.from_env(env, config, "cpu", 42)
@@ -713,6 +728,5 @@ def test_nonfinite_prediction_raises_error(env_and_config):
     with pytest.raises(FloatingPointError):
         algo.update(batch_size=4)
     assert not parameters_changed(before, algo.actors["mg2"])
-
 
 
