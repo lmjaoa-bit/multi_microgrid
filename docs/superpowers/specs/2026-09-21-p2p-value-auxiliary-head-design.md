@@ -2,7 +2,7 @@
 
 **Date:** 2026-09-21
 
-**Status:** Proposed design, pending user review
+**Status:** Approved by user on 2026-09-21
 
 **Target algorithm slug:** `matd3_hierarchical_transformer_p2p_value`
 
