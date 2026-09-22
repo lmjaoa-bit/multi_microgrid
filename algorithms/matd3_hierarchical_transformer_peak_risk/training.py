@@ -15,7 +15,7 @@ from algorithms.diagnostic_sampling import (
     _gradient_norm_tensor,
 )
 from algorithms.matd3_hierarchical_transformer_peak_risk.peak_risk import (
-    system_actual_load_kw, max_return_target, peak_actor_weight,
+    assert_finite, system_actual_load_kw, max_return_target, peak_actor_weight,
 )
 
 
@@ -125,15 +125,18 @@ def update_peak_risk(self: Any, batch_size: int) -> dict[str, Any]:
         peak_loss1 = nn.functional.smooth_l1_loss(prediction1, target_peak)
         peak_loss2 = nn.functional.smooth_l1_loss(prediction2, target_peak)
         peak_loss = peak_loss1 + peak_loss2
-        if not torch.isfinite(peak_loss):
-            raise FloatingPointError("Nonfinite peak critic loss")
+        assert_finite(peak_loss, "Nonfinite peak critic loss")
         self.peak_optimizer.zero_grad(set_to_none=True)
         peak_loss.backward()
         if diagnostic_due:
             peak_grad_norm = _gradient_norm_tensor(self.peak_critic).detach()
-        nn.utils.clip_grad_norm_(
+        # error_if_nonfinite=True reads the CUDA total norm back to the CPU.
+        # Preserve a per-step nonfinite guard with a stream-ordered async assert.
+        peak_total_norm = nn.utils.clip_grad_norm_(
             self.peak_critic.parameters(), cfg["critic_max_grad_norm"],
-            error_if_nonfinite=True)
+            error_if_nonfinite=not state.is_cuda)
+        if state.is_cuda:
+            assert_finite(peak_total_norm, "Nonfinite peak critic gradient norm")
         self.peak_optimizer.step()
         self.peak_optimizer.zero_grad(set_to_none=True)
         self._soft_update(self.peak_critic, self.target_peak_critic)
