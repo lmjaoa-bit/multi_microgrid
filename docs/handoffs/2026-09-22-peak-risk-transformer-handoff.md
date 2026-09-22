@@ -1,8 +1,9 @@
 # Peak-Risk Transformer implementation handoff
 
 **Date:** 2026-09-22  
-**Branch:** `codex/milp-benchmark`  
-**Current scope status:** reliability prerequisite is implemented; peak-risk Transformer production code has **not** been started.
+**Base branch/commit:** `codex/milp-benchmark` @ `ef216fb`  
+**Implementation branch:** `codex/peak-risk-transformer-20260922`  
+**Current scope status:** stage-three Peak-Risk Transformer implementation is complete through unit/integration tests, benchmark-worker smoke, full one-episode shared pipeline smoke, and same-directory recovery verification. Formal long-run effectiveness and production runtime gates still require local/GPU evidence.
 
 ## 1. Completed prerequisite work
 
@@ -52,39 +53,97 @@ python scripts/run_experiment.py `
 
 If the original command explicitly set `--episodes`, `--test-episodes`, `--output-root`, `--config`, or `--algorithm-config`, repeat those values on resume.
 
-## 4. Stage-three work deliberately not implemented
+## 4. Stage-three implementation delivered
 
-No files were created under `algorithms/matd3_hierarchical_transformer_peak_risk/`; no peak-risk YAML, critic, actor token, training update, gate, or runtime benchmark change exists yet.
+The isolated package `algorithms/matd3_hierarchical_transformer_peak_risk/`
+now contains:
 
-The approved design and executable task plan are:
+- a 15-token predictive actor with one actor-visible peak-risk token;
+- exactly one shared twin peak critic;
+- no-discount max-return target over three-microgrid simultaneous actual load;
+- delayed actor regularization using the conservative max of the twin peak heads;
+- strict checkpoint and recovery contracts including peak networks, optimizer,
+  update count, observation/state schemas, normalizers and projection signature;
+- fused training that reuses the parent's replay sample and projected actions;
+- nested `peak` and `runtime` diagnostics in the shared training history;
+- a saved-result-only effectiveness/safety gate and a controlled parent/candidate
+  runtime benchmark mode.
 
-- `docs/superpowers/specs/2026-09-21-peak-risk-transformer-design.md`
-- `docs/superpowers/plans/2026-09-21-peak-risk-transformer.md`
+No files under `algorithms/matd3/` were modified. The P2P-value auxiliary head
+is not inherited.
 
-The next implementer should execute the plan in task order. In particular:
+Verification on GitHub Actions has exercised:
 
-1. use the corrected `matd3_hierarchical_transformer_predictive_dr` as parent;
-2. scaffold the isolated slug `matd3_hierarchical_transformer_peak_risk`;
-3. do not inherit the P2P-value auxiliary algorithm;
-4. add exactly one actor peak-risk token and one shared lightweight twin peak critic;
-5. preserve the raw action space, feasible/predictive DR mapping, reward, environment, settlement and canonical MATD3 baseline;
-6. preserve exact parent behavior when the token and peak actor weight are disabled;
-7. reuse the parent's projected actions and replay batch—no extra projector call, replay sample, rollout, MILP solve or test day;
-8. include peak modules and optimizer state in both strict checkpoint validation and the new recovery hooks;
-9. enforce the saved-result effectiveness/safety gate and the specified runtime overhead gate before a long training run.
+1. focused Peak-Risk tests;
+2. parameter budget and exact max-return target;
+3. token-disabled exact parent action path;
+4. token/Critic-disabled full update parity with the predictive parent;
+5. peak-critic cadence, actor-gradient path and recovery round-trip;
+6. benchmark worker smoke for parent and candidate;
+7. the full one-episode train -> validation -> best checkpoint -> formal test ->
+   MILP -> settlement -> plotting pipeline;
+8. same-directory resume with no duplicated training row;
+9. the full repository regression suite.
 
-## 5. First commands for the next implementer
+The remaining evidence is intentionally not fabricated by CI smoke tests:
 
-Read the repository instructions and both documents above, then begin Task 1 with tests first:
+- a controlled production timing comparison with at least 1000 updates,
+  3 repetitions and 100 end-to-end episodes per candidate;
+- a full stage-three training run;
+- saved-result comparison against the corrected predictive-DR parent on the
+  exact same formal test dates;
+- final Peak-Risk gate PASS on peak reduction, rebound, profit, feasibility and
+  runtime overhead.
+
+## 5. Commands for local production verification
+
+Run the controlled runtime comparison first:
 
 ```powershell
-python scripts/create_algorithm_variant.py --name matd3_hierarchical_transformer_peak_risk
-pytest tests/test_matd3_hierarchical_transformer_peak_risk.py -k "plugin or config" -v
+python scripts/benchmark_training_runtime.py `
+  --compare-parent matd3_hierarchical_transformer_predictive_dr `
+  --compare-candidate matd3_hierarchical_transformer_peak_risk `
+  --compare-device cuda `
+  --compare-updates 1000 `
+  --compare-repetitions 3 `
+  --compare-episodes 100 `
+  --output outputs/runtime_benchmarks/peak_risk_vs_predictive.json
 ```
 
-Do not launch a long experiment until every plan task, `pytest -q`, the short full pipeline smoke test, baseline-integrity check, and runtime gate pass.
+Do not start the 5000-episode experiment if the measured median update overhead
+exceeds 20%, projector/replay parity is false, or the other hard runtime budgets
+fail.
 
+Then train the candidate with its registered production configuration:
 
+```powershell
+python scripts/run_experiment.py `
+  --algorithm matd3_hierarchical_transformer_peak_risk `
+  --device cuda `
+  --seed 42
+```
+
+If interrupted, resume into the same run directory and repeat the original
+algorithm/config/seed/episode arguments:
+
+```powershell
+python scripts/run_experiment.py `
+  --algorithm matd3_hierarchical_transformer_peak_risk `
+  --resume-run outputs/working_runs/matd3_hierarchical_transformer_peak_risk/runs/<RUN_ID> `
+  --device cuda `
+  --seed 42
+```
+
+After both the corrected predictive parent and Peak-Risk candidate have complete
+saved formal-test artifacts for the same dates, run the fail-closed gate:
+
+```powershell
+python scripts/check_peak_risk_gate.py `
+  --candidate outputs/working_runs/matd3_hierarchical_transformer_peak_risk/runs/<PEAK_RUN> `
+  --parent outputs/working_runs/matd3_hierarchical_transformer_predictive_dr/runs/<PARENT_RUN> `
+  --runtime-json outputs/runtime_benchmarks/peak_risk_vs_predictive.json `
+  --output outputs/runtime_benchmarks/peak_risk_gate.json
+```
 
 ## 2026-09-22 implementation reconciliation: peak-critic width
 
