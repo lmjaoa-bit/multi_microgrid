@@ -115,8 +115,18 @@ class PeakRiskFeatureExtractor(nn.Module):
         self.kind = kind
         need = ["load", "pv", "wind", "previous_system_buy_demand",
                 "available_discharge_ratio", "time_remaining"]
-        need += [f"{mg}_deficit" for mg in self.peers]
-        need += [f"{mg}_surplus" for mg in self.peers]
+        # Two supported public peer-observation contracts: summary pressure
+        # (deficit/surplus) and legacy cross_microgrid (peer net-load).
+        self.peer_modes = {}
+        for mg in self.peers:
+            if f"{mg}_deficit" in names and f"{mg}_surplus" in names:
+                self.peer_modes[mg] = "summary"
+                need.extend((f"{mg}_deficit", f"{mg}_surplus"))
+            elif f"{mg}_net_load" in names:
+                self.peer_modes[mg] = "net_load"
+                need.append(f"{mg}_net_load")
+            else:
+                raise ValueError(f"{active_agent}: missing public peer pressure fields for {mg}")
         for k in range(1, self.forecast_horizon + 1):
             need += [f"load_t+{k}", f"pv_t+{k}", f"wind_t+{k}"]
         bounds = {"industrial_mill": ("mill_feasible_min", "mill_feasible_max", "production_pressure"),
@@ -143,8 +153,16 @@ class PeakRiskFeatureExtractor(nn.Module):
         x = observation
         ix = self.indices
         local = x[:, ix["load"]] - x[:, ix["pv"]] - x[:, ix["wind"]]
-        peer_deficit = sum((x[:, ix[f"{mg}_deficit"]] for mg in self.peers), torch.zeros_like(local))
-        peer_surplus = sum((x[:, ix[f"{mg}_surplus"]] for mg in self.peers), torch.zeros_like(local))
+        peer_deficit = torch.zeros_like(local)
+        peer_surplus = torch.zeros_like(local)
+        for mg in self.peers:
+            if self.peer_modes[mg] == "summary":
+                peer_deficit = peer_deficit + x[:, ix[f"{mg}_deficit"]]
+                peer_surplus = peer_surplus + x[:, ix[f"{mg}_surplus"]]
+            else:
+                peer_net = x[:, ix[f"{mg}_net_load"]]
+                peer_deficit = peer_deficit + peer_net.clamp_min(0.0)
+                peer_surplus = peer_surplus + (-peer_net).clamp_min(0.0)
         forecasts = x[:, self.forecast_indices.flatten()].reshape(x.shape[0], self.forecast_horizon, 3)
         forecast_net = forecasts[:, :, 0] - forecasts[:, :, 1] - forecasts[:, :, 2]
         if (self.valid_indices >= 0).any():
