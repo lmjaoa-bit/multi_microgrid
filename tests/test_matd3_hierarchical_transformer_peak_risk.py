@@ -131,6 +131,85 @@ def test_peak_actor_token_features_use_only_observation(env_and_configs):
         assert actor(tensor).shape == (1, 2)
 
 
+def test_precomputed_inference_features_preserve_actor_latent_and_actions(env_and_configs):
+    from algorithms.matd3_hierarchical_transformer_peak_risk.peak_risk import PeakRiskFeatureExtractor
+    from algorithms.matd3_hierarchical_transformer_peak_risk.training import (
+        select_peak_risk_actions,
+    )
+    from algorithms.matd3_hierarchical_transformer_predictive_dr.training import (
+        select_predictive_actions,
+    )
+
+    env, config = env_and_configs
+    observations, _ = env.reset(seed=42)
+    algorithm = get_algorithm_spec(config["algorithm"]["name"]).create(
+        env, config, device="cpu", seed=42)
+    with torch.no_grad():
+        for mg in env.agent_ids:
+            actor = algorithm.actors[mg]
+            obs = torch.as_tensor(observations[mg], dtype=torch.float32).unsqueeze(0)
+            features = actor.peak_features(obs)
+            reference = actor.forward_latent(obs, collect_diagnostics=False)
+            precomputed = actor.forward_latent_precomputed(obs, features)
+            torch.testing.assert_close(precomputed, reference, rtol=0.0, atol=0.0)
+            with pytest.raises(ValueError, match="precomputed feature shape"):
+                actor.forward_latent_precomputed(obs, features[:, :-1])
+
+    # Force the production fast selection routine on CPU as well: the same
+    # schema-only helper path must agree with regular latent exploration.
+    algorithm._cpu_peak_extractors = {
+        mg: PeakRiskFeatureExtractor(
+            algorithm.observation_schemas[mg], algorithm.agent_ids, mg,
+            forecast_horizon=algorithm.actors[mg].forecast_horizon,
+        ).cpu()
+        for mg in algorithm.agent_ids
+    }
+    import copy
+    saved_rng = copy.deepcopy(algorithm.rng.bit_generator.state)
+    for noise_std in (0.0, 0.15):
+        algorithm.rng.bit_generator.state = copy.deepcopy(saved_rng)
+        baseline = select_predictive_actions(algorithm, observations, noise_std=noise_std)
+        algorithm.rng.bit_generator.state = copy.deepcopy(saved_rng)
+        fast = select_peak_risk_actions(algorithm, observations, noise_std=noise_std)
+        for mg in algorithm.agent_ids:
+            torch.testing.assert_close(
+                torch.from_numpy(fast[mg]), torch.from_numpy(baseline[mg]),
+                rtol=0.0, atol=0.0,
+            )
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA inference parity needs a GPU")
+def test_cuda_cpu_precomputed_peak_features_match_training_feature_path(env_and_configs):
+    from algorithms.matd3_hierarchical_transformer_predictive_dr.training import (
+        select_predictive_actions,
+    )
+
+    env, config = env_and_configs
+    observations, _ = env.reset(seed=42)
+    algorithm = get_algorithm_spec(config["algorithm"]["name"]).create(
+        env, config, device="cuda", seed=42)
+    assert algorithm._cpu_peak_extractors
+    with torch.no_grad():
+        for mg in algorithm.agent_ids:
+            actor = algorithm.actors[mg]
+            obs = torch.as_tensor(observations[mg], dtype=torch.float32, device="cuda").unsqueeze(0)
+            cpu_obs = torch.as_tensor(observations[mg], dtype=torch.float32).unsqueeze(0)
+            cuda_features = actor.peak_features(obs)
+            cpu_features = algorithm._cpu_peak_extractors[mg](cpu_obs).to("cuda")
+            torch.testing.assert_close(cuda_features, cpu_features, rtol=1e-5, atol=1e-6)
+            torch.testing.assert_close(
+                actor.forward_latent_precomputed(obs, cpu_features),
+                actor.forward_latent(obs), rtol=1e-5, atol=1e-6,
+            )
+    ref = select_predictive_actions(algorithm, observations, noise_std=0.0)
+    fast = algorithm.select_actions(observations, noise_std=0.0)
+    for mg in algorithm.agent_ids:
+        torch.testing.assert_close(
+            torch.from_numpy(fast[mg]), torch.from_numpy(ref[mg]),
+            rtol=1e-5, atol=1e-6,
+        )
+
+
 def test_all_invalid_forecast_is_finite_and_marked(env_and_configs):
     env, config = env_and_configs
     observations, _ = env.reset(seed=42)
