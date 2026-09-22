@@ -278,8 +278,17 @@ def evaluate_peak_risk_gate(candidate_dir: Path, parent_dir: Path,
         check(field, require_number(pm, field, "paper_metrics"), 1e-9, "<=")
 
     # Speed numbers must come from a separately saved, controlled benchmark.
+    # New benchmark reports use the phase-weighted mean of all update calls,
+    # with a median of paired per-repetition overheads. The legacy pooled
+    # median mixes actor-due and actor-not-due distributions and is only shown
+    # for historical comparisons. Legacy reports remain readable.
+    update_overhead_field = (
+        "weighted_update_overhead_pct"
+        if runtime.get("comparison_method") == "median_of_paired_percent_overheads"
+        else "median_update_overhead_pct"
+    )
     for field, maximum in (
-        ("median_update_overhead_pct", 20.0),
+        (update_overhead_field, 20.0),
         ("end_to_end_training_overhead_pct", 15.0),
         ("recovery_snapshot_overhead_pct", 3.0),
         ("deterministic_evaluation_overhead_pct", 5.0),
