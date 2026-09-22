@@ -37,11 +37,13 @@ class DispatchResult:
     profit_by_microgrid: dict[str, float]
     trajectories: pd.DataFrame
     pair_flows_kwh: dict[str, float]
+    cost_breakdown: dict[str, float] | None = None
 
     def summary(self) -> dict[str, Any]:
         return {"mode": self.mode, "status": self.status, "total_cost": self.total_cost,
                 "total_profit": self.total_profit, "profit_by_microgrid": self.profit_by_microgrid,
-                "total_p2p_energy_kwh": float(sum(self.pair_flows_kwh.values()))}
+                "total_p2p_energy_kwh": float(sum(self.pair_flows_kwh.values())),
+                **({"cost_breakdown": self.cost_breakdown} if self.cost_breakdown is not None else {})}
 
 
 def load_config(config: str | Path | Mapping[str, Any]) -> dict[str, Any]:
@@ -398,6 +400,12 @@ def solve_dispatch(
     rows: list[dict[str, Any]] = []
     pair_totals: dict[str, float] = {}
     profit_by = {mg: 0.0 for mg in ids}
+    cost_breakdown = {key: 0.0 for key in (
+        "grid_import_cost", "grid_export_revenue",
+        "battery_degradation_cost", "unmet_load_cost",
+        "renewable_curtailment_cost", "ess_terminal_penalty",
+        "industrial_terminal_penalty", "hvac_terminal_penalty",
+        "ev_terminal_penalty")}
     for t in range(data.horizon):
         for mg in ids:
             incoming = outgoing = 0.0
@@ -423,6 +431,12 @@ def solve_dispatch(
             operating_profit -= (charge + discharge) * dt * float(battery["degradation_cost_per_kwh"])
             operating_profit -= curtailment * dt * curtail_price + unmet * dt * unmet_price
             profit_by[mg] += float(operating_profit)
+            cost_breakdown["grid_import_cost"] += grid_import*price_at(data.buy_price,mg,t)*dt
+            cost_breakdown["grid_export_revenue"] += grid_export*price_at(data.sell_price,mg,t)*dt
+            cost_breakdown["battery_degradation_cost"] += (
+                charge+discharge)*dt*float(battery["degradation_cost_per_kwh"])
+            cost_breakdown["unmet_load_cost"] += unmet*dt*unmet_price
+            cost_breakdown["renewable_curtailment_cost"] += curtailment*dt*curtail_price
             flexible = 0.0
             dr_row: dict[str, float] = {}
             if include_dr:
@@ -457,28 +471,36 @@ def solve_dispatch(
         for mg in ids:
             penalty = rate * (value("terminal_positive", (mg,)) + value("terminal_negative", (mg,)))
             profit_by[mg] -= penalty
+            cost_breakdown["ess_terminal_penalty"] += penalty
     if include_dr:
         for mg in ids:
             device = dr_devices[mg]
             if hasattr(device, "initial_silo_t"):
                 excess = max(0.0, abs(float(model.val(dr[(mg,"silo",data.horizon)])) -
                                      device.initial_silo_t) - device.terminal_tolerance_t)
-                profit_by[mg] -= rate * excess * device.rated_power_kw / device.production_tph
+                dr_penalty = rate * excess * device.rated_power_kw / device.production_tph
+                profit_by[mg] -= dr_penalty
+                cost_breakdown["industrial_terminal_penalty"] += dr_penalty
             elif hasattr(device, "initial_t_air"):
                 for key,initial,tolerance,heat_capacity in (
                     ("air",device.initial_t_air,device.terminal_air_tolerance,device.c_air),
                     ("mass",device.initial_t_mass,device.terminal_mass_tolerance,device.c_mass),
                 ):
                     final = float(model.val(dr[(mg,key,data.horizon)]))
-                    profit_by[mg] -= rate*heat_capacity*(
+                    dr_penalty = rate*heat_capacity*(
                         max(0.0,final-initial-tolerance)/device.cop_cool +
                         max(0.0,initial-final-tolerance)/device.cop_heat)
+                    profit_by[mg] -= dr_penalty
+                    cost_breakdown["hvac_terminal_penalty"] += dr_penalty
             else:
                 final = float(model.val(dr[(mg,"ev_energy",data.horizon)]))
-                profit_by[mg] -= rate*max(0.0,device.capacity_kwh*device.target_soc-final)
+                dr_penalty = rate*max(0.0,device.capacity_kwh*device.target_soc-final)
+                profit_by[mg] -= dr_penalty
+                cost_breakdown["ev_terminal_penalty"] += dr_penalty
     total_profit = float(sum(profit_by.values()))
     return DispatchResult(("cooperative_full_information_relaxed" if cooperative else
                            "independent_full_information") if include_dr else
                           ("cooperative" if cooperative else "independent"),
                           status, -total_profit,
-                          total_profit, profit_by, pd.DataFrame(rows), pair_totals)
+                          total_profit, profit_by, pd.DataFrame(rows), pair_totals,
+                          cost_breakdown if include_dr else None)
