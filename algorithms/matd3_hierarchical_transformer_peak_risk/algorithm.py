@@ -103,7 +103,7 @@ class Matd3HierarchicalTransformerPeakRisk(Matd3HierarchicalTransformerPredictiv
                     forecast_horizon=self.actors[mg].forecast_horizon,
                 ).cpu()
                 for mg in self.agent_ids
-            } if self.peak_token_enabled and self.device.type == "cuda" else {}
+            } if self.peak_token_enabled and torch.device(self.device).type == "cuda" else {}
         )
 
         self.system_peak_scale_kw = float(sum(
