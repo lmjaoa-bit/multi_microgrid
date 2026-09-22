@@ -34,3 +34,74 @@ jobs:
         run: pytest tests/test_matd3_hierarchical_transformer_peak_risk.py tests/test_peak_risk_gate.py tests/test_runtime_optimizations.py -q
       - name: Full regression suite
         run: pytest -q
+
+  peak-risk-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install torch CPU and requirements
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt
+      - name: Build isolated one-episode smoke configuration
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import yaml
+          source = Path("configs/algorithms/matd3_hierarchical_transformer_peak_risk.yaml")
+          cfg = yaml.safe_load(source.read_text(encoding="utf-8"))
+          cfg["algorithm"]["batch_size"] = 16
+          cfg["algorithm"]["warmup_steps"] = 0
+          cfg["algorithm"]["replay_capacity"] = 1000
+          cfg["algorithm"]["training_recovery"]["snapshot_interval_episodes"] = 1
+          cfg["algorithm"]["peak_risk"]["critic_warmup_updates"] = 0
+          cfg["algorithm"]["peak_risk"]["actor_start_update"] = 0
+          cfg["algorithm"]["peak_risk"]["actor_weight_ramp_updates"] = 1
+          cfg["runtime"]["cpu_threads"] = 1
+          cfg["runtime"]["device"] = "cpu"
+          cfg["training"]["episodes"] = 1
+          cfg["training"]["test_episodes"] = 1
+          cfg["validation"]["enabled"] = True
+          cfg["validation"]["interval"] = 1
+          cfg["validation"]["max_days"] = 1
+          cfg["logging"]["diagnostic_interval"] = 2
+          Path("/tmp/peak_risk_smoke.yaml").write_text(yaml.safe_dump(cfg, sort_keys=False))
+          PY
+      - name: Complete shared training-test-MILP-settlement-plot pipeline
+        run: >-
+          python scripts/run_experiment.py
+          --algorithm matd3_hierarchical_transformer_peak_risk
+          --algorithm-config /tmp/peak_risk_smoke.yaml
+          --episodes 1 --test-episodes 1
+          --validation-interval 1 --validation-days 1
+          --device cpu --no-dashboard
+          --output-root /tmp/peak_risk_smoke_outputs
+      - name: Verify checkpoint, recovery, settlement and saved figures
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("/tmp/peak_risk_smoke_outputs")
+          found = list(root.rglob("run_status.json"))
+          assert len(found) == 1, found
+          run = found[0].parent
+          status = json.loads((run / "run_status.json").read_text())
+          assert status["status"] == "COMPLETED", status
+          for rel in (
+              "checkpoints/best_model.pt", "checkpoints/final_model.pt",
+              "checkpoints/training_state/manifest.json",
+              "test_summary.json", "test_daily_metrics.csv",
+              "training_history.json", "validation_history.json",
+              "summary.json", "paper_metrics.json", "dr_shift_metrics.csv",
+          ):
+              assert (run / rel).is_file(), rel
+          ts = json.loads((run / "test_summary.json").read_text())
+          assert ts["checkpoint_used"].replace(chr(92), "/").endswith("best_model.pt")
+          assert len(list((run / "figures").glob("*.png"))) >= 15
+          assert len(list((run / "figures").glob("*.pdf"))) >= 15
+          print("stage-three smoke run:", run)
+          PY
