@@ -46,6 +46,12 @@ jobs:
             --algorithm matd3_hierarchical_transformer_peak_risk \
             --device cpu --cpu-threads 1 --compare-updates 10 \
             --compare-episodes 1 --seed 42
+          python scripts/benchmark_training_runtime.py \
+            --compare-worker \
+            --algorithm matd3_hierarchical_transformer_peak_risk \
+            --device cpu --cpu-threads 1 --compare-updates 10 \
+            --compare-active-step 12500 \
+            --compare-episodes 1 --seed 42
       - name: Full regression suite
         run: pytest -q
 
