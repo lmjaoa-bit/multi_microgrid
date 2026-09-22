@@ -177,6 +177,11 @@ def _diagnostic_means(items: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     for name in ("actor_grad_norms", "critic_grad_norms", "actor_branch_grad_norms",
                  "actor_layer_grad_norms", "actor_diagnostics"):
         result[name] = nested_mean([item.get(name) for item in items]) or {}
+    # New algorithms may report nested metrics without exposing network internals.
+    # Missing delayed updates remain None rather than an invented zero.
+    for name in ("peak", "runtime"):
+        if any(name in item for item in items):
+            result[name] = nested_mean([item.get(name) for item in items])
     details = [item["actor_diagnostics"] for item in items if item.get("actor_diagnostics")]
     result["actor_diagnostic_statistics"] = {}
     for mg in sorted({mg for item in details for mg in item}):
