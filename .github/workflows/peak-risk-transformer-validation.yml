@@ -4,6 +4,7 @@ on:
     branches:
       - codex/peak-risk-transformer-20260922
       - codex/peak-risk-runtime-optimization-20260922
+      - codex/peak-risk-runtime-optimization-v2-20260922
     paths:
       - 'algorithms/matd3_hierarchical_transformer_peak_risk/**'
       - 'configs/algorithms/matd3_hierarchical_transformer_peak_risk.yaml'
