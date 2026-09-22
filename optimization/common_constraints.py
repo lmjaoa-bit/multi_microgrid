@@ -21,6 +21,7 @@ class DispatchData:
     renewable_kw: dict[str, np.ndarray]
     buy_price: np.ndarray | dict[str, np.ndarray]
     sell_price: np.ndarray | dict[str, np.ndarray]
+    frame: pd.DataFrame | None = None
 
     @property
     def horizon(self) -> int:
@@ -76,7 +77,8 @@ def build_dispatch_data(config: str | Path | Mapping[str, Any], split: str = "te
         for mg in ids
     }
     data = DispatchData(
-        [str(x) for x in frame["timestamp"]], ids, load, renewable, buy_price, sell_price
+        [str(x) for x in frame["timestamp"]], ids, load, renewable, buy_price, sell_price,
+        frame=frame.reset_index(drop=True).copy(),
     )
     return cfg, data
 
@@ -111,6 +113,7 @@ def solve_dispatch(
     terminal_target_soc_by_microgrid: Mapping[str, float] | None = None,
     apply_terminal_condition: bool = True,
     p2p_export_source: str = "unrestricted",
+    include_dr: bool = False,
 ) -> DispatchResult:
     try:
         import highspy
@@ -145,6 +148,117 @@ def solve_dispatch(
         variable = model.addVariable(name=f"{name}[{','.join(map(str, key))}]", **kwargs)
         variables[name][key] = variable
         return variable
+
+    # The original ESS-only benchmark keeps include_dr=False for backward
+    # compatibility. The new full-information entry point enables this block.
+    dr: dict[tuple[str, str, int], Any] = {}
+    dr_power: dict[tuple[str, int], Any] = {}
+    dr_terminal: dict[str, list[Any]] = {mg: [] for mg in ids}
+    dr_devices: dict[str, Any] = {}
+    def dvar(name: str, mg: str, t: int, **kwargs: Any) -> Any:
+        variable = model.addVariable(name=f"dr_{name}[{mg},{t}]", type=continuous, **kwargs)
+        dr[(mg, name, t)] = variable
+        return variable
+
+    if include_dr:
+        if data.frame is None or len(data.frame) != data.horizon:
+            raise ValueError("Full-information DR oracle requires the complete 24-hour episode frame")
+        from components.industrial_mill import IndustrialMillDR
+        from components.commercial_hvac import CommercialHVACDR
+        from components.ev_charging import EVChargingDR
+        for mg in ids:
+            device_cfg = cfg_by_id[mg].get("dr")
+            if device_cfg is None:
+                raise ValueError(f"Missing physical DR configuration for {mg}")
+            kind = str(device_cfg["type"])
+            cls = {"industrial_mill": IndustrialMillDR,
+                   "commercial_hvac": CommercialHVACDR,
+                   "ev_charging": EVChargingDR}.get(kind)
+            if cls is None:
+                raise ValueError(f"Unsupported full-information DR type: {kind}")
+            device = cls(device_cfg, delta_t=dt, episode_length=data.horizon)
+            device.reset(data.frame, np.asarray(data.load_kw[mg], dtype=np.float64))
+            dr_devices[mg] = device
+            if kind == "industrial_mill":
+                for t in range(data.horizon + 1):
+                    initial = device.initial_silo_t
+                    dvar("silo", mg, t,
+                         lb=initial if t == 0 else device.silo_min_t,
+                         ub=initial if t == 0 else device.silo_max_t)
+                for t in range(data.horizon):
+                    duty = dvar("duty", mg, t, lb=0.0, ub=1.0)
+                    dr_power[(mg, t)] = device.rated_power_kw * duty
+                    model.addConstr(dr[(mg, "silo", t+1)] ==
+                                    dr[(mg, "silo", t)] +
+                                    (device.production_tph * duty - device.downstream_tph) * dt)
+                gap = dvar("silo_terminal_excess", mg, data.horizon, lb=0.0, ub=inf,
+                           obj=rate * device.rated_power_kw / device.production_tph)
+                model.addConstr(gap >= dr[(mg, "silo", data.horizon)] -
+                                device.initial_silo_t - device.terminal_tolerance_t)
+                model.addConstr(gap >= device.initial_silo_t -
+                                dr[(mg, "silo", data.horizon)] - device.terminal_tolerance_t)
+                dr_terminal[mg].append(gap)
+            elif kind == "commercial_hvac":
+                for t in range(data.horizon+1):
+                    dvar("air", mg, t, lb=device.initial_t_air if t == 0 else -inf,
+                         ub=device.initial_t_air if t == 0 else inf)
+                    dvar("mass", mg, t, lb=device.initial_t_mass if t == 0 else -inf,
+                         ub=device.initial_t_mass if t == 0 else inf)
+                for t in range(data.horizon):
+                    heat = dvar("heat", mg, t, lb=0.0, ub=device.heat_max_kw)
+                    cool = dvar("cool", mg, t, lb=0.0, ub=device.cool_max_kw)
+                    mode = model.addVariable(name=f"dr_hvac_mode[{mg},{t}]",
+                                             lb=0.0, ub=1.0, type=integer)
+                    model.addConstr(heat <= device.heat_max_kw * mode)
+                    model.addConstr(cool <= device.cool_max_kw * (1.0-mode))
+                    dr_power[(mg,t)] = heat + cool
+                    t_out, q_solar, q_internal = device._exogenous(t)
+                    air, mass = dr[(mg,"air",t)], dr[(mg,"mass",t)]
+                    model.addConstr(dr[(mg,"air",t+1)] ==
+                        air + dt / device.c_air * ((t_out-air)/device.r_oa +
+                        (mass-air)/device.r_am + q_internal +
+                        device.solar_air_fraction*q_solar +
+                        device.cop_heat*heat - device.cop_cool*cool))
+                    model.addConstr(dr[(mg,"mass",t+1)] ==
+                        mass + dt/device.c_mass * ((air-mass)/device.r_am +
+                        (1.0-device.solar_air_fraction)*q_solar))
+                    low, high = device._state_comfort_bounds(t+1)
+                    model.addConstr(dr[(mg,"air",t+1)] >= low)
+                    model.addConstr(dr[(mg,"air",t+1)] <= high)
+                # The environment converts positive final temperature deviation
+                # with cooling COP, negative deviation with heating COP.
+                for key, initial, tolerance, heat_capacity in (
+                    ("air",device.initial_t_air,device.terminal_air_tolerance,device.c_air),
+                    ("mass",device.initial_t_mass,device.terminal_mass_tolerance,device.c_mass),
+                ):
+                    state = dr[(mg,key,data.horizon)]
+                    hot = dvar(key+"_terminal_hot",mg,data.horizon,lb=0.0,ub=inf,
+                               obj=rate*heat_capacity/device.cop_cool)
+                    cold = dvar(key+"_terminal_cold",mg,data.horizon,lb=0.0,ub=inf,
+                                obj=rate*heat_capacity/device.cop_heat)
+                    model.addConstr(hot >= state-initial-tolerance)
+                    model.addConstr(cold >= initial-state-tolerance)
+                    dr_terminal[mg].extend([hot,cold])
+            elif kind == "ev_charging":
+                capacity = device.capacity_kwh
+                initial = capacity * device.initial_soc
+                maximum = capacity * device.max_soc
+                for t in range(data.horizon+1):
+                    dvar("ev_energy",mg,t,lb=initial if t==0 else 0.0,
+                         ub=initial if t==0 else maximum)
+                for t in range(data.horizon):
+                    hour = pd.Timestamp(data.timestamps[t]).hour
+                    available = device.available_start_hour <= hour < device.departure_hour
+                    charge = dvar("ev_charge",mg,t,lb=0.0,
+                                  ub=device.max_charge_kw if available else 0.0)
+                    dr_power[(mg,t)] = charge
+                    model.addConstr(dr[(mg,"ev_energy",t+1)] ==
+                                    dr[(mg,"ev_energy",t)] + device.eta*charge*dt)
+                shortfall = dvar("ev_terminal_shortfall",mg,data.horizon,
+                                 lb=0.0,ub=inf,obj=rate)
+                model.addConstr(shortfall >= capacity*device.target_soc -
+                                dr[(mg,"ev_energy",data.horizon)])
+                dr_terminal[mg].append(shortfall)
 
     for mg in ids:
         battery = cfg_by_id[mg]["battery"]
@@ -232,9 +346,18 @@ def solve_dispatch(
                         <= renewable_surplus
                         + float(battery["max_charge_kw"]) * export_mode
                     )
+            if include_dr and cooperative:
+                # A source-aware relaxation: peer exports must be backed by
+                # renewable surplus before flexible demand or ESS discharge.
+                # The actual local-first sequential pool is still stricter.
+                model.addConstr(outgoing <= max(0.0,
+                    float(data.renewable_kw[mg][t]) - float(data.load_kw[mg][t])) +
+                    variables["discharge"][(mg,t)])
             model.addConstr(float(data.renewable_kw[mg][t]) + variables["discharge"][(mg, t)]
                             + variables["grid_import"][(mg, t)] + incoming + variables["unmet"][(mg, t)]
-                            == float(data.load_kw[mg][t]) + variables["charge"][(mg, t)]
+                            == float(data.load_kw[mg][t]) +
+                            (dr_power[(mg,t)] if include_dr else 0.0) +
+                            variables["charge"][(mg, t)]
                             + variables["grid_export"][(mg, t)] + outgoing
                             + variables["curtailment"][(mg, t)])
     tolerance = float(terminal_cfg["tolerance"])
@@ -262,6 +385,8 @@ def solve_dispatch(
 
     model.minimize()
     status = str(model.getModelStatus()).replace("HighsModelStatus.", "")
+    if include_dr and status != "kOptimal":
+        raise RuntimeError(f"Full-information oracle not proven optimal: {status}")
     if not model.getSolution().value_valid:
         raise RuntimeError(f"Dispatch oracle failed: {status}")
 
@@ -297,8 +422,11 @@ def solve_dispatch(
             operating_profit -= (charge + discharge) * dt * float(battery["degradation_cost_per_kwh"])
             operating_profit -= curtailment * dt * curtail_price + unmet * dt * unmet_price
             profit_by[mg] += float(operating_profit)
+            flexible = float(model.val(dr_power[(mg,t)])) if include_dr else 0.0
             rows.append({"timestamp": data.timestamps[t], "microgrid": mg,
-                         "load_kw": float(data.load_kw[mg][t]), "renewable_kw": float(data.renewable_kw[mg][t]),
+                         "base_load_kw": float(data.load_kw[mg][t]),
+                         "flexible_load_kw": flexible,
+                         "load_kw": float(data.load_kw[mg][t]) + flexible, "renewable_kw": float(data.renewable_kw[mg][t]),
                          "battery_charge_kw": charge, "battery_discharge_kw": discharge,
                          "soc": value("energy", (mg, t + 1)) / float(battery["capacity_kwh"]),
                          "grid_import_kw": grid_import, "grid_export_kw": grid_export,
@@ -308,6 +436,28 @@ def solve_dispatch(
         for mg in ids:
             penalty = rate * (value("terminal_positive", (mg,)) + value("terminal_negative", (mg,)))
             profit_by[mg] -= penalty
+    if include_dr:
+        for mg in ids:
+            device = dr_devices[mg]
+            if hasattr(device, "initial_silo_t"):
+                excess = max(0.0, abs(float(model.val(dr[(mg,"silo",data.horizon)])) -
+                                     device.initial_silo_t) - device.terminal_tolerance_t)
+                profit_by[mg] -= rate * excess * device.rated_power_kw / device.production_tph
+            elif hasattr(device, "initial_t_air"):
+                for key,initial,tolerance,heat_capacity in (
+                    ("air",device.initial_t_air,device.terminal_air_tolerance,device.c_air),
+                    ("mass",device.initial_t_mass,device.terminal_mass_tolerance,device.c_mass),
+                ):
+                    final = float(model.val(dr[(mg,key,data.horizon)]))
+                    profit_by[mg] -= rate*heat_capacity*(
+                        max(0.0,final-initial-tolerance)/device.cop_cool +
+                        max(0.0,initial-final-tolerance)/device.cop_heat)
+            else:
+                final = float(model.val(dr[(mg,"ev_energy",data.horizon)]))
+                profit_by[mg] -= rate*max(0.0,device.capacity_kwh*device.target_soc-final)
     total_profit = float(sum(profit_by.values()))
-    return DispatchResult("cooperative" if cooperative else "independent", status, -total_profit,
+    return DispatchResult(("cooperative_full_information_relaxed" if cooperative else
+                           "independent_full_information") if include_dr else
+                          ("cooperative" if cooperative else "independent"),
+                          status, -total_profit,
                           total_profit, profit_by, pd.DataFrame(rows), pair_totals)
