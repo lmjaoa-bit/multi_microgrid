@@ -39,7 +39,10 @@ algorithm:
     token_enabled: true
     critic_enabled: true
     contract_version: "1.0"
-    critic_hidden_dims: [64, 64]
+    # [64,64] exceeds the design's <=40% parent-critic parameter budget at the
+    # real global-state dimension (42.49%); [60,60] is 39.40% and preserves the
+    # same two-hidden-layer independent-twin architecture.
+    critic_hidden_dims: [60, 60]
     critic_lr: 0.0003
     critic_update_interval: 1
     critic_loss: smooth_l1
