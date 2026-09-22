@@ -105,3 +105,33 @@ jobs:
           assert len(list((run / "figures").glob("*.pdf"))) >= 15
           print("stage-three smoke run:", run)
           PY
+      - name: Resume same-directory smoke without duplicating training history
+        run: |
+          RUN_DIR=$(python - <<'PY'
+          from pathlib import Path
+          paths = list(Path("/tmp/peak_risk_smoke_outputs").rglob("run_status.json"))
+          assert len(paths) == 1, paths
+          print(paths[0].parent)
+          PY
+          )
+          python scripts/run_experiment.py \
+            --algorithm matd3_hierarchical_transformer_peak_risk \
+            --algorithm-config /tmp/peak_risk_smoke.yaml \
+            --episodes 1 --test-episodes 1 \
+            --validation-interval 1 --validation-days 1 \
+            --device cpu --no-dashboard \
+            --output-root /tmp/peak_risk_smoke_outputs \
+            --resume-run "$RUN_DIR"
+          RUN_DIR="$RUN_DIR" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          run = Path(os.environ["RUN_DIR"])
+          status = json.loads((run / "run_status.json").read_text())
+          assert status["status"] == "COMPLETED", status
+          assert len(json.loads((run / "training_history.json").read_text())) == 1
+          assert status.get("resume_count") == 1 or any(
+              entry.get("resume_count") == 1 for entry in status.get("history", [])
+          ), status
+          print("resumed peak-risk smoke:", run)
+          PY
