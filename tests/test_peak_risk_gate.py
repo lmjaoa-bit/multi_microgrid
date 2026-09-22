@@ -106,6 +106,23 @@ def test_saved_gate_passes_complete_aligned_finite_evidence(saved_runs):
     assert result["hashes"]["candidate"]["paper_metrics.json"]
 
 
+def test_saved_gate_uses_weighted_update_overhead_when_paired(saved_runs):
+    candidate, parent, runtime = saved_runs
+    report = json.loads(runtime.read_text())
+    report["comparison_method"] = "median_of_paired_percent_overheads"
+    report["weighted_update_overhead_pct"] = 21.0
+    # The pooled median would misleadingly pass; paired weighted mean must fail.
+    report["median_update_overhead_pct"] = 2.0
+    runtime.write_text(json.dumps(report))
+    result = evaluate_peak_risk_gate(candidate, parent, runtime)
+    assert result["overall_status"] == "FAIL"
+
+    report.pop("weighted_update_overhead_pct")
+    runtime.write_text(json.dumps(report))
+    with pytest.raises(ValueError, match="weighted_update_overhead_pct"):
+        evaluate_peak_risk_gate(candidate, parent, runtime)
+
+
 def test_saved_gate_rejects_different_test_days(saved_runs):
     candidate, parent, runtime = saved_runs
     target = parent / "dr_shift_metrics.csv"
