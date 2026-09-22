@@ -16,7 +16,7 @@ PEAK_RISK_CONTRACT_VERSION = "1.0"
 _DEFAULTS: dict[str, Any] = {
     "enabled": True, "token_enabled": True, "critic_enabled": True,
     "contract_version": PEAK_RISK_CONTRACT_VERSION,
-    "critic_hidden_dims": [64, 64], "critic_lr": 0.0003,
+    "critic_hidden_dims": [60, 60], "critic_lr": 0.0003,
     "critic_update_interval": 1, "critic_loss": "smooth_l1",
     "critic_max_grad_norm": 10.0, "conservative_twin_mode": "max",
     "use_discount": False, "critic_warmup_updates": 1000,
