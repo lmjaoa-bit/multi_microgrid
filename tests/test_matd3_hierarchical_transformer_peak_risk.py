@@ -239,3 +239,124 @@ def test_shared_peak_actor_gradient_and_recovery_state(env_and_configs, tmp_path
         assert torch.equal(tensor, restored.peak_critic.state_dict()[name]), name
     for name, tensor in algorithm.actors.state_dict().items():
         assert torch.equal(tensor, restored.actors.state_dict()[name]), name
+
+
+def _fill_identical_replay(env, algorithms, steps=8):
+    observations, info = env.reset(seed=4242, deterministic=True)
+    state = info["global_state"]
+    for _ in range(steps):
+        actions = {
+            mg: torch.tensor([0.0, 0.0], dtype=torch.float32).numpy()
+            for mg in env.agent_ids
+        }
+        next_obs, rewards, done, step_info = env.step(actions)
+        for algorithm in algorithms:
+            algorithm.replay.add(
+                observations, state, actions, float(rewards[env.agent_ids[0]]),
+                next_obs, step_info["global_state_after"], done,
+            )
+        observations, state = next_obs, step_info["global_state_after"]
+        if done:
+            observations, info = env.reset(seed=4243, deterministic=True)
+            state = info["global_state"]
+
+
+def test_peak_critic_parameter_budget_is_below_forty_percent(env_and_configs):
+    env, cfg = env_and_configs
+    algorithm = get_algorithm_spec(cfg["algorithm"]["name"]).create(
+        env, cfg, device="cpu", seed=42)
+    parent_critic = algorithm.critics[env.agent_ids[0]]
+    parent_count = sum(p.numel() for p in parent_critic.parameters())
+    peak_count = sum(p.numel() for p in algorithm.peak_critic.parameters())
+    assert peak_count / parent_count <= 0.40
+
+
+def test_disabled_peak_full_update_matches_predictive_parent(env_and_configs):
+    from algorithms.matd3_hierarchical_transformer_predictive_dr.algorithm import (
+        Matd3HierarchicalTransformerPredictiveDr,
+    )
+
+    env, child_cfg = env_and_configs
+    parent_cfg = yaml.safe_load(Path(
+        "configs/algorithms/matd3_hierarchical_transformer_predictive_dr_hvac.yaml"
+    ).read_text(encoding="utf-8"))
+    child_cfg["algorithm"]["peak_risk"].update(
+        enabled=False, token_enabled=False, critic_enabled=False,
+        actor_weight_final=0.0,
+    )
+    parent = Matd3HierarchicalTransformerPredictiveDr.from_env(
+        env, parent_cfg, device="cpu", seed=42)
+    child = get_algorithm_spec(child_cfg["algorithm"]["name"]).create(
+        env, child_cfg, device="cpu", seed=42)
+
+    # Enforce exact network/optimizer starting state before comparing one update.
+    child.actors.load_state_dict(parent.actors.state_dict())
+    child.target_actors.load_state_dict(parent.target_actors.state_dict())
+    child.critics.load_state_dict(parent.critics.state_dict())
+    child.target_critics.load_state_dict(parent.target_critics.state_dict())
+    for mg in env.agent_ids:
+        child.actor_optimizers[mg].load_state_dict(
+            parent.actor_optimizers[mg].state_dict())
+        child.critic_optimizers[mg].load_state_dict(
+            parent.critic_optimizers[mg].state_dict())
+
+    _fill_identical_replay(env, (parent, child), steps=8)
+    parent.update_steps = child.update_steps = 1  # next update is actor-due
+    parent.diagnostic_schedule.next_boundary = 2
+    child.diagnostic_schedule.next_boundary = 2
+
+    torch.manual_seed(20260922)
+    torch_state = torch.get_rng_state().clone()
+    parent_metrics = parent.update(batch_size=4)
+    torch.set_rng_state(torch_state)
+    child_metrics = child.update(batch_size=4)
+
+    for left, right in (
+        (parent.actors.state_dict(), child.actors.state_dict()),
+        (parent.target_actors.state_dict(), child.target_actors.state_dict()),
+        (parent.critics.state_dict(), child.critics.state_dict()),
+        (parent.target_critics.state_dict(), child.target_critics.state_dict()),
+    ):
+        assert left.keys() == right.keys()
+        for name in left:
+            assert torch.equal(left[name], right[name]), name
+
+    assert parent.update_steps == child.update_steps
+    assert parent_metrics.keys() == child_metrics.keys()
+    for key in ("critic_loss", "actor_loss", "q1_mean", "q2_mean",
+                "target_q_mean", "actor_grad_norm", "critic_grad_norm"):
+        if key in parent_metrics:
+            assert parent_metrics[key] == pytest.approx(child_metrics[key], rel=0, abs=0)
+
+
+def test_peak_critic_cadence_moves_target_only_when_due(env_and_configs):
+    env, cfg = env_and_configs
+    cfg["algorithm"]["peak_risk"]["critic_update_interval"] = 2
+    cfg["logging"]["diagnostic_interval"] = 100
+    algorithm = get_algorithm_spec(cfg["algorithm"]["name"]).create(
+        env, cfg, device="cpu", seed=42)
+    _fill_identical_replay(env, (algorithm,), steps=8)
+
+    before_online = {
+        k: v.detach().clone() for k, v in algorithm.peak_critic.state_dict().items()
+    }
+    before_target = {
+        k: v.detach().clone() for k, v in algorithm.target_peak_critic.state_dict().items()
+    }
+    algorithm.update(batch_size=4)  # step 1, peak critic not due
+    assert algorithm.peak_critic_updates == 0
+    for name, value in algorithm.peak_critic.state_dict().items():
+        assert torch.equal(value, before_online[name]), name
+    for name, value in algorithm.target_peak_critic.state_dict().items():
+        assert torch.equal(value, before_target[name]), name
+
+    algorithm.update(batch_size=4)  # step 2, peak critic due
+    assert algorithm.peak_critic_updates == 1
+    assert any(
+        not torch.equal(value, before_online[name])
+        for name, value in algorithm.peak_critic.state_dict().items()
+    )
+    assert any(
+        not torch.equal(value, before_target[name])
+        for name, value in algorithm.target_peak_critic.state_dict().items()
+    )
