@@ -142,8 +142,9 @@ jobs:
           status = json.loads((run / "run_status.json").read_text())
           assert status["status"] == "COMPLETED", status
           assert len(json.loads((run / "training_history.json").read_text())) == 1
-          assert status.get("resume_count") == 1 or any(
-              entry.get("resume_count") == 1 for entry in status.get("history", [])
-          ), status
+          assert sum(
+              entry.get("resumed") is True and entry.get("status") == "RUNNING"
+              for entry in status.get("history", [])
+          ) == 1, status
           print("resumed peak-risk smoke:", run)
           PY
