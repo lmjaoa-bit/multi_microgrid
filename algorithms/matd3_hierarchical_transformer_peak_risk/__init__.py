@@ -1,0 +1,3 @@
+from algorithms.matd3_hierarchical_transformer_peak_risk.algorithm import Matd3HierarchicalTransformerPeakRisk
+
+__all__ = ["Matd3HierarchicalTransformerPeakRisk"]
