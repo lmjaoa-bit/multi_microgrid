@@ -19,9 +19,11 @@ from algorithms.matd3_hierarchical_transformer_predictive_dr.actor import Predic
 from algorithms.matd3_hierarchical_transformer_peak_risk.actor import PeakRiskActor
 from algorithms.matd3_hierarchical_transformer_peak_risk.critic import TwinPeakCritic
 from algorithms.matd3_hierarchical_transformer_peak_risk.peak_risk import (
-    PEAK_RISK_CONTRACT_VERSION, SLUG, validate_peak_risk_config,
+    PEAK_RISK_CONTRACT_VERSION, SLUG, PeakRiskFeatureExtractor, validate_peak_risk_config,
 )
-from algorithms.matd3_hierarchical_transformer_peak_risk.training import update_peak_risk
+from algorithms.matd3_hierarchical_transformer_peak_risk.training import (
+    select_peak_risk_actions, update_peak_risk,
+)
 
 
 class Matd3HierarchicalTransformerPeakRisk(Matd3HierarchicalTransformerPredictiveDr):
@@ -91,6 +93,18 @@ class Matd3HierarchicalTransformerPeakRisk(Matd3HierarchicalTransformerPredictiv
                     for idx, layer in enumerate(actor.transformer.layers)
                 } for mg, actor in self.actors.items()
             }
+
+        # CPU extraction removes tiny CUDA feature kernels from per-step inference.
+        # Helpers have only schema-derived nonpersistent buffers; checkpoints stay stable.
+        self._cpu_peak_extractors = (
+            {
+                mg: PeakRiskFeatureExtractor(
+                    self.observation_schemas[mg], self.agent_ids, mg,
+                    forecast_horizon=self.actors[mg].forecast_horizon,
+                ).cpu()
+                for mg in self.agent_ids
+            } if self.peak_token_enabled and self.device.type == "cuda" else {}
+        )
 
         self.system_peak_scale_kw = float(sum(
             self.normalizers_by_microgrid[mg]["load"] +
@@ -182,6 +196,13 @@ class Matd3HierarchicalTransformerPeakRisk(Matd3HierarchicalTransformerPredictiv
         for key, expected in self._peak_contract().items():
             if key not in saved or saved[key] != expected:
                 raise ValueError(f"{source} {key} mismatch: expected {expected!r}, got {saved.get(key)!r}")
+
+    def select_actions(
+        self, observations: Mapping[str, Any], noise_std: float = 0.0
+    ) -> dict[str, Any]:
+        if not self._cpu_peak_extractors:
+            return super().select_actions(observations, noise_std=noise_std)
+        return select_peak_risk_actions(self, observations, noise_std=noise_std)
 
     def update(self, batch_size: int) -> dict[str, Any]:
         if not self.peak_critic_enabled:
