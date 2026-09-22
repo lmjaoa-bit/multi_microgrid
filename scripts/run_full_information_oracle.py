@@ -11,6 +11,10 @@ import argparse
 from datetime import datetime
 import json
 from pathlib import Path
+import sys
+
+# Direct invocation from the repository root must find shared packages.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import pandas as pd
