@@ -31,7 +31,16 @@ jobs:
         run: python -m pytest -q tests/test_full_information_oracle.py
       - name: Solve one actual test day
         run: python scripts/run_full_information_oracle.py --day 2018-04-27 --output oracle_smoke
-      - name: Save audit artifacts
+      - name: Solve the entire natural-day test split
+        run: python scripts/run_full_information_oracle.py --all-test-days --output oracle_full55
+      - name: Save 55-day audit artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-full55-audit
+          path: oracle_full55/
+          if-no-files-found: ignore
+      - name: Save smoke audit artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
