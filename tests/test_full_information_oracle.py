@@ -36,6 +36,11 @@ def test_full_information_oracle_models_all_three_dr_types(cooperative: bool) ->
     assert result.status == "kOptimal"
     assert len(result.trajectories) == 72
     assert result.mode.endswith("full_information") or result.mode.endswith("relaxed")
+    assert result.cost_breakdown is not None
+    costs = result.cost_breakdown
+    recovered_cost = (sum(value for key,value in costs.items()
+                          if key != "grid_export_revenue") - costs["grid_export_revenue"])
+    assert recovered_cost == pytest.approx(result.total_cost, abs=1e-4)
     rows = result.trajectories
     assert np.allclose(rows["load_kw"], rows["base_load_kw"] + rows["flexible_load_kw"])
     assert np.allclose(rows["load_kw"] + rows["battery_charge_kw"] +
