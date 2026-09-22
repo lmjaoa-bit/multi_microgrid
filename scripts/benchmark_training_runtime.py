@@ -571,6 +571,11 @@ def _comparison_worker(args: argparse.Namespace) -> dict[str, object]:
         "update_calls": args.compare_updates, "end_to_end_episodes": args.compare_episodes,
         "due_update_ms": float(np.median(elapsed_by_phase["due"])),
         "not_due_update_ms": float(np.median(elapsed_by_phase["not_due"])),
+        "due_update_mean_ms": float(np.mean(elapsed_by_phase["due"])),
+        "not_due_update_mean_ms": float(np.mean(elapsed_by_phase["not_due"])),
+        # An exact observed mean, weighted by actual update-phase call counts.
+        "weighted_update_mean_ms": float(np.mean(
+            elapsed_by_phase["due"] + elapsed_by_phase["not_due"])),
         "median_update_ms": float(np.median(
             elapsed_by_phase["due"] + elapsed_by_phase["not_due"])),
         "projector_calls": projection_counts, "replay_samples": replay_counts,
@@ -651,6 +656,22 @@ def _comparison_driver(args: argparse.Namespace) -> int:
             raise ValueError(f"invalid parent benchmark {field}={p}")
         return 100.0 * (c / p - 1.0)
 
+    def paired_overheads(field):
+        ratios = []
+        for index, (p_row, c_row) in enumerate(zip(parent_rows, candidate_rows)):
+            p, c = float(p_row[field]), float(c_row[field])
+            if not (np.isfinite(p) and np.isfinite(c)) or p <= 0:
+                raise ValueError(f"invalid paired benchmark {field} at repetition {index}")
+            ratios.append(100.0 * (c / p - 1.0))
+        return ratios
+
+    # Do not take a pooled median of alternating policy-due/non-due steps.
+    # Per-worker means reflect all 1000 actual calls; median of paired percent
+    # changes is less sensitive to between-run GPU load than ratio of medians.
+    weighted_overheads = paired_overheads("weighted_update_mean_ms")
+    paired_training_overheads = paired_overheads("training_seconds")
+    paired_eval_overheads = paired_overheads("deterministic_eval_ms")
+
     def count_per_call(rows, key, phase):
         return float(np.mean([
             row[key][phase] / max(int(row["actor_due_calls"] if phase == "due"
@@ -685,18 +706,24 @@ def _comparison_driver(args: argparse.Namespace) -> int:
             "Only counters advanced to trigger the mid-ramp Actor penalty; the peak Critic "
             "was not trained for those steps. Throughput check only, not a learning benchmark."
             if args.compare_active_step else None),
+        "comparison_method": "median_of_paired_percent_overheads",
         "median_update_overhead_pct": overhead("median_update_ms"),
-        "actor_due_update_overhead_pct": overhead("due_update_ms"),
-        "actor_not_due_update_overhead_pct": overhead("not_due_update_ms"),
-        "end_to_end_training_overhead_pct": overhead("training_seconds"),
+        "median_update_overhead_note": "Legacy pooled median: informational only; NOT a pass/fail criterion.",
+        "weighted_update_overhead_pct": float(np.median(weighted_overheads)),
+        "paired_weighted_update_overheads_pct": weighted_overheads,
+        "actor_due_update_overhead_pct": float(np.median(paired_overheads("due_update_mean_ms"))),
+        "actor_not_due_update_overhead_pct": float(np.median(paired_overheads("not_due_update_mean_ms"))),
+        "end_to_end_training_overhead_pct": float(np.median(paired_training_overheads)),
+        "paired_end_to_end_training_overheads_pct": paired_training_overheads,
         "recovery_snapshot_overhead_pct": recovery_ratio,
-        "deterministic_evaluation_overhead_pct": overhead("deterministic_eval_ms"),
+        "deterministic_evaluation_overhead_pct": float(np.median(paired_eval_overheads)),
+        "paired_deterministic_evaluation_overheads_pct": paired_eval_overheads,
         "peak_critic_parameter_fraction": median(candidate_rows, "peak_critic_parameter_fraction"),
         "projector_call_parity": projector_parity,
         "replay_sample_parity": replay_parity,
         "gpu_peak_memory_overhead_pct": memory_overhead,
-        "update_overhead_target_pass": overhead("median_update_ms") <= 15.0,
-        "update_overhead_hard_pass": overhead("median_update_ms") <= 20.0,
+        "update_overhead_target_pass": float(np.median(weighted_overheads)) <= 15.0,
+        "update_overhead_hard_pass": float(np.median(weighted_overheads)) <= 20.0,
         "parent_runs": parent_rows, "candidate_runs": candidate_rows,
     }
     output = args.output or (
