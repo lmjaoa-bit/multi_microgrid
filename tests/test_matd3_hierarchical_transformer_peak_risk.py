@@ -173,3 +173,69 @@ def test_parent_projection_call_count_on_actor_due_and_not_due(env_and_configs):
     calls[0] = 0
     algorithm.update(batch_size=2)
     assert calls[0] == 5  # behavior, target, one actor projection per agent
+
+
+def test_token_and_critic_disabled_reuse_exact_parent_action_path(env_and_configs):
+    from algorithms.matd3_hierarchical_transformer_predictive_dr.algorithm import (
+        Matd3HierarchicalTransformerPredictiveDr,
+    )
+
+    env, child_config = env_and_configs
+    parent_config = yaml.safe_load(Path(
+        "configs/algorithms/matd3_hierarchical_transformer_predictive_dr_hvac.yaml"
+    ).read_text(encoding="utf-8"))
+    child_config["algorithm"]["peak_risk"].update(
+        enabled=False, token_enabled=False, critic_enabled=False,
+        actor_weight_final=0.0,
+    )
+    parent = Matd3HierarchicalTransformerPredictiveDr.from_env(
+        env, parent_config, device="cpu", seed=42)
+    child = get_algorithm_spec(child_config["algorithm"]["name"]).create(
+        env, child_config, device="cpu", seed=42)
+    child.actors.load_state_dict(parent.actors.state_dict())
+    child.target_actors.load_state_dict(parent.target_actors.state_dict())
+    observations, _ = env.reset(seed=42, deterministic=True)
+    for mg in env.agent_ids:
+        x = torch.as_tensor(observations[mg], dtype=torch.float32).unsqueeze(0)
+        with torch.no_grad():
+            assert torch.equal(child.actors[mg](x), parent.actors[mg](x))
+
+
+def test_shared_peak_actor_gradient_and_recovery_state(env_and_configs, tmp_path):
+    env, cfg = env_and_configs
+    cfg["algorithm"]["peak_risk"].update(
+        critic_warmup_updates=0, actor_start_update=0,
+        actor_weight_ramp_updates=1, critic_update_interval=1,
+    )
+    cfg["logging"]["diagnostic_interval"] = 2
+    spec = get_algorithm_spec(cfg["algorithm"]["name"])
+    algorithm = spec.create(env, cfg, device="cpu", seed=42)
+    observations, info = env.reset(seed=42)
+    state = info["global_state"]
+    for _ in range(5):
+        actions = {mg: torch.zeros(env.action_dim).numpy() for mg in env.agent_ids}
+        next_obs, rewards, done, step_info = env.step(actions)
+        algorithm.replay.add(
+            observations, state, actions, float(rewards[env.agent_ids[0]]),
+            next_obs, step_info["global_state_after"], done)
+        observations, state = next_obs, step_info["global_state_after"]
+    first = algorithm.update(batch_size=2)
+    assert first == {}
+    second = algorithm.update(batch_size=2)
+    assert algorithm.peak_critic_updates == 2
+    assert second["peak"]["actor_weight"] > 0
+    assert second["peak"]["actor_penalty"] is not None
+    assert second["peak"]["actor_peak_gradient_norm"] > 0
+    assert all(param.grad is None for param in algorithm.peak_critic.parameters())
+    assert all(param.grad is None for param in algorithm.target_peak_critic.parameters())
+    directory = tmp_path / "recovery"
+    algorithm.save_training_state(directory, {"completed_episode": 1})
+    restored = spec.create(env, cfg, device="cpu", seed=42)
+    progress = restored.load_training_state(directory)
+    assert progress["completed_episode"] == 1
+    assert restored.peak_critic_updates == 2
+    assert len(restored.replay) == len(algorithm.replay)
+    for name, tensor in algorithm.peak_critic.state_dict().items():
+        assert torch.equal(tensor, restored.peak_critic.state_dict()[name]), name
+    for name, tensor in algorithm.actors.state_dict().items():
+        assert torch.equal(tensor, restored.actors.state_dict()[name]), name
