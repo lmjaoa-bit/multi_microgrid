@@ -67,11 +67,20 @@ older runs with different observation / physical environment contracts:
 ```powershell
 python scripts/run_full_information_oracle.py --all-test-days `
   --compare-matd3 "C:\\path\\to\\MATD3_2026-09-22_17-35-13_seed42\\test_daily_metrics.csv" `
-  --compare-transformer "C:\\path\\to\\MATD3HIERARCHICALTRANSFORMER_2026-09-20_15-09-10_seed42\\test_daily_metrics.csv"
+  --compare-transformer "C:\\path\\to\\MATD3HIERARCHICALTRANSFORMER_2026-09-20_15-09-10_seed42\\test_daily_metrics.csv" \`
+  --compare-matd3-hourly "C:\\path\\to\\MATD3_2026-09-22_17-35-13_seed42\\test_hourly_trajectories" \`
+  --compare-transformer-hourly "C:\\path\\to\\MATD3HIERARCHICALTRANSFORMER_2026-09-20_15-09-10_seed42\\test_hourly_trajectories"
 ```
 
 Outputs are under `outputs/working_runs/oracle_full_information/runs/`:
 `audit.json`, `daily_comparison.csv` and `hourly/<date>.csv`.
+If hourly trajectory directories are supplied, the comparison CSV also exposes
+paired grid import cost, grid export revenue, battery degradation, unmet-load
+cost, curtailment and aggregate terminal task penalty, with an explicit
+reconciliation check against each RL day's published team cost. Individual
+ESS/mill/HVAC/EV penalty attribution from RL still needs a state-level audit
+and must not be inferred from the aggregate terminal column.
+
 The comparison CSV reports signed **RL cost minus oracle cost** by day
 (positive means the RL policy costs more). A negative gap or failed day is
 a **model equivalence warning**, not proof of exceptional RL performance.
