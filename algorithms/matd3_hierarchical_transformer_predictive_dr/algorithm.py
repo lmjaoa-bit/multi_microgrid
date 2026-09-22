@@ -22,6 +22,10 @@ from algorithms.matd3_hierarchical_transformer_predictive_dr.training import (
     select_predictive_actions,
     update_predictive_dr,
 )
+from algorithms.training_recovery import (
+    load_incremental_training_state,
+    save_incremental_training_state,
+)
 
 
 class Matd3HierarchicalTransformerPredictiveDr(Matd3HierarchicalTransformerFeasibleDR):
@@ -38,6 +42,14 @@ class Matd3HierarchicalTransformerPredictiveDr(Matd3HierarchicalTransformerFeasi
         seed: int = 42,
     ) -> None:
         settings = config.get("algorithm", config)
+        recovery_config_json = json.dumps(
+            self.canonical_predictive_config(settings),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        self.recovery_config_signature = hashlib.sha256(
+            recovery_config_json.encode("utf-8")
+        ).hexdigest()
         self.predictive_hvac_config = copy.deepcopy(settings.get("predictive_hvac", {}))
         requested_feasible_dr_config = copy.deepcopy(settings.get("feasible_dr", {}))
         self.feasible_dr_config = requested_feasible_dr_config
@@ -136,6 +148,78 @@ class Matd3HierarchicalTransformerPredictiveDr(Matd3HierarchicalTransformerFeasi
             mg: torch.optim.Adam(self.actors[mg].parameters(), lr=actor_lr)
             for mg in self.agent_ids
         }
+
+    def _training_fingerprints(self) -> dict[str, Any]:
+        module_parts = self.__class__.__module__.split(".")
+        algorithm_slug = module_parts[1] if len(module_parts) > 1 else self.__class__.__name__
+        return {
+            "algorithm_slug": algorithm_slug,
+            "config_signature": self.recovery_config_signature,
+            "state_schema": list(self.state_schema),
+            "projection_signature": self.projection_signature,
+            "normalization_signature": self.normalization_signature,
+        }
+
+    def _extra_training_state(self) -> dict[str, Any]:
+        return {}
+
+    def _load_extra_training_state(self, state: Mapping[str, Any]) -> None:
+        if state:
+            raise ValueError(f"Unexpected extra training state: {sorted(state)}")
+
+    def save_training_state(
+        self,
+        directory: Path,
+        progress: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        payload = {
+            "actors": self.actors.state_dict(),
+            "target_actors": self.target_actors.state_dict(),
+            "critics": self.critics.state_dict(),
+            "target_critics": self.target_critics.state_dict(),
+            "actor_optimizers": {
+                mg: optimizer.state_dict() for mg, optimizer in self.actor_optimizers.items()
+            },
+            "critic_optimizers": {
+                mg: optimizer.state_dict() for mg, optimizer in self.critic_optimizers.items()
+            },
+            "update_steps": self.update_steps,
+            "algorithm_rng_state": copy.deepcopy(self.rng.bit_generator.state),
+            "torch_cpu_rng_state": torch.get_rng_state(),
+            "torch_cuda_rng_states": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+            "extra": self._extra_training_state(),
+        }
+        return save_incremental_training_state(
+            directory,
+            replay=self.replay,
+            state_payload=payload,
+            fingerprints=self._training_fingerprints(),
+            progress=progress,
+        )
+
+    def load_training_state(self, directory: Path) -> dict[str, Any]:
+        payload, transitions, replay_metadata, progress = load_incremental_training_state(
+            directory,
+            expected_fingerprints=self._training_fingerprints(),
+            map_location=self.device,
+        )
+        self.actors.load_state_dict(payload["actors"])
+        self.target_actors.load_state_dict(payload["target_actors"])
+        self.critics.load_state_dict(payload["critics"])
+        self.target_critics.load_state_dict(payload["target_critics"])
+        for mg, optimizer in self.actor_optimizers.items():
+            optimizer.load_state_dict(payload["actor_optimizers"][mg])
+        for mg, optimizer in self.critic_optimizers.items():
+            optimizer.load_state_dict(payload["critic_optimizers"][mg])
+        self.update_steps = int(payload["update_steps"])
+        self.replay.restore_logical(transitions, replay_metadata)
+        self.rng.bit_generator.state = copy.deepcopy(payload["algorithm_rng_state"])
+        self._load_extra_training_state(payload.get("extra", {}))
+        torch.set_rng_state(payload["torch_cpu_rng_state"].cpu())
+        cuda_states = payload.get("torch_cuda_rng_states", [])
+        if cuda_states and torch.cuda.is_available():
+            torch.cuda.set_rng_state_all(cuda_states)
+        return progress
 
     def select_actions(
         self,
