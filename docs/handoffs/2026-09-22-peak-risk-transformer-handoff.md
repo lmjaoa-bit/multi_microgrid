@@ -145,6 +145,21 @@ python scripts/check_peak_risk_gate.py `
   --output outputs/runtime_benchmarks/peak_risk_gate.json
 ```
 
+## 6. Final verification evidence
+
+GitHub Actions run `35680046413` completed successfully against the production
+code after the peak-critic budget correction.
+
+- Focused Peak-Risk/gate/runtime/constraint tests: passed.
+- Benchmark worker smoke for corrected predictive parent and Peak-Risk candidate: passed.
+- Full repository regression: `447 passed, 4 skipped, 3 warnings`.
+- Full one-episode shared pipeline smoke: passed.
+- Same-directory recovery/resume smoke with no duplicated training row: passed.
+- Measured Peak-Risk critic parameter fraction in the worker smoke:
+  `0.3939371710` (39.39%), below the 40% hard limit.
+- The latest branch commits after that successful code run are documentation-only;
+  no algorithm/runtime/test code changed after the tested `ee56da9` code state.
+
 ## 2026-09-22 implementation reconciliation: peak-critic width
 
 The design draft proposed `critic_hidden_dims: [64, 64]` while also making the
