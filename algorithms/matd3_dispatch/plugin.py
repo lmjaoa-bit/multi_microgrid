@@ -15,7 +15,7 @@ ALGORITHM_SPEC = AlgorithmSpec(
     environment_overrides={
         "env": {"mode": "cooperative"},
         "ess_sharing": {"control_mode": "single_dispatch",
-                        "observation_mode": "peer_energy_summary",
+                        "observation_mode": "cross_microgrid",
                         "offer_projection": "peer_demand_cap"},
     },
 )
