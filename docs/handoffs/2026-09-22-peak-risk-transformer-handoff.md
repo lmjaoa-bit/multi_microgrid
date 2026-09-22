@@ -10,11 +10,11 @@ The prerequisite work was intentionally kept separate from the stage-three algor
 
 | Commit | Delivery |
 |---|---|
-| `a41139d` | Scale-aware P2P label consistency tolerance and strict normalization-signature loading |
-| `8091a31` | Fail-closed saved-result P2P gates and saved-hourly HVAC late-power metric |
-| `4aff326` | Optional recoverable-algorithm protocol, replay logical-state persistence, atomic/chunk helpers |
-| `c591ff3` | Full predictive-DR training-state persistence: online/target models, optimizers, replay, counters and RNG state |
-| `9be04ee` | Shared pipeline run lifecycle and same-directory `--resume-run` support |
+| `01c410b` | Scale-aware P2P label consistency tolerance and strict normalization-signature loading |
+| `2fbe45a` | Fail-closed saved-result P2P gates and saved-hourly HVAC late-power metric |
+| `d5aed9f` | Optional recoverable-algorithm protocol, replay logical-state persistence, atomic/chunk helpers |
+| `1b1cf58` | Full predictive-DR training-state persistence: online/target models, optimizers, replay, counters and RNG state |
+| `9efc54d` | Shared pipeline run lifecycle and same-directory `--resume-run` support |
 
 New runs now write `run_status.json` and transition through `RUNNING -> TRAINED -> EVALUATING -> COMPLETED`; caught failures produce `FAILED` and `training_error.json`. Recovery manifests are stored below `checkpoints/training_state/`. Configuration, algorithm, seed, schema, normalization and projection contracts are checked before restoration.
 
