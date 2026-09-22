@@ -8,6 +8,7 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+import tempfile
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -38,7 +39,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--algorithm",
         default="matd3_transformer",
-        choices=("matd3_transformer", "pnn", "pnn_transformer"),
+        help="Any registered algorithm slug",
     )
     parser.add_argument(
         "--config", type=Path, default=PROJECT_ROOT / "configs" / "cooperative.yaml"
@@ -60,6 +61,13 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip the optional informational CUDA torch.compile candidate",
     )
 
+    parser.add_argument("--compare-parent", help="Registered corrected baseline algorithm")
+    parser.add_argument("--compare-candidate", help="Registered peak-risk candidate")
+    parser.add_argument("--compare-device", choices=("cpu", "cuda"), default="cpu")
+    parser.add_argument("--compare-updates", type=int, default=1000)
+    parser.add_argument("--compare-repetitions", type=int, default=3)
+    parser.add_argument("--compare-episodes", type=int, default=100)
+    parser.add_argument("--compare-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--device", choices=("cpu", "cuda"), help=argparse.SUPPRESS)
     parser.add_argument("--cpu-threads", type=int, help=argparse.SUPPRESS)
@@ -445,12 +453,247 @@ def _driver(args: argparse.Namespace) -> int:
     return 0
 
 
+
+def _comparison_worker(args: argparse.Namespace) -> dict[str, object]:
+    """Run a comparable fixed-replay microbenchmark in its own process.
+
+    The 100-episode segment measures actual policy/environment/update time with
+    the normal diagnostic schedule and recovery semantics retained.
+    """
+    if args.device is None or args.cpu_threads is None:
+        raise ValueError("comparison worker requires --device and --cpu-threads")
+    if args.device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA is unavailable")
+    spec, env_cfg, algorithm_cfg, cfg_path = _load_configs(args)
+    configure_torch_runtime(algorithm_cfg, args.device)
+    env = MultiMicrogridEnv(env_cfg, split="train")
+    algorithm = spec.create(env, algorithm_cfg, device=args.device, seed=args.seed)
+    settings = algorithm_cfg["algorithm"]
+    batch_size = int(settings.get("batch_size", 128))
+    _prefill_replay(env, algorithm, batch_size, args.seed)
+    for _ in range(max(8, int(args.warmup_updates))):
+        algorithm.update(batch_size)
+    _sync(args.device)
+
+    projection_counts = {"due": 0, "not_due": 0}
+    replay_counts = {"due": 0, "not_due": 0}
+    phase = ["not_due"]
+    original_projection = algorithm.project_actions
+    original_sample = algorithm.replay.sample
+
+    def projected(*values, **kwargs):
+        projection_counts[phase[0]] += 1
+        return original_projection(*values, **kwargs)
+
+    def sampled(*values, **kwargs):
+        replay_counts[phase[0]] += 1
+        return original_sample(*values, **kwargs)
+
+    algorithm.project_actions = projected
+    algorithm.replay.sample = sampled
+    if args.device == "cuda":
+        torch.cuda.reset_peak_memory_stats()
+    elapsed_by_phase = {"due": [], "not_due": []}
+    for _ in range(args.compare_updates):
+        due = (algorithm.update_steps + 1) % algorithm.policy_delay == 0
+        phase[0] = "due" if due else "not_due"
+        _sync(args.device)
+        started = time.perf_counter()
+        algorithm.update(batch_size)
+        _sync(args.device)
+        elapsed_by_phase[phase[0]].append((time.perf_counter() - started) * 1000.0)
+    algorithm.project_actions = original_projection
+    algorithm.replay.sample = original_sample
+
+    # Identical seed and episode count, including environment, replay and
+    # algorithm update time; no formal-test day is used here.
+    training_start = time.perf_counter()
+    for ep in range(args.compare_episodes):
+        observations, info = env.reset(seed=args.seed + 900_000 + ep)
+        state = info["global_state"]
+        done = False
+        while not done:
+            actions = algorithm.select_actions(
+                observations, noise_std=float(settings.get("exploration_noise", 0.15)))
+            next_obs, rewards, done, step_info = env.step(actions)
+            algorithm.replay.add(observations, state, actions,
+                float(rewards[env.agent_ids[0]]), next_obs,
+                step_info["global_state_after"], done)
+            algorithm.update(batch_size)
+            observations, state = next_obs, step_info["global_state_after"]
+    _sync(args.device)
+    training_seconds = time.perf_counter() - training_start
+
+    # Inference only; the shared formal evaluator does not execute the cost critic.
+    obs, _ = env.reset(seed=args.seed + 650_000)
+    _sync(args.device)
+    eval_started = time.perf_counter()
+    for _ in range(args.compare_updates):
+        algorithm.select_actions(obs, noise_std=0.0)
+    _sync(args.device)
+    eval_ms = (time.perf_counter() - eval_started) * 1000 / args.compare_updates
+
+    snapshot_seconds = None
+    if args.compare_episodes and hasattr(algorithm, "save_training_state"):
+        with tempfile.TemporaryDirectory(prefix="peak_risk_speed_") as directory:
+            _sync(args.device)
+            started = time.perf_counter()
+            algorithm.save_training_state(
+                Path(directory), {"completed_episode": args.compare_episodes,
+                                  "update_steps": algorithm.update_steps})
+            _sync(args.device)
+            snapshot_seconds = time.perf_counter() - started
+    peak_memory_mb = (torch.cuda.max_memory_allocated() / 1024**2
+                      if args.device == "cuda" else None)
+    parent_reward_critic = next(iter(algorithm.critics.values()))
+    critic_size = sum(p.numel() for p in parent_reward_critic.parameters())
+    peak = getattr(algorithm, "peak_critic", None)
+    peak_size = sum(p.numel() for p in peak.parameters()) if peak is not None else 0
+    return {
+        "status": "ok", "algorithm": args.algorithm, "device": args.device,
+        "algorithm_config": str(cfg_path), "seed": args.seed,
+        "update_calls": args.compare_updates, "end_to_end_episodes": args.compare_episodes,
+        "due_update_ms": float(np.median(elapsed_by_phase["due"])),
+        "not_due_update_ms": float(np.median(elapsed_by_phase["not_due"])),
+        "median_update_ms": float(np.median(
+            elapsed_by_phase["due"] + elapsed_by_phase["not_due"])),
+        "projector_calls": projection_counts, "replay_samples": replay_counts,
+        "actor_due_calls": len(elapsed_by_phase["due"]),
+        "actor_not_due_calls": len(elapsed_by_phase["not_due"]),
+        "training_seconds": training_seconds, "deterministic_eval_ms": eval_ms,
+        "snapshot_seconds": snapshot_seconds, "gpu_peak_memory_mb": peak_memory_mb,
+        "peak_critic_parameter_fraction": peak_size / max(critic_size, 1),
+    }
+
+
+def _comparison_subprocess(args: argparse.Namespace, algorithm: str) -> dict[str, object]:
+    command = [
+        sys.executable, str(Path(__file__).resolve()), "--compare-worker",
+        "--algorithm", algorithm, "--config", str(Path(args.config).resolve()),
+        "--compare-updates", str(args.compare_updates),
+        "--compare-episodes", str(args.compare_episodes),
+        "--warmup-updates", str(args.warmup_updates),
+        "--seed", str(args.seed), "--device", args.compare_device,
+        "--cpu-threads", str(args.cpu_threads or 4), "--interop-threads",
+        str(args.interop_threads),
+    ]
+    process = subprocess.run(command, cwd=PROJECT_ROOT, capture_output=True, text=True)
+    if process.returncode:
+        raise RuntimeError(
+            f"Benchmark worker {algorithm} failed: {process.stderr[-6000:] or process.stdout[-6000:]}"
+        )
+    for line in reversed(process.stdout.splitlines()):
+        if line.startswith(RESULT_PREFIX):
+            return json.loads(line[len(RESULT_PREFIX):])
+    raise RuntimeError(f"Benchmark worker {algorithm} returned no report")
+
+
+def _comparison_driver(args: argparse.Namespace) -> int:
+    if not args.compare_parent or not args.compare_candidate:
+        raise ValueError("Both --compare-parent and --compare-candidate are required")
+    if args.algorithm_config:
+        raise ValueError("Comparison uses each registered algorithm's own configuration")
+    if args.compare_updates < 1000 or args.compare_repetitions < 3 or args.compare_episodes < 100:
+        raise ValueError("Production comparison requires >=1000 updates, 3 repetitions and 100 episodes")
+    parent_spec = get_algorithm_spec(args.compare_parent)
+    candidate_spec = get_algorithm_spec(args.compare_candidate)
+    parent_cfg = yaml.safe_load(parent_spec.default_config_path.read_text(encoding="utf-8"))
+    candidate_cfg = yaml.safe_load(candidate_spec.default_config_path.read_text(encoding="utf-8"))
+    for section in ("training", "validation", "logging"):
+        if parent_cfg.get(section) != candidate_cfg.get(section):
+            raise ValueError(f"{section} schedule differs between parent and candidate")
+    for field in ("batch_size", "network", "policy_delay", "warmup_steps",
+                  "replay_capacity", "target_policy_noise", "target_noise_clip"):
+        if parent_cfg["algorithm"].get(field) != candidate_cfg["algorithm"].get(field):
+            raise ValueError(f"algorithm.{field} differs between parent and candidate")
+
+    parent_rows = []
+    candidate_rows = []
+    for _ in range(args.compare_repetitions):
+        parent_rows.append(_comparison_subprocess(args, args.compare_parent))
+        candidate_rows.append(_comparison_subprocess(args, args.compare_candidate))
+
+    def median(rows, field):
+        return float(np.median([float(row[field]) for row in rows]))
+
+    def overhead(field):
+        p = median(parent_rows, field)
+        c = median(candidate_rows, field)
+        if p <= 0:
+            raise ValueError(f"invalid parent benchmark {field}={p}")
+        return 100.0 * (c / p - 1.0)
+
+    def count_per_call(rows, key, phase):
+        return float(np.mean([
+            row[key][phase] / max(int(row["actor_due_calls"] if phase == "due"
+                                              else row["actor_not_due_calls"]), 1)
+            for row in rows
+        ]))
+
+    projector_parity = all(
+        count_per_call(parent_rows, "projector_calls", phase)
+        == count_per_call(candidate_rows, "projector_calls", phase)
+        for phase in ("due", "not_due")
+    )
+    replay_parity = all(
+        count_per_call(parent_rows, "replay_samples", phase)
+        == count_per_call(candidate_rows, "replay_samples", phase) == 1.0
+        for phase in ("due", "not_due")
+    )
+    recovery_ratio = float(np.median([
+        100.0 * float(row["snapshot_seconds"]) / max(float(row["training_seconds"]), 1e-12)
+        for row in candidate_rows
+    ]))
+    memory_overhead = (overhead("gpu_peak_memory_mb")
+                       if args.compare_device == "cuda" else None)
+    report = {
+        "device": args.compare_device, "parent": args.compare_parent,
+        "candidate": args.compare_candidate,
+        "update_calls_per_repetition": args.compare_updates,
+        "end_to_end_episodes": args.compare_episodes,
+        "repetitions": args.compare_repetitions,
+        "median_update_overhead_pct": overhead("median_update_ms"),
+        "actor_due_update_overhead_pct": overhead("due_update_ms"),
+        "actor_not_due_update_overhead_pct": overhead("not_due_update_ms"),
+        "end_to_end_training_overhead_pct": overhead("training_seconds"),
+        "recovery_snapshot_overhead_pct": recovery_ratio,
+        "deterministic_evaluation_overhead_pct": overhead("deterministic_eval_ms"),
+        "peak_critic_parameter_fraction": median(candidate_rows, "peak_critic_parameter_fraction"),
+        "projector_call_parity": projector_parity,
+        "replay_sample_parity": replay_parity,
+        "gpu_peak_memory_overhead_pct": memory_overhead,
+        "update_overhead_target_pass": overhead("median_update_ms") <= 15.0,
+        "update_overhead_hard_pass": overhead("median_update_ms") <= 20.0,
+        "parent_runs": parent_rows, "candidate_runs": candidate_rows,
+    }
+    output = args.output or (
+        PROJECT_ROOT / "outputs" / "runtime_benchmarks" /
+        f"peak_risk_comparison_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    )
+    output = Path(output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    print(f"Saved comparative benchmark: {output}")
+    return 0 if report["update_overhead_hard_pass"] and projector_parity and replay_parity else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.episodes < 1 or args.warmup_updates < 0 or args.sample_iterations < 1:
         raise ValueError(
             "episodes/sample-iterations must be positive and warmup-updates non-negative"
         )
+    if args.compare_worker:
+        try:
+            result = _comparison_worker(args)
+        except Exception as exc:
+            print(f"{type(exc).__name__}: {exc}", file=sys.stderr)
+            return 2
+        print(RESULT_PREFIX + json.dumps(result, ensure_ascii=False))
+        return 0
+    if args.compare_parent or args.compare_candidate:
+        return _comparison_driver(args)
     if args.worker:
         try:
             result = _worker(args)
