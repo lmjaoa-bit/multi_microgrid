@@ -25,6 +25,20 @@ _DEFAULTS: dict[str, Any] = {
     "reuse_parent_projection": True, "diagnostics_only_on_schedule": True,
 }
 
+
+def assert_finite(tensor: torch.Tensor, message: str) -> None:
+    """Fail closed without a host/device synchronization on the CUDA hot path.
+
+    CUDA async assertions execute on the current stream before subsequent kernels;
+    on CPU or an older torch build, retain the synchronous exception behavior.
+    """
+    async_assert = getattr(torch, "_assert_async", None)
+    if tensor.is_cuda and async_assert is not None:
+        async_assert(torch.isfinite(tensor).all(), message)
+    elif not bool(torch.isfinite(tensor).all()):
+        raise FloatingPointError(message)
+
+
 def validate_peak_risk_config(config: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the complete, versioned peak-risk contract (no unknown keys)."""
     unknown = set(config) - set(_DEFAULTS)
@@ -80,8 +94,11 @@ def max_return_target(current: torch.Tensor, next1: torch.Tensor,
     for name, tensor in (("current", current), ("next1", next1), ("next2", next2), ("done", done)):
         if tensor.ndim != 2 or tensor.shape[1] != 1 or tensor.shape != current.shape:
             raise ValueError(f"peak target {name} shape mismatch")
-        if not bool(torch.isfinite(tensor).all()):
-            raise FloatingPointError(f"peak target {name} is nonfinite")
+        if not tensor.is_cuda:
+            assert_finite(tensor, f"peak target {name} is nonfinite")
+    if current.is_cuda:
+        # One device-side check for all four tensors, rather than four CUDA syncs.
+        assert_finite(torch.stack((current, next1, next2, done)), "peak target is nonfinite")
     return torch.where(done >= 0.5, current, torch.maximum(current, torch.maximum(next1, next2)))
 
 
@@ -89,11 +106,16 @@ def system_actual_load_kw(plans: Sequence[Mapping[str, torch.Tensor]]) -> torch.
     if len(plans) != 3:
         raise ValueError("Expected projected plans from all three microgrids")
     loads = [plan["actual_load_kw"].reshape(-1, 1) for plan in plans]
-    if not all(torch.isfinite(load).all() for load in loads):
-        raise FloatingPointError("Projected actual_load_kw is nonfinite")
     if any(load.shape != loads[0].shape for load in loads):
         raise ValueError("Projected actual_load_kw has inconsistent batch sizes")
-    return torch.stack(loads, dim=0).sum(dim=0)
+    if not loads[0].is_cuda:
+        for load in loads:
+            assert_finite(load, "Projected actual_load_kw is nonfinite")
+    result = torch.stack(loads, dim=0).sum(dim=0)
+    if loads[0].is_cuda:
+        # A nonfinite input propagates to the finite sum for this three-load contract.
+        assert_finite(result, "Projected actual_load_kw is nonfinite")
+    return result
 
 
 class PeakRiskFeatureExtractor(nn.Module):
@@ -144,6 +166,12 @@ class PeakRiskFeatureExtractor(nn.Module):
         valid_names = [f"forecast_valid_t+{k}" for k in range(1, self.forecast_horizon + 1)]
         self.register_buffer("valid_indices", torch.tensor(
             [names.get(name, -1) for name in valid_names], dtype=torch.long), persistent=False)
+        # Cache static gather indices and the flag-presence decision on the host;
+        # testing a CUDA tensor in a Python `if` synchronizes every Actor forward.
+        self.has_valid_flags = any(name in names for name in valid_names)
+        self.register_buffer("forecast_flat_indices", self.forecast_indices.flatten(), persistent=False)
+        self.register_buffer("valid_gather_indices", self.valid_indices.clamp_min(0), persistent=False)
+        self.register_buffer("valid_presence", self.valid_indices >= 0, persistent=False)
         self.register_buffer("step_indices", torch.arange(
             1, self.forecast_horizon + 1, dtype=torch.float32), persistent=False)
 
@@ -163,20 +191,15 @@ class PeakRiskFeatureExtractor(nn.Module):
                 peer_net = x[:, ix[f"{mg}_net_load"]]
                 peer_deficit = peer_deficit + peer_net.clamp_min(0.0)
                 peer_surplus = peer_surplus + (-peer_net).clamp_min(0.0)
-        forecasts = x[:, self.forecast_indices.flatten()].reshape(x.shape[0], self.forecast_horizon, 3)
+        forecasts = x[:, self.forecast_flat_indices].reshape(x.shape[0], self.forecast_horizon, 3)
         forecast_net = forecasts[:, :, 0] - forecasts[:, :, 1] - forecasts[:, :, 2]
-        if (self.valid_indices >= 0).any():
-            presence = self.valid_indices >= 0
-            safe_indices = self.valid_indices.clamp_min(0)
-            flags = x[:, safe_indices] >= 0.5
-            valid = torch.where(presence.unsqueeze(0), flags, torch.ones_like(flags))
+        if self.has_valid_flags:
+            flags = x[:, self.valid_gather_indices] >= 0.5
+            valid = torch.where(self.valid_presence.unsqueeze(0), flags, torch.ones_like(flags))
         else:
             valid = torch.ones_like(forecast_net, dtype=torch.bool)
         valid = valid & torch.isfinite(forecast_net)
         valid_count = valid.sum(dim=1)
-        fallback = local.unsqueeze(1).expand_as(forecast_net)
-        finite = torch.where(valid, forecast_net, fallback)
-        mean = finite.sum(dim=1) / float(self.forecast_horizon)
         # Invalid forecast positions do not alter the valid-forecast mean/max.
         mean = torch.where(valid_count > 0, torch.where(valid, forecast_net, torch.zeros_like(forecast_net)).sum(dim=1)
                            / valid_count.clamp_min(1), local)
@@ -201,6 +224,5 @@ class PeakRiskFeatureExtractor(nn.Module):
             forecast_fraction,
             torch.full_like(local, urgency),
         ], dim=1)
-        if not torch.isfinite(features).all():
-            raise FloatingPointError("peak-risk token features are nonfinite")
+        assert_finite(features, "peak-risk token features are nonfinite")
         return features
