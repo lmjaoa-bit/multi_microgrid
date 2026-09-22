@@ -47,4 +47,4 @@ def test_mill_terminal_or_production_accepts_completed_daily_production():
 
     assert summary["mill_terminal_success_rate"] == 0.0
     assert summary["mill_production_completion_rate"] == pytest.approx(1.0, abs=1e-12)
-    assert summary["mill_terminal_or_production_success_rate"] == 1.0
+    assert summary["mill_terminal_or_production_success_rate"] == pytest.approx(1.0, abs=1e-12)
