@@ -48,6 +48,38 @@ def test_exact_max_return_without_gamma_and_single_row():
     assert torch.equal(max_return_target(x[:1], n1[:1], n2[:1], done[:1]), x[:1])
 
 
+def test_nonfinite_peak_guards_keep_cpu_fail_closed():
+    from algorithms.matd3_hierarchical_transformer_peak_risk.peak_risk import assert_finite
+
+    assert_finite(torch.ones(2, 1), "finite")
+    with pytest.raises(FloatingPointError, match="invalid peak tensor"):
+        assert_finite(torch.tensor([[float("nan")]]), "invalid peak tensor")
+    with pytest.raises(FloatingPointError, match="peak target next2"):
+        max_return_target(
+            torch.ones(1, 1), torch.ones(1, 1),
+            torch.tensor([[float("inf")]]), torch.zeros(1, 1),
+        )
+    with pytest.raises(FloatingPointError, match="Projected actual_load_kw"):
+        system_actual_load_kw([
+            {"actual_load_kw": torch.tensor([[1.0]])},
+            {"actual_load_kw": torch.tensor([[float("nan")]])},
+            {"actual_load_kw": torch.tensor([[2.0]])},
+        ])
+
+
+def test_peak_token_feature_check_rejects_nan_on_cpu(env_and_configs):
+    env, config = env_and_configs
+    observations, _ = env.reset(seed=42)
+    algorithm = get_algorithm_spec(config["algorithm"]["name"]).create(
+        env, config, device="cpu", seed=42)
+    actor = algorithm.actors["mg1"]
+    obs = torch.as_tensor(observations["mg1"], dtype=torch.float32).unsqueeze(0)
+    actor.peak_features(obs)
+    obs[:, actor.peak_features.indices["previous_system_buy_demand"]] = float("nan")
+    with pytest.raises(FloatingPointError, match="peak-risk token features"):
+        actor.peak_features(obs)
+
+
 def test_peak_weight_ramp():
     assert peak_actor_weight(4999, 5000, 15000, 0.02) == 0
     assert peak_actor_weight(12500, 5000, 15000, 0.02) == pytest.approx(0.01)
