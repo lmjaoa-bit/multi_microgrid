@@ -21,6 +21,7 @@ import pandas as pd
 
 from core.data_manager import DataManager
 from optimization.common_constraints import build_dispatch_data, load_config, solve_dispatch
+from optimization.oracle_replay import validate_device_trajectories
 
 
 def _read_rl_daily(path: Path, dates: list[str], label: str) -> dict[str, float]:
@@ -104,12 +105,18 @@ def run(
             )
             if result.status != "kOptimal":
                 raise RuntimeError(f"Day {date}: solver status {result.status}")
+            replay = validate_device_trajectories(cfg, dispatch, result.trajectories)
+            if not replay["device_replay_passed"]:
+                raise RuntimeError(f"Day {date}: device-state replay mismatch: "
+                                   f"{replay['first_mismatches'][:3]}")
             result.trajectories.to_csv(output / "hourly" / f"{date}.csv", index=False)
             day_results.append({
                 "date": date,
                 "oracle_profit": result.total_profit,
                 "oracle_cost": result.total_cost,
                 "solver_status": result.status,
+                "device_replay_passed": replay["device_replay_passed"],
+                "device_replay_compared_values": replay["compared_values"],
                 "p2p_energy_kwh": sum(result.pair_flows_kwh.values()),
                 "gross_load_peak_kw": (
                     result.trajectories.groupby("timestamp")["load_kw"].sum().max()
@@ -132,6 +139,8 @@ def run(
         "days_completed": completed,
         "errors": errors,
         "solver_requirement": "kOptimal",
+        "device_replay_requirement": "Every device model matches its MILP state and power schedule",
+        "market_clearing_replayed": False,
         "reference_type": "joint_optimization_with_relaxed_p2p_clearing",
         "not_a_verified_environment_equivalent_upper_bound": True,
         "assumptions": [
