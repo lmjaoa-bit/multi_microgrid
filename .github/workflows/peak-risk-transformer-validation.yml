@@ -32,6 +32,18 @@ jobs:
           python -m pip install -r requirements.txt
       - name: Focused peak-risk tests
         run: pytest tests/test_matd3_hierarchical_transformer_peak_risk.py tests/test_peak_risk_gate.py tests/test_runtime_optimizations.py -q
+      - name: Benchmark worker smoke for parent and candidate
+        run: |
+          python scripts/benchmark_training_runtime.py \
+            --compare-worker \
+            --algorithm matd3_hierarchical_transformer_predictive_dr \
+            --device cpu --cpu-threads 1 --compare-updates 10 \
+            --compare-episodes 1 --seed 42
+          python scripts/benchmark_training_runtime.py \
+            --compare-worker \
+            --algorithm matd3_hierarchical_transformer_peak_risk \
+            --device cpu --cpu-threads 1 --compare-updates 10 \
+            --compare-episodes 1 --seed 42
       - name: Full regression suite
         run: pytest -q
 
