@@ -103,6 +103,7 @@ class FastReplayBuffer:
             raise ValueError("replay capacity must be positive")
         self.storage: list[Transition] = []
         self._next_index = 0
+        self._total_added = 0
         self.rng = np.random.default_rng(seed)
 
     @classmethod
@@ -128,6 +129,7 @@ class FastReplayBuffer:
         else:
             self.storage[self._next_index] = transition
             self._next_index = (self._next_index + 1) % self.capacity
+        self._total_added += 1
 
     def add(
         self,
@@ -159,6 +161,60 @@ class FastReplayBuffer:
 
     def _transitions_for_indices(self, indices) -> list[Transition]:
         return [self._logical_get(int(i)) for i in indices]
+
+    def logical_transitions(self) -> list[Transition]:
+        return [self._logical_get(i) for i in range(len(self))]
+
+    def state_metadata(self) -> dict[str, object]:
+        return {
+            "capacity": self.capacity,
+            "size": len(self.storage),
+            "next_index": self._next_index,
+            "total_added": self._total_added,
+            "rng_state": copy.deepcopy(self.rng.bit_generator.state),
+        }
+
+    def restore_logical(
+        self,
+        transitions: Sequence[Transition],
+        metadata: Mapping[str, object],
+    ) -> None:
+        capacity = int(metadata.get("capacity", -1))
+        size = int(metadata.get("size", -1))
+        next_index = int(metadata.get("next_index", -1))
+        total_added = int(metadata.get("total_added", -1))
+        if capacity != self.capacity:
+            raise ValueError(f"Replay capacity mismatch: expected {self.capacity}, got {capacity}")
+        if size != len(transitions) or not 0 <= size <= capacity:
+            raise ValueError(
+                f"Replay size mismatch: metadata={size}, transitions={len(transitions)}"
+            )
+        if not 0 <= next_index < capacity:
+            raise ValueError(f"Invalid replay next_index: {next_index}")
+        if total_added < size:
+            raise ValueError(f"Invalid replay total_added: {total_added} < size {size}")
+        if size < capacity and next_index != size % capacity:
+            raise ValueError(
+                f"Invalid replay next_index for partial buffer: {next_index} != {size % capacity}"
+            )
+        if "rng_state" not in metadata:
+            raise ValueError("Replay metadata is missing rng_state")
+
+        logical = list(transitions)
+        if size < capacity:
+            physical = logical
+        else:
+            physical: list[Transition | None] = [None] * capacity
+            for logical_index, transition in enumerate(logical):
+                physical[(next_index + logical_index) % capacity] = transition
+            if any(item is None for item in physical):
+                raise ValueError("Replay restore produced an incomplete physical buffer")
+            physical = [item for item in physical if item is not None]
+
+        self.storage = physical
+        self._next_index = next_index
+        self._total_added = total_added
+        self.rng.bit_generator.state = copy.deepcopy(metadata["rng_state"])
 
     def sample(
         self,

@@ -39,3 +39,16 @@ class MultiAgentAlgorithm(Protocol):
     def save(self, path: str | Path) -> None: ...
 
     def load(self, path: str | Path) -> None: ...
+
+
+@runtime_checkable
+class RecoverableAlgorithmProtocol(Protocol):
+    """Optional opaque training-state contract used only by resumable variants."""
+
+    def save_training_state(
+        self,
+        directory: Path,
+        progress: Mapping[str, Any],
+    ) -> Mapping[str, Any]: ...
+
+    def load_training_state(self, directory: Path) -> dict[str, Any]: ...
