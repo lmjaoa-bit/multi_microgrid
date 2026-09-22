@@ -114,7 +114,7 @@ class PeakRiskFeatureExtractor(nn.Module):
             raise ValueError(f"{active_agent}: missing categorical device observation")
         self.kind = kind
         need = ["load", "pv", "wind", "previous_system_buy_demand",
-                "available_discharge_ratio", "time_remaining"]
+                "available_discharge_ratio"]
         # Two supported public peer-observation contracts: summary pressure
         # (deficit/surplus) and legacy cross_microgrid (peer net-load).
         self.peer_modes = {}
