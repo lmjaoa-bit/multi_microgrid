@@ -220,3 +220,47 @@ def test_malformed_non_best_checkpoint_raises_error(saved_gate_fixture):
     )
     with pytest.raises(ValueError, match="checkpoint_used"):
         evaluate_p2p_value_gate(candidate, reference, predictive)
+
+
+def _rewrite_json(path: Path, update) -> None:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    update(payload)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+@pytest.mark.parametrize("replacement", [None, 1, "true"])
+def test_constraint_eligible_must_be_present_boolean(saved_gate_fixture, replacement):
+    candidate, reference, predictive = saved_gate_fixture()
+    path = candidate / "training_summary.json"
+
+    def mutate(payload):
+        selection = payload["checkpoint_selection"]
+        if replacement is None:
+            selection.pop("constraint_eligible")
+        else:
+            selection["constraint_eligible"] = replacement
+
+    _rewrite_json(path, mutate)
+    with pytest.raises(ValueError, match="constraint_eligible"):
+        evaluate_p2p_value_gate(candidate, reference, predictive)
+
+
+@pytest.mark.parametrize("metric_id", ["hvac_late_power_p95_kw", "mg2_dr_projection_rate"])
+@pytest.mark.parametrize("replacement", [None, True, "5", float("nan"), float("inf")])
+def test_required_paper_metrics_must_be_present_finite_numbers(
+    saved_gate_fixture, metric_id, replacement
+):
+    candidate, reference, predictive = saved_gate_fixture()
+    path = candidate / "paper_metrics.json"
+
+    def mutate(payload):
+        metrics = payload["metrics"]
+        item = next(row for row in metrics if row["metric_id"] == metric_id)
+        if replacement is None:
+            metrics.remove(item)
+        else:
+            item["value"] = replacement
+
+    _rewrite_json(path, mutate)
+    with pytest.raises(ValueError, match=metric_id):
+        evaluate_p2p_value_gate(candidate, reference, predictive)

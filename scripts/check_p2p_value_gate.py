@@ -8,6 +8,7 @@ import csv
 import hashlib
 import json
 import math
+import numbers
 import sys
 from pathlib import Path
 from typing import Any
@@ -20,6 +21,24 @@ DEFAULT_PREDICTIVE_RUN = (
     Path("outputs/working_runs/matd3_hierarchical_transformer_predictive_dr/runs")
     / "MATD3HIERARCHICALTRANSFORMERPREDICTIVEDR_2026-09-21_13-01-58_seed42"
 )
+
+
+def _require_finite_number(mapping: dict[str, Any], key: str, source: str) -> float:
+    if key not in mapping:
+        raise ValueError(f"{source} requires numeric {key}")
+    raw = mapping[key]
+    if isinstance(raw, bool) or not isinstance(raw, numbers.Real):
+        raise ValueError(f"{source} requires numeric {key}")
+    value = float(raw)
+    if not math.isfinite(value):
+        raise ValueError(f"{source} has non-finite {key}")
+    return value
+
+
+def _require_bool(mapping: dict[str, Any], key: str, source: str) -> bool:
+    if key not in mapping or not isinstance(mapping[key], bool):
+        raise ValueError(f"{source} requires boolean {key}")
+    return bool(mapping[key])
 
 
 def compute_sha256(path: Path) -> str:
@@ -106,9 +125,9 @@ def read_run_artifacts(
     paper_metrics_dict: dict[str, float] = {}
     for item in paper_metrics_raw.get("metrics", []):
         mid = item.get("metric_id")
-        val = float(item.get("value", 0.0))
-        if not math.isfinite(val):
-            raise ValueError(f"Non-finite value in paper_metrics for {mid}: {val}")
+        if not isinstance(mid, str) or not mid:
+            raise ValueError("paper_metrics contains an invalid metric_id")
+        val = _require_finite_number(item, "value", f"paper_metrics.{mid}")
         paper_metrics_dict[mid] = val
 
     hourly_dir = run_dir / "test_hourly_trajectories"
@@ -130,22 +149,45 @@ def read_run_artifacts(
     if not ess_offer:
         raise ValueError(f"Missing algorithm.p2p.ess_offer in test_summary for {run_dir}")
 
-    offer_means = ess_offer.get("offer_mean_kwh", {})
-    accepted_means = ess_offer.get("accepted_mean_kwh", {})
+    if "offer_mean_kwh" not in ess_offer or "accepted_mean_kwh" not in ess_offer:
+        raise ValueError(f"Missing offer_mean_kwh or accepted_mean_kwh for {run_dir}")
+    offer_means = ess_offer["offer_mean_kwh"]
+    accepted_means = ess_offer["accepted_mean_kwh"]
     if isinstance(offer_means, dict):
-        total_offer_kwh = sum(float(v) for v in offer_means.values())
+        total_offer_kwh = sum(
+            _require_finite_number(offer_means, key, "algorithm.p2p.ess_offer.offer_mean_kwh")
+            for key in offer_means
+        )
     else:
-        total_offer_kwh = float(offer_means)
+        total_offer_kwh = _require_finite_number(
+            {"offer_mean_kwh": offer_means}, "offer_mean_kwh", "algorithm.p2p.ess_offer"
+        )
 
     if isinstance(accepted_means, dict):
-        total_accepted_kwh = sum(float(v) for v in accepted_means.values())
+        total_accepted_kwh = sum(
+            _require_finite_number(
+                accepted_means, key, "algorithm.p2p.ess_offer.accepted_mean_kwh"
+            )
+            for key in accepted_means
+        )
     else:
-        total_accepted_kwh = float(accepted_means)
+        total_accepted_kwh = _require_finite_number(
+            {"accepted_mean_kwh": accepted_means},
+            "accepted_mean_kwh",
+            "algorithm.p2p.ess_offer",
+        )
 
-    acceptance_rate = float(ess_offer.get("energy_acceptance_rate", 0.0))
-    total_p2p_kwh = float(
-        p2p_info.get("total_energy_mean_kwh", test_summary.get("p2p_total_energy_kwh_mean", 0.0))
+    acceptance_rate = _require_finite_number(
+        ess_offer, "energy_acceptance_rate", "algorithm.p2p.ess_offer"
     )
+    if "total_energy_mean_kwh" in p2p_info:
+        total_p2p_kwh = _require_finite_number(
+            p2p_info, "total_energy_mean_kwh", "algorithm.p2p"
+        )
+    else:
+        total_p2p_kwh = _require_finite_number(
+            test_summary, "p2p_total_energy_kwh_mean", "test_summary"
+        )
 
     return {
         "run_dir": str(run_dir),
@@ -191,8 +233,10 @@ def evaluate_p2p_value_gate(
         or {}
     )
     selection_mode = ckpt_sel.get("selection_mode", "unknown")
-    constraint_eligible = ckpt_sel.get("constraint_eligible", True)
-    c0 = bool(constraint_eligible)
+    constraint_eligible = _require_bool(
+        ckpt_sel, "constraint_eligible", "checkpoint_selection"
+    )
+    c0 = constraint_eligible
     conditions["validation_checkpoint_eligible"] = {
         "passed": c0,
         "selection_mode": selection_mode,
@@ -271,7 +315,7 @@ def evaluate_p2p_value_gate(
         all_passed = False
 
     # 2. Inherited Safety Gates (Spec Section 16.2)
-    strict_feasible = float(ts.get("strict_feasible_day_rate", 0.0))
+    strict_feasible = _require_finite_number(ts, "strict_feasible_day_rate", "test_summary")
     s1 = strict_feasible >= 1.0 - atol
     conditions["strict_feasible_rate_100pct"] = {
         "passed": s1,
@@ -281,7 +325,7 @@ def evaluate_p2p_value_gate(
     if not s1:
         all_passed = False
 
-    unmet_energy = float(ts.get("unmet_energy_mean_kwh", 0.0))
+    unmet_energy = _require_finite_number(ts, "unmet_energy_mean_kwh", "test_summary")
     s2 = unmet_energy <= 0.0 + atol
     conditions["unmet_energy_eq_0_kwh"] = {
         "passed": s2,
@@ -291,7 +335,7 @@ def evaluate_p2p_value_gate(
     if not s2:
         all_passed = False
 
-    mg2_proj = pm.get("mg2_dr_projection_rate", 0.0) / 100.0
+    mg2_proj = _require_finite_number(pm, "mg2_dr_projection_rate", "paper_metrics") / 100.0
     s3 = mg2_proj <= 0.0 + atol
     conditions["mg2_projection_rate_0"] = {
         "passed": s3,
@@ -301,7 +345,7 @@ def evaluate_p2p_value_gate(
     if not s3:
         all_passed = False
 
-    mg3_proj = pm.get("mg3_dr_projection_rate", 0.0) / 100.0
+    mg3_proj = _require_finite_number(pm, "mg3_dr_projection_rate", "paper_metrics") / 100.0
     s4 = mg3_proj <= 0.0 + atol
     conditions["mg3_projection_rate_0"] = {
         "passed": s4,
@@ -311,7 +355,9 @@ def evaluate_p2p_value_gate(
     if not s4:
         all_passed = False
 
-    ev_success = pm.get("ev_departure_target_success_rate", 0.0) / 100.0
+    ev_success = _require_finite_number(
+        pm, "ev_departure_target_success_rate", "paper_metrics"
+    ) / 100.0
     s5 = ev_success >= 1.0 - atol
     conditions["ev_departure_success_100pct"] = {
         "passed": s5,
@@ -321,7 +367,9 @@ def evaluate_p2p_value_gate(
     if not s5:
         all_passed = False
 
-    comfort = pm.get("hvac_occupied_comfort_rate", 0.0) / 100.0
+    comfort = _require_finite_number(
+        pm, "hvac_occupied_comfort_rate", "paper_metrics"
+    ) / 100.0
     s6 = comfort >= 0.995 - atol
     conditions["hvac_comfort_ge_99_5pct"] = {
         "passed": s6,
@@ -331,8 +379,14 @@ def evaluate_p2p_value_gate(
     if not s6:
         all_passed = False
 
-    cand_hvac_joint = pm.get("hvac_terminal_joint_success_rate", 0.0) / 100.0
-    pred_hvac_joint = predictive["paper_metrics"].get("hvac_terminal_joint_success_rate", 0.0) / 100.0
+    cand_hvac_joint = _require_finite_number(
+        pm, "hvac_terminal_joint_success_rate", "candidate paper_metrics"
+    ) / 100.0
+    pred_hvac_joint = _require_finite_number(
+        predictive["paper_metrics"],
+        "hvac_terminal_joint_success_rate",
+        "predictive paper_metrics",
+    ) / 100.0
     hvac_joint_threshold = pred_hvac_joint - 0.05
     s7 = cand_hvac_joint >= hvac_joint_threshold - atol
     conditions["hvac_joint_no_worse_than_predictive_5pp"] = {
@@ -344,8 +398,12 @@ def evaluate_p2p_value_gate(
     if not s7:
         all_passed = False
 
-    cand_late_power = pm.get("hvac_late_power_p95_kw", 0.0)
-    pred_late_power = predictive["paper_metrics"].get("hvac_late_power_p95_kw", 0.0)
+    cand_late_power = _require_finite_number(
+        pm, "hvac_late_power_p95_kw", "candidate paper_metrics"
+    )
+    pred_late_power = _require_finite_number(
+        predictive["paper_metrics"], "hvac_late_power_p95_kw", "predictive paper_metrics"
+    )
     late_power_threshold = pred_late_power * 1.05 if pred_late_power > 0.0 else 35.0
     s8 = cand_late_power <= late_power_threshold + atol
     conditions["hvac_late_power_no_worse_than_predictive_5pct"] = {
@@ -357,8 +415,12 @@ def evaluate_p2p_value_gate(
     if not s8:
         all_passed = False
 
-    mill_success = pm.get("mill_terminal_success_rate", 0.0) / 100.0
-    mill_prod = pm.get("mill_production_completion_rate", 0.0) / 100.0
+    mill_success = _require_finite_number(
+        pm, "mill_terminal_success_rate", "paper_metrics"
+    ) / 100.0
+    mill_prod = _require_finite_number(
+        pm, "mill_production_completion_rate", "paper_metrics"
+    ) / 100.0
     s9 = (mill_success >= 0.995 - atol) or (mill_prod >= 0.995 - atol)
     conditions["mill_terminal_or_production_ge_99_5pct"] = {
         "passed": s9,
@@ -370,8 +432,10 @@ def evaluate_p2p_value_gate(
         all_passed = False
 
     # 3. Economic Guardrails (Spec Section 16.3)
-    cand_cost = pm.get("total_operating_cost_day", 0.0)
-    ref_cost = reference["paper_metrics"].get("total_operating_cost_day", 0.0)
+    cand_cost = _require_finite_number(pm, "total_operating_cost_day", "candidate paper_metrics")
+    ref_cost = _require_finite_number(
+        reference["paper_metrics"], "total_operating_cost_day", "reference paper_metrics"
+    )
     cost_threshold = ref_cost * 1.02
     e1 = cand_cost <= cost_threshold + atol
     conditions["economic_cost_le_102pct_reference"] = {
@@ -396,8 +460,10 @@ def evaluate_p2p_value_gate(
     if not e2:
         all_passed = False
 
-    cand_res = float(ts.get("renewable_utilization_rate", 0.0))
-    ref_res = float(reference["test_summary"].get("renewable_utilization_rate", 0.0))
+    cand_res = _require_finite_number(ts, "renewable_utilization_rate", "candidate test_summary")
+    ref_res = _require_finite_number(
+        reference["test_summary"], "renewable_utilization_rate", "reference test_summary"
+    )
     res_threshold = ref_res - 0.005
     e3 = cand_res >= res_threshold - atol
     conditions["economic_res_utilization_within_0_5pct"] = {

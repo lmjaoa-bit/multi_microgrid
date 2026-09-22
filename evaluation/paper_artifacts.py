@@ -104,6 +104,7 @@ def calculate_paper_metrics(
     required.extend([
         "mg1_silo_level_t", "mg1_mill_production_tph",
         "mg2_t_air_c", "mg2_t_mass_c", "mg2_t_out_c", "mg2_occupied",
+        "mg2_hvac_effective_signed_power_kw",
         "mg3_ev_soc", "mg3_ev_effective_power_kw",
     ])
     _require_columns(hourly, required)
@@ -200,10 +201,17 @@ def calculate_paper_metrics(
         + (mass_gap - mass_tolerance).clip(lower=0.0) * float(hvac["c_mass_kwh_per_c"]) / mass_cop
     )
     comfort_rate = float((occupied_violation <= 1e-9).mean()) if len(occupied_violation) else 1.0
+    episode_length = int(env.get("episode_length", 24))
+    late_mask = ordered["hour"] >= (episode_length - 2)
+    late_power = ordered.loc[late_mask, "mg2_hvac_effective_signed_power_kw"]
+    if late_power.empty or not np.all(np.isfinite(late_power)):
+        raise ValueError("Paper metrics require finite mg2_hvac_effective_signed_power_kw for late hours")
+    late_power_p95 = float(np.quantile(late_power.abs(), 0.95))
     rows.extend([
         _metric("hvac_occupied_comfort_rate", "MG2 HVAC", "Occupied comfort compliance rate", "%", comfort_rate, "higher"),
         _metric("hvac_occupied_degree_hours", "MG2 HVAC", "Occupied temperature violation", "°C·h/occupied day", occupied_violation.sum() / occupied_days, "lower"),
         _metric("hvac_terminal_joint_success_rate", "MG2 HVAC", "Joint terminal thermal success rate", "%", ((air_gap <= air_tolerance + 1e-12) & (mass_gap <= mass_tolerance + 1e-12)).mean(), "higher"),
+        _metric("hvac_late_power_p95_kw", "MG2 HVAC", "Late HVAC absolute power p95", "kW", late_power_p95, "lower"),
     ])
 
     ev = microgrids["mg3"]["dr"]

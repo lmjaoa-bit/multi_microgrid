@@ -344,3 +344,15 @@ def test_comparison_cli_builds_table_from_explicit_runs(tmp_path: Path) -> None:
 
     assert result == 0
     assert (output / "performance_comparison.png").exists()
+
+
+def test_paper_metrics_include_hvac_late_power_p95() -> None:
+    hourly = _hourly_fixture()
+    hourly.loc[hourly["hour"].isin([22, 23]), "mg2_hvac_effective_signed_power_kw"] = [4.0, -6.0]
+    daily = pd.DataFrame({"date": ["2018-01-01"], "algorithm_team_profit": [-100.0]})
+
+    metrics = calculate_paper_metrics(hourly, daily, deepcopy(_environment_config()))
+    values = dict(zip(metrics["metric_id"], metrics["value"], strict=True))
+
+    assert "hvac_late_power_p95_kw" in values
+    assert np.isclose(values["hvac_late_power_p95_kw"], 5.9, rtol=0.1)
