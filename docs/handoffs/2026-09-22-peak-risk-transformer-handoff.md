@@ -84,3 +84,17 @@ pytest tests/test_matd3_hierarchical_transformer_peak_risk.py -k "plugin or conf
 
 Do not launch a long experiment until every plan task, `pytest -q`, the short full pipeline smoke test, baseline-integrity check, and runtime gate pass.
 
+
+
+## 2026-09-22 implementation reconciliation: peak-critic width
+
+The design draft proposed `critic_hidden_dims: [64, 64]` while also making the
+peak critic parameter budget a hard requirement of at most 40% of one parent
+centralized twin critic. At the repository's real global-state and joint-action
+dimensions, independent twin `[64,64]` peak networks contain 46,338 parameters
+versus 109,058 for one parent twin critic, or 42.49%.
+
+The production implementation therefore uses `[60,60]`, which retains the
+approved two-hidden-layer independent-twin architecture while reducing the
+ratio to 42,962 / 109,058 = 39.40%. The 40% budget is treated as the stricter
+requirement because it is part of the training-overhead acceptance contract.
