@@ -7,12 +7,31 @@ from utils.metrics_collector import json_ready, write_json
 
 
 class TrainingHistoryJournal:
-    def __init__(self, path):
+    def __init__(self, path, *, resume=False, completed_records=None):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        # A run owns its journal. Never silently append another run to it.
-        with self.path.open("x", encoding="utf-8"):
-            pass
+        if resume:
+            if not self.path.is_file():
+                raise FileNotFoundError(f"Training history journal not found: {self.path}")
+            if completed_records is not None:
+                count = int(completed_records)
+                if count < 0:
+                    raise ValueError("completed_records must be non-negative")
+                lines = self.path.read_bytes().splitlines(keepends=True)
+                if len(lines) < count or any(not line.endswith(b"\n") for line in lines[:count]):
+                    raise ValueError("Training history journal is shorter than the durable cursor")
+                for line in lines[:count]:
+                    json.loads(line)
+                temporary = self.path.with_name(f".{self.path.name}.tmp")
+                try:
+                    temporary.write_bytes(b"".join(lines[:count]))
+                    temporary.replace(self.path)
+                finally:
+                    temporary.unlink(missing_ok=True)
+        else:
+            # A run owns its journal. Never silently append another run to it.
+            with self.path.open("x", encoding="utf-8"):
+                pass
 
     def append(self, record):
         clean, invalid = json_ready(record)

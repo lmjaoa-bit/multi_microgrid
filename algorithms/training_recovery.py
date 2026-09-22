@@ -13,7 +13,7 @@ from algorithms.matd3.replay_buffer import Transition
 
 
 def _temporary_path(target: Path) -> Path:
-    return target.with_name(f".{target.name}.{uuid4().hex}.tmp")
+    return target.with_name(f".{target.name}.tmp")
 
 
 def _atomic_torch_save(payload: Any, path: str | Path) -> None:

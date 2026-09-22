@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
+import json
 import math
 import platform
 import subprocess
 import sys
 import time
+from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping, Sequence
@@ -26,6 +27,13 @@ from evaluation.plotting import generate_figures
 from experiments.checkpoint_selector import CheckpointCandidate, CheckpointSelector
 from experiments.layout import ExperimentLayout
 from experiments.profiles import resolve_training_args, experiment_contract
+from experiments.training_recovery import (
+    config_text_hash,
+    ensure_recoverable,
+    validate_resume_directory,
+    write_run_status,
+    write_training_error,
+)
 from utils.metrics_collector import EpisodeMetricsCollector, write_json
 from utils.training_history import TrainingHistoryJournal
 from utils.torch_runtime import configure_torch_runtime
@@ -85,6 +93,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-validation", action="store_true")
     parser.add_argument("--no-milp", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-dashboard", action="store_true")
+    parser.add_argument(
+        "--resume-run",
+        type=Path,
+        help="Resume a supported interrupted run in its existing directory",
+    )
     return parser
 
 
@@ -283,13 +296,36 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         raise ValueError("validation.interval must be positive")
 
     output_override = getattr(args, "output", None)
-    layout = ExperimentLayout.create(
-        getattr(args, "output_root", "outputs"),
-        spec.slug,
-        spec.display_name,
-        args.seed,
-        algorithm_root_override=output_override,
-    )
+    resume_requested = getattr(args, "resume_run", None) is not None
+    if output_override is not None:
+        expected_algorithm_root = Path(output_override).resolve()
+    else:
+        expected_algorithm_root = Path(getattr(args, "output_root", "outputs")).resolve() / spec.slug
+    if resume_requested:
+        resume_dir = validate_resume_directory(
+            Path(args.resume_run), expected_algorithm_root / "runs"
+        )
+        checkpoints = resume_dir / "checkpoints"
+        checkpoints.mkdir(exist_ok=True)
+        figures = resume_dir / "figures"
+        figures.mkdir(exist_ok=True)
+        layout = ExperimentLayout(
+            algorithm_root=expected_algorithm_root,
+            runs_root=expected_algorithm_root / "runs",
+            run_id=resume_dir.name,
+            run_dir=resume_dir,
+            checkpoints_dir=checkpoints.resolve(),
+            figures_dir=figures.resolve(),
+            hourly_dir=(resume_dir / "test_hourly_trajectories").resolve(),
+        )
+    else:
+        layout = ExperimentLayout.create(
+            getattr(args, "output_root", "outputs"),
+            spec.slug,
+            spec.display_name,
+            args.seed,
+            algorithm_root_override=output_override,
+        )
     algorithm_root = layout.algorithm_root
     run_id, run_dir = layout.run_id, layout.run_dir
     checkpoints_dir = layout.checkpoints_dir
@@ -298,10 +334,9 @@ def train(args: argparse.Namespace) -> dict[str, object]:
 
     snapshot = {"environment": env_config, "algorithm": algorithm_cfg, "experiment_contract": contract}
     snapshot_text = yaml.safe_dump(snapshot, allow_unicode=True, sort_keys=False)
-    (run_dir / "config_snapshot.yaml").write_text(snapshot_text, encoding="utf-8")
-    config_hash = hashlib.sha256(snapshot_text.encode("utf-8")).hexdigest()
+    config_hash = config_text_hash(snapshot_text)
     start_time = datetime.now().astimezone()
-    metadata: dict[str, Any] = {
+    new_metadata: dict[str, Any] = {
         "run_id": run_id,
         "experiment_contract": contract,
         "algorithm": spec.display_name,
@@ -325,7 +360,36 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "test_episodes": test_episodes, "git_commit": _git_commit(),
         "runtime": runtime_settings,
     }
+    if resume_requested:
+        snapshot_path = run_dir / "config_snapshot.yaml"
+        metadata_path = run_dir / "run_metadata.json"
+        if not snapshot_path.is_file() or not metadata_path.is_file():
+            raise FileNotFoundError("Resume run is missing config_snapshot.yaml or run_metadata.json")
+        saved_hash = config_text_hash(snapshot_path.read_text(encoding="utf-8"))
+        if saved_hash != config_hash:
+            raise ValueError(
+                f"Resume config hash mismatch: saved {saved_hash}, requested {config_hash}"
+            )
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if metadata.get("algorithm_slug") != spec.slug:
+            raise ValueError("Resume algorithm_slug does not match selected algorithm")
+        if int(metadata.get("seed", -1)) != int(args.seed):
+            raise ValueError("Resume seed does not match the saved run")
+        if int(metadata.get("train_episodes", -1)) != training_episodes:
+            raise ValueError("Resume episode count does not match the saved run")
+        metadata["resume_count"] = int(metadata.get("resume_count", 0)) + 1
+        metadata["end_time"] = None
+    else:
+        (run_dir / "config_snapshot.yaml").write_text(snapshot_text, encoding="utf-8")
+        metadata = new_metadata
     write_json(run_dir / "run_metadata.json", metadata)
+    write_json(algorithm_root / "latest_run.json", {
+        "algorithm_slug": spec.slug,
+        "algorithm_display_name": spec.display_name,
+        "run_id": run_id,
+        "run_directory": str(run_dir),
+    })
+    write_run_status(run_dir, "RUNNING", completed_episode=0, resumed=resume_requested)
 
     env = MultiMicrogridEnv(env_config, split="train")
     algorithm = spec.create(env, algorithm_cfg, device=args.device, seed=args.seed)
@@ -336,6 +400,20 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     replay_cap = int(settings.get("replay_capacity", 200_000))
     rng = np.random.default_rng(args.seed)
     ids = env.agent_ids
+    recovery_cfg = dict(settings.get("training_recovery", {}))
+    recoverable = None
+    if hasattr(algorithm, "save_training_state") and hasattr(algorithm, "load_training_state"):
+        recoverable = ensure_recoverable(algorithm)
+    if resume_requested and recoverable is None:
+        raise ValueError(f"Algorithm {spec.slug} does not support resumable training")
+    recovery_enabled = recoverable is not None and bool(recovery_cfg.get("enabled", True))
+    recovery_interval = int(
+        recovery_cfg.get("snapshot_interval_episodes", validation_interval)
+    )
+    if recovery_enabled and recovery_interval <= 0:
+        raise ValueError("training_recovery.snapshot_interval_episodes must be positive")
+    recovery_dir = checkpoints_dir / "training_state"
+    durable_recovery_point: str | None = None
 
     validation_env = MultiMicrogridEnv(env_config, split="val") if validation_enabled else None
     validation_days = (
@@ -344,15 +422,62 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     if validation_days_limit is not None:
         validation_days = validation_days[:max(1, int(validation_days_limit))]
 
-    history: list[dict[str, Any]] = []
-    history_journal = (TrainingHistoryJournal(run_dir / "training_history.jsonl")
-                       if incremental_history else None)
-    validation_history: list[dict[str, Any]] = []
-    total_steps = 0
+    progress: dict[str, Any] = {}
+    if resume_requested:
+        progress = recoverable.load_training_state(recovery_dir)  # type: ignore[union-attr]
+        durable_recovery_point = str(recovery_dir / "manifest.json")
+
+    start_episode = int(progress.get("completed_episode", 0))
+    history_path = run_dir / "training_history.json"
+    history: list[dict[str, Any]] = (
+        list(json.loads(history_path.read_text(encoding="utf-8")))
+        if resume_requested and history_path.is_file()
+        else []
+    )
+    if len(history) < start_episode:
+        raise ValueError(
+            f"Training history has {len(history)} rows, shorter than recovery cursor {start_episode}"
+        )
+    history = history[:start_episode]
+    if resume_requested:
+        write_json(history_path, history)
+    journal_path = run_dir / "training_history.jsonl"
+    history_journal = None
+    if incremental_history:
+        history_journal = TrainingHistoryJournal(
+            journal_path,
+            resume=resume_requested,
+            completed_records=start_episode if resume_requested else None,
+        )
+    validation_path = run_dir / "validation_history.json"
+    validation_history: list[dict[str, Any]] = (
+        list(json.loads(validation_path.read_text(encoding="utf-8")))
+        if resume_requested and validation_path.is_file()
+        else []
+    )
+    validation_cursor = int(progress.get("validation_history_length", len(validation_history)))
+    if len(validation_history) < validation_cursor:
+        raise ValueError("Validation history is shorter than its recovery cursor")
+    validation_history = validation_history[:validation_cursor]
+    if resume_requested:
+        write_json(validation_path, validation_history)
+    total_steps = int(progress.get("total_steps", 0))
+    if "pipeline_rng_state" in progress:
+        rng.bit_generator.state = progress["pipeline_rng_state"]
     selector = CheckpointSelector(validation_cfg.get("selection"))
-    best_candidate: CheckpointCandidate | None = None
-    best_validation_score = -float("inf")
-    best_episode: int | None = None
+    best_candidate_raw = progress.get("best_candidate")
+    best_candidate = (
+        CheckpointCandidate(**best_candidate_raw) if best_candidate_raw is not None else None
+    )
+    best_validation_score_raw = progress.get("best_validation_score")
+    best_validation_score = (
+        float(best_validation_score_raw)
+        if best_validation_score_raw is not None
+        else -float("inf")
+    )
+    best_episode_raw = progress.get("best_episode")
+    best_episode = int(best_episode_raw) if best_episode_raw is not None else None
+    prior_training_seconds = float(progress.get("training_seconds", 0.0))
     train_started = time.perf_counter()
 
     dashboard = AlgorithmTrainingDashboard(
@@ -369,7 +494,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     )
     dashboard.start()
     try:
-        for episode_index in range(training_episodes):
+        for episode_index in range(start_episode, training_episodes):
             episode_started = time.perf_counter()
             observations, reset_info = env.reset(seed=args.seed + episode_index)
             state = reset_info["global_state"]
@@ -472,6 +597,37 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                 save_history = should_validate or (episode_index + 1) % 10 == 0
             if save_history or episode_index + 1 == training_episodes:
                 write_json(run_dir / "training_history.json", history)
+            recovery_due = recovery_enabled and (
+                (episode_index + 1) % recovery_interval == 0
+                or episode_index + 1 == training_episodes
+            )
+            if recovery_due and recoverable is not None:
+                # History and validation artifacts are committed before the
+                # recovery cursor that refers to them.
+                write_json(run_dir / "training_history.json", history)
+                write_json(run_dir / "validation_history.json", validation_history)
+                recovery_progress = {
+                    "completed_episode": episode_index + 1,
+                    "total_steps": total_steps,
+                    "validation_history_length": len(validation_history),
+                    "best_candidate": asdict(best_candidate) if best_candidate is not None else None,
+                    "best_validation_score": (
+                        best_validation_score if math.isfinite(best_validation_score) else None
+                    ),
+                    "best_episode": best_episode,
+                    "pipeline_rng_state": rng.bit_generator.state,
+                    "training_seconds": prior_training_seconds + time.perf_counter() - train_started,
+                }
+                recoverable.save_training_state(recovery_dir, recovery_progress)
+                durable_recovery_point = str(recovery_dir / "manifest.json")
+                write_run_status(
+                    run_dir,
+                    "RUNNING",
+                    completed_episode=episode_index + 1,
+                    total_steps=total_steps,
+                    durable_recovery_point=durable_recovery_point,
+                    resumed=resume_requested,
+                )
             dashboard.update(ep_record)
             if not dashboard.enabled and ((episode_index + 1) % 25 == 0 or episode_index == 0
                                           or should_validate):
@@ -481,19 +637,41 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                     f"MA100 {ep_record['team_profit_ma_100']:.2f} | "
                     f"Best validation {best_validation_score:.2f}"
                 )
+    except BaseException as exc:
+        if history:
+            write_json(run_dir / "training_history.json", history)
+        write_training_error(
+            run_dir,
+            exc,
+            completed_episode=len(history),
+            update_step=int(getattr(algorithm, "update_steps", 0)),
+            durable_recovery_point=durable_recovery_point,
+        )
+        write_run_status(
+            run_dir,
+            "FAILED",
+            completed_episode=len(history),
+            total_steps=total_steps,
+            durable_recovery_point=durable_recovery_point,
+        )
+        raise
     finally:
         dashboard.stop()
-        # A catchable interruption still leaves a compatible snapshot. A hard
-        # process kill can be recovered from complete lines in the journal.
-        if history_journal is not None and history and sys.exc_info()[0] is not None:
-            write_json(run_dir / "training_history.json", history)
+
+    write_run_status(
+        run_dir,
+        "TRAINED",
+        completed_episode=training_episodes,
+        total_steps=total_steps,
+        durable_recovery_point=durable_recovery_point,
+    )
 
     algorithm.save(final_checkpoint)
     if not best_checkpoint.exists():
         algorithm.save(best_checkpoint)
         best_episode = training_episodes
         best_validation_score = float(history[-1]["team_profit"])
-    training_seconds = time.perf_counter() - train_started
+    training_seconds = prior_training_seconds + time.perf_counter() - train_started
     checkpoint_selection = {
         "selection_mode": selector.mode,
         "selection_metric": (
@@ -532,13 +710,37 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     metadata["end_time"] = datetime.now().astimezone().isoformat()
     write_json(run_dir / "run_metadata.json", metadata)
 
-    test_result = evaluate(
-        config_path, algorithm_path, best_checkpoint, split="test",
-        run_milp=not args.no_milp, output_dir=run_dir,
-        checkpoint_metadata=checkpoint_selection, test_seed=args.seed,
-        max_days=test_episodes, device=args.device, algorithm_name=spec.slug,
-        experiment_identity=contract,
+    write_run_status(
+        run_dir,
+        "EVALUATING",
+        completed_episode=training_episodes,
+        total_steps=total_steps,
+        durable_recovery_point=durable_recovery_point,
     )
+    try:
+        test_result = evaluate(
+            config_path, algorithm_path, best_checkpoint, split="test",
+            run_milp=not args.no_milp, output_dir=run_dir,
+            checkpoint_metadata=checkpoint_selection, test_seed=args.seed,
+            max_days=test_episodes, device=args.device, algorithm_name=spec.slug,
+            experiment_identity=contract,
+        )
+    except BaseException as exc:
+        write_training_error(
+            run_dir,
+            exc,
+            completed_episode=training_episodes,
+            update_step=int(getattr(algorithm, "update_steps", 0)),
+            durable_recovery_point=durable_recovery_point,
+        )
+        write_run_status(
+            run_dir,
+            "FAILED",
+            completed_episode=training_episodes,
+            total_steps=total_steps,
+            durable_recovery_point=durable_recovery_point,
+        )
+        raise
     summary = {
         **training_summary,
         "algorithm_slug": spec.slug,
@@ -572,6 +774,13 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         summary["plotting_error"] = f"{type(exc).__name__}: {exc}"
         print(f"TRAINING/TEST SUCCEEDED, PLOTTING FAILED: {type(exc).__name__}: {exc}")
     write_json(run_dir / "summary.json", summary)
+    write_run_status(
+        run_dir,
+        "COMPLETED",
+        completed_episode=training_episodes,
+        total_steps=total_steps,
+        durable_recovery_point=durable_recovery_point,
+    )
 
     dashboard.render_final_summary(
         checkpoint_path=str(best_checkpoint),
