@@ -67,6 +67,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--compare-updates", type=int, default=1000)
     parser.add_argument("--compare-repetitions", type=int, default=3)
     parser.add_argument("--compare-episodes", type=int, default=100)
+    parser.add_argument(
+        "--compare-active-peak", action="store_true",
+        help="Measure the mid-ramp peak Actor branch (synthetic counter advancement, no extra training)",
+    )
+    parser.add_argument("--compare-active-step", type=int, default=0, help=argparse.SUPPRESS)
     parser.add_argument("--compare-worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--device", choices=("cpu", "cuda"), help=argparse.SUPPRESS)
@@ -473,6 +478,16 @@ def _comparison_worker(args: argparse.Namespace) -> dict[str, object]:
     _prefill_replay(env, algorithm, batch_size, args.seed)
     for _ in range(max(8, int(args.warmup_updates))):
         algorithm.update(batch_size)
+    if args.compare_active_step:
+        # Both workers enter the same update phase. The cost Critic is only
+        # warm-started: this measures active-branch compute, not convergence.
+        if args.compare_active_step <= algorithm.update_steps:
+            raise ValueError("active-peak comparison step must exceed actual warmup steps")
+        algorithm.update_steps = args.compare_active_step
+        if getattr(algorithm, "peak_critic_enabled", False):
+            peak_cfg = algorithm.peak_risk_config
+            algorithm.peak_critic_updates = max(
+                algorithm.peak_critic_updates, int(peak_cfg["critic_warmup_updates"]))
     _sync(args.device)
 
     projection_counts = {"due": 0, "not_due": 0}
@@ -552,6 +567,7 @@ def _comparison_worker(args: argparse.Namespace) -> dict[str, object]:
     return {
         "status": "ok", "algorithm": args.algorithm, "device": args.device,
         "algorithm_config": str(cfg_path), "seed": args.seed,
+        "synthetic_active_peak_step": args.compare_active_step or None,
         "update_calls": args.compare_updates, "end_to_end_episodes": args.compare_episodes,
         "due_update_ms": float(np.median(elapsed_by_phase["due"])),
         "not_due_update_ms": float(np.median(elapsed_by_phase["not_due"])),
@@ -573,6 +589,7 @@ def _comparison_subprocess(args: argparse.Namespace, algorithm: str) -> dict[str
         "--compare-updates", str(args.compare_updates),
         "--compare-episodes", str(args.compare_episodes),
         "--warmup-updates", str(args.warmup_updates),
+        "--compare-active-step", str(args.compare_active_step),
         "--seed", str(args.seed), "--device", args.compare_device,
         "--cpu-threads", str(args.cpu_threads or 4), "--interop-threads",
         str(args.interop_threads),
@@ -606,6 +623,17 @@ def _comparison_driver(args: argparse.Namespace) -> int:
                   "replay_capacity", "target_policy_noise", "target_noise_clip"):
         if parent_cfg["algorithm"].get(field) != candidate_cfg["algorithm"].get(field):
             raise ValueError(f"algorithm.{field} differs between parent and candidate")
+    if args.compare_active_peak:
+        peak_cfg = candidate_cfg["algorithm"].get("peak_risk", {})
+        if not peak_cfg.get("enabled") or not peak_cfg.get("critic_enabled"):
+            raise ValueError("--compare-active-peak requires an enabled peak-risk candidate")
+        args.compare_active_step = int(peak_cfg["actor_start_update"]) + max(
+            1, int(peak_cfg["actor_weight_ramp_updates"]) // 2)
+        # Same actor-update parity for both algorithms.
+        args.compare_active_step += (-args.compare_active_step) % int(
+            candidate_cfg["algorithm"]["policy_delay"])
+        if args.compare_active_step <= max(8, int(args.warmup_updates)):
+            raise ValueError("active-peak step must exceed the warmup update count")
 
     parent_rows = []
     candidate_rows = []
@@ -652,6 +680,11 @@ def _comparison_driver(args: argparse.Namespace) -> int:
         "update_calls_per_repetition": args.compare_updates,
         "end_to_end_episodes": args.compare_episodes,
         "repetitions": args.compare_repetitions,
+        "synthetic_active_peak_step": args.compare_active_step or None,
+        "active_peak_measurement_note": (
+            "Only counters advanced to trigger the mid-ramp Actor penalty; the peak Critic "
+            "was not trained for those steps. Throughput check only, not a learning benchmark."
+            if args.compare_active_step else None),
         "median_update_overhead_pct": overhead("median_update_ms"),
         "actor_due_update_overhead_pct": overhead("due_update_ms"),
         "actor_not_due_update_overhead_pct": overhead("not_due_update_ms"),
