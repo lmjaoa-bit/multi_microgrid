@@ -55,7 +55,26 @@ def _saved_run(directory: Path, slug: str, *, peak_advantage: float = 0.0,
     hourly = directory / "test_hourly_trajectories"
     hourly.mkdir()
     for day in days:
-        (hourly / f"{day}.csv").write_text("date,hour\n" + f"{day},0\n")
+        # The physical system peak is 100 kW for the parent and 97 kW
+        # for the candidate; the independently saved DR reference is 100 kW.
+        actual_peak = 100.0 - peak_advantage
+        rows = []
+        for hour in range(24):
+            total_actual = actual_peak if hour == 18 else 40.0
+            total_import = 15.0 - peak_advantage if hour == 18 else 5.0
+            rows.append({
+                "date": day, "hour": hour,
+                **{f"{mg}_actual_load_kw": total_actual / 3.0
+                   for mg in ("mg1", "mg2", "mg3")},
+                **{f"{mg}_grid_import_kw": total_import / 3.0
+                   for mg in ("mg1", "mg2", "mg3")},
+            })
+        _write_csv(
+            hourly / f"{day}.csv",
+            ["date", "hour", *[f"{mg}_actual_load_kw" for mg in ("mg1", "mg2", "mg3")],
+             *[f"{mg}_grid_import_kw" for mg in ("mg1", "mg2", "mg3")]],
+            rows,
+        )
     return directory
 
 
@@ -83,6 +102,7 @@ def test_saved_gate_passes_complete_aligned_finite_evidence(saved_runs):
     assert result["overall_status"] == "PASS"
     assert result["mean_peak_load_reduction_kw"] == pytest.approx(3.0)
     assert result["positive_peak_reduction_day_rate"] == 1.0
+    assert result["mean_grid_import_peak_reduction_kw"] == pytest.approx(3.0)
     assert result["hashes"]["candidate"]["paper_metrics.json"]
 
 
@@ -138,4 +158,24 @@ def test_saved_gate_rejects_missing_safety_and_ineligible_selection(saved_runs):
     training["checkpoint_selection"]["constraint_eligible"] = False
     (candidate / "training_summary.json").write_text(json.dumps(training))
     with pytest.raises(ValueError, match="constraint_eligible"):
+        evaluate_peak_risk_gate(candidate, parent, runtime)
+
+
+def test_gate_rejects_divergent_saved_reference_peak(saved_runs):
+    candidate, parent, runtime = saved_runs
+    file = candidate / "dr_shift_metrics.csv"
+    file.write_text(file.read_text().replace("3.0", "5.0"))
+    with pytest.raises(ValueError, match="DR-reference peak differs"):
+        evaluate_peak_risk_gate(candidate, parent, runtime)
+
+
+def test_gate_rejects_incomplete_or_nonfinite_hourly_physics(saved_runs):
+    candidate, parent, runtime = saved_runs
+    file = next((candidate / "test_hourly_trajectories").glob("*.csv"))
+    text = file.read_text()
+    file.write_text(text.replace(",23,", ",bad,"))
+    with pytest.raises(ValueError, match="hour"):
+        evaluate_peak_risk_gate(candidate, parent, runtime)
+    file.write_text(text.replace(",18,", ",18,nan,", 1))
+    with pytest.raises(ValueError):
         evaluate_peak_risk_gate(candidate, parent, runtime)
