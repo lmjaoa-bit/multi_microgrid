@@ -1,0 +1,33 @@
+name: Peak-risk Transformer verification
+on:
+  push:
+    branches:
+      - codex/peak-risk-transformer-20260922
+    paths:
+      - 'algorithms/matd3_hierarchical_transformer_peak_risk/**'
+      - 'configs/algorithms/matd3_hierarchical_transformer_peak_risk.yaml'
+      - 'tests/test_matd3_hierarchical_transformer_peak_risk.py'
+      - 'experiments/training_pipeline.py'
+      - '.github/workflows/peak-risk-transformer-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  peak-risk-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install torch CPU and requirements
+        run: |
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r requirements.txt
+      - name: Focused peak-risk tests
+        run: pytest tests/test_matd3_hierarchical_transformer_peak_risk.py -q
+      - name: Full regression suite
+        run: pytest -q
