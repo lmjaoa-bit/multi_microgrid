@@ -66,6 +66,41 @@ def select_predictive_actions(
     return actions
 
 
+def select_peak_risk_actions(
+    self: Any,
+    observations: Mapping[str, Any],
+    noise_std: float = 0.0,
+) -> dict[str, np.ndarray]:
+    """Single-step CUDA inference with CPU-prepared peak features.
+
+    Keep the current-observation-only feature contract and latent exploration
+    semantics. Pack raw observation + 14 features into ONE host-to-GPU copy per
+    agent; the 15-token Transformer and predictive physical mapping run on GPU.
+    The batch training/target Actor path remains completely unchanged.
+    """
+    actions: dict[str, np.ndarray] = {}
+    with torch.no_grad():
+        for mg in self.agent_ids:
+            obs_array = np.asarray(observations[mg], dtype=np.float32)
+            obs_cpu = torch.from_numpy(np.ascontiguousarray(obs_array)).unsqueeze(0)
+            feature_cpu = self._cpu_peak_extractors[mg](obs_cpu)
+            packed = torch.cat((obs_cpu, feature_cpu), dim=-1).to(self.device)
+            obs_tensor = packed[:, :obs_cpu.shape[-1]]
+            feature_tensor = packed[:, obs_cpu.shape[-1]:]
+            actor = self.actors[mg]
+            latent = actor.forward_latent_precomputed(obs_tensor, feature_tensor)
+            if noise_std > 0.0:
+                noise = self.rng.normal(0.0, float(noise_std), size=tuple(latent.shape))
+                noise_tensor = torch.as_tensor(noise, dtype=latent.dtype, device=latent.device)
+                noisy_latent = (latent + noise_tensor).clamp(-1.0, 1.0)
+            else:
+                noisy_latent = latent.clamp(-1.0, 1.0)
+            mapped = actor.map_latent_actions(
+                obs_tensor, noisy_latent, collect_diagnostics=False)
+            actions[mg] = mapped.squeeze(0).cpu().numpy().astype(np.float32)
+    return actions
+
+
 def update_peak_risk(self: Any, batch_size: int) -> dict[str, Any]:
     """Fused predictive-DR/peak update with one replay sample and parent projector calls."""
     if len(self.replay) < batch_size:
