@@ -8,6 +8,7 @@ on:
       - 'configs/algorithms/matd3_hierarchical_transformer_peak_risk.yaml'
       - 'tests/test_matd3_hierarchical_transformer_peak_risk.py'
       - 'tests/test_peak_risk_gate.py'
+      - 'tests/test_rollout_constraint_metrics.py'
       - 'scripts/check_peak_risk_gate.py'
       - 'scripts/benchmark_training_runtime.py'
       - 'experiments/training_pipeline.py'
@@ -31,7 +32,7 @@ jobs:
           python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -r requirements.txt
       - name: Focused peak-risk tests
-        run: pytest tests/test_matd3_hierarchical_transformer_peak_risk.py tests/test_peak_risk_gate.py tests/test_runtime_optimizations.py -q
+        run: pytest tests/test_matd3_hierarchical_transformer_peak_risk.py tests/test_peak_risk_gate.py tests/test_runtime_optimizations.py tests/test_rollout_constraint_metrics.py -q
       - name: Benchmark worker smoke for parent and candidate
         run: |
           python scripts/benchmark_training_runtime.py \
