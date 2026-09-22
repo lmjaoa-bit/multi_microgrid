@@ -82,6 +82,40 @@ def _csv_number(row: Mapping[str, str], field: str, source: str) -> float:
     return value
 
 
+
+def _read_hourly_peaks(hourly_dir: Path, dates: set[str]) -> dict[str, dict[str, float]]:
+    """Reconstruct physical daily maxima from 24 saved rows, not DR-reference differences."""
+    result: dict[str, dict[str, float]] = {}
+    actual_fields = tuple(f"{mg}_actual_load_kw" for mg in ("mg1", "mg2", "mg3"))
+    grid_fields = tuple(f"{mg}_grid_import_kw" for mg in ("mg1", "mg2", "mg3"))
+    for day in sorted(dates):
+        source = hourly_dir / f"{day}.csv"
+        with source.open(encoding="utf-8", newline="") as stream:
+            rows = list(csv.DictReader(stream))
+        hours: dict[int, tuple[float, float]] = {}
+        for row in rows:
+            if row.get("date") != day:
+                raise ValueError(f"{source}: hourly date mismatch")
+            hour_raw = _csv_number(row, "hour", str(source))
+            if not hour_raw.is_integer() or int(hour_raw) not in range(24):
+                raise ValueError(f"{source}: invalid hour {hour_raw}")
+            hour = int(hour_raw)
+            if hour in hours:
+                raise ValueError(f"{source}: duplicate hour {hour}")
+            actual_kw = sum(_csv_number(row, col, str(source)) for col in actual_fields)
+            import_kw = sum(_csv_number(row, col, str(source)) for col in grid_fields)
+            if actual_kw < -1e-6 or import_kw < -1e-6:
+                raise ValueError(f"{source}: negative physical system load/import")
+            hours[hour] = (actual_kw, import_kw)
+        if set(hours) != set(range(24)):
+            raise ValueError(f"{source}: expected exactly 24 complete hourly rows")
+        result[day] = {
+            "actual_load_peak_kw": max(values[0] for values in hours.values()),
+            "grid_import_peak_kw": max(values[1] for values in hours.values()),
+        }
+    return result
+
+
 def _load_run(directory: Path, slug: str) -> dict[str, Any]:
     directory = directory.resolve()
     if not directory.is_dir():
@@ -132,12 +166,14 @@ def _load_run(directory: Path, slug: str) -> dict[str, Any]:
     saved_days = {file.stem for file in hourly.glob("*.csv")}
     if saved_days != set(daily):
         raise ValueError(f"{directory}: saved hourly/daily date sets differ")
+    hourly_peaks = _read_hourly_peaks(hourly, set(daily))
     for file in sorted(hourly.glob("*.csv")):
         hashes[f"test_hourly_trajectories/{file.name}"] = _hash(file)
     return {
         "path": str(directory), "metadata": metadata,
         "test": summary, "training": training, "paper": paper_values,
-        "shift": shift, "daily": daily, "hashes": hashes,
+        "shift": shift, "daily": daily, "hourly_peaks": hourly_peaks,
+        "hashes": hashes,
     }
 
 
@@ -175,12 +211,28 @@ def evaluate_peak_risk_gate(candidate_dir: Path, parent_dir: Path,
         }
 
     reduction = np.asarray([
-        _csv_number(candidate["shift"][date], "peak_load_reduction_kw", date)
-        - _csv_number(parent["shift"][date], "peak_load_reduction_kw", date)
+        parent["hourly_peaks"][date]["actual_load_peak_kw"]
+        - candidate["hourly_peaks"][date]["actual_load_peak_kw"]
         for date in dates
     ], dtype=float)
-    # Both runs must share a common fixed rule-reference peak on every date.
-    # The paired difference equals parent physical peak - candidate physical peak.
+    grid_peak_delta = np.asarray([
+        parent["hourly_peaks"][date]["grid_import_peak_kw"]
+        - candidate["hourly_peaks"][date]["grid_import_peak_kw"]
+        for date in dates
+    ], dtype=float)
+    # Independently reconstruct the rule-reference peak implied by each
+    # dr_shift_metrics row. A different reference invalidates the paired study.
+    for date in dates:
+        parent_reference = (
+            parent["hourly_peaks"][date]["actual_load_peak_kw"]
+            + _csv_number(parent["shift"][date], "peak_load_reduction_kw", date)
+        )
+        candidate_reference = (
+            candidate["hourly_peaks"][date]["actual_load_peak_kw"]
+            + _csv_number(candidate["shift"][date], "peak_load_reduction_kw", date)
+        )
+        if not math.isclose(parent_reference, candidate_reference, rel_tol=1e-6, abs_tol=1e-3):
+            raise ValueError(f"{date}: DR-reference peak differs between parent and candidate")
     check("mean_actual_load_peak_reduction_kw", float(reduction.mean()), 0.0, ">")
     check("median_actual_load_peak_reduction_kw", float(np.median(reduction)), 0.0, ">")
     check("positive_peak_reduction_day_rate", float(np.mean(reduction > 0)), 0.60, ">=")
@@ -254,6 +306,13 @@ def evaluate_peak_risk_gate(candidate_dir: Path, parent_dir: Path,
         "p10_peak_load_reduction_kw": float(np.quantile(reduction, .10)),
         "worst_day_peak_increase_kw": float(max(0.0, -reduction.min())),
         "positive_peak_reduction_day_rate": float(np.mean(reduction > 0)),
+        "mean_grid_import_peak_reduction_kw": float(grid_peak_delta.mean()),
+        "candidate_mean_grid_import_peak_kw": float(np.mean([
+            candidate["hourly_peaks"][day]["grid_import_peak_kw"] for day in dates
+        ])),
+        "parent_mean_grid_import_peak_kw": float(np.mean([
+            parent["hourly_peaks"][day]["grid_import_peak_kw"] for day in dates
+        ])),
         "rebound_to_shed_ratio_candidate": candidate["rebound_to_shed_ratio"],
         "rebound_to_shed_ratio_parent": parent["rebound_to_shed_ratio"],
         "mean_team_profit_candidate": profits["candidate"],
