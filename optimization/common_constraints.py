@@ -129,6 +129,7 @@ def solve_dispatch(
     unmet_price = float(cost_cfg["unmet_load_cost_per_kwh"])
     curtail_price = float(cost_cfg["renewable_curtailment_cost_per_kwh"])
     terminal_cfg = config["terminal_soc"]
+    rate = float(terminal_cfg["penalty_per_kwh"])
     p2p_cfg = config["p2p"]
     pair_capacity_kw = float(p2p_cfg["pair_capacity_kw"])
     allow_grid_resale = bool(p2p_cfg["allow_grid_resale"])
@@ -422,7 +423,26 @@ def solve_dispatch(
             operating_profit -= (charge + discharge) * dt * float(battery["degradation_cost_per_kwh"])
             operating_profit -= curtailment * dt * curtail_price + unmet * dt * unmet_price
             profit_by[mg] += float(operating_profit)
-            flexible = float(model.val(dr_power[(mg,t)])) if include_dr else 0.0
+            flexible = 0.0
+            dr_row: dict[str, float] = {}
+            if include_dr:
+                device = dr_devices[mg]
+                if hasattr(device, "initial_silo_t"):
+                    flexible = device.rated_power_kw * float(model.val(dr[(mg,"duty",t)]))
+                    dr_row = {"mill_duty":float(model.val(dr[(mg,"duty",t)])),
+                              "silo_after_t":float(model.val(dr[(mg,"silo",t+1)]))}
+                elif hasattr(device, "initial_t_air"):
+                    heat = float(model.val(dr[(mg,"heat",t)]))
+                    cool = float(model.val(dr[(mg,"cool",t)]))
+                    flexible = heat + cool
+                    dr_row = {"hvac_heating_kw":heat,"hvac_cooling_kw":cool,
+                              "hvac_air_after_c":float(model.val(dr[(mg,"air",t+1)])),
+                              "hvac_mass_after_c":float(model.val(dr[(mg,"mass",t+1)]))}
+                else:
+                    flexible = float(model.val(dr[(mg,"ev_charge",t)]))
+                    dr_row = {"ev_soc_after":float(model.val(dr[(mg,"ev_energy",t+1)]))/
+                              device.capacity_kwh}
+
             rows.append({"timestamp": data.timestamps[t], "microgrid": mg,
                          "base_load_kw": float(data.load_kw[mg][t]),
                          "flexible_load_kw": flexible,
@@ -431,7 +451,8 @@ def solve_dispatch(
                          "soc": value("energy", (mg, t + 1)) / float(battery["capacity_kwh"]),
                          "grid_import_kw": grid_import, "grid_export_kw": grid_export,
                          "p2p_import_kw": incoming, "p2p_export_kw": outgoing,
-                         "curtailment_kw": curtailment, "unmet_load_kw": unmet})
+                         "curtailment_kw": curtailment, "unmet_load_kw": unmet,
+                         **dr_row})
     if apply_terminal_condition and terminal_cfg["mode"] == "penalty":
         for mg in ids:
             penalty = rate * (value("terminal_positive", (mg,)) + value("terminal_negative", (mg,)))
