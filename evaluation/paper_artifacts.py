@@ -425,6 +425,7 @@ def _configure_matplotlib() -> None:
     import matplotlib as mpl
 
     mpl.rcParams.update({
+        "font.family": ["Noto Sans SC", "Microsoft YaHei", "DejaVu Sans"],
         "figure.facecolor": "white", "axes.facecolor": "white",
         "axes.edgecolor": INK, "axes.labelcolor": INK, "axes.titlecolor": INK,
         "xtick.color": INK, "ytick.color": INK, "grid.color": LIGHT_GREY,

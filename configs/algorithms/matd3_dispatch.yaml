@@ -1,4 +1,4 @@
-# Canonical flat Actor; remaining settings match CrossGate.
+# Canonical flat Actor for the MATD3 dispatch experiment.
 algorithm:
   name: matd3_dispatch
   hidden_dims:

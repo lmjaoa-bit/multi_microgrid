@@ -10,8 +10,9 @@ install_diagnostic_sampling(
 
 ALGORITHM_SPEC = AlgorithmSpec(
     slug="matd3_hierarchical_transformer",
-    display_name="Matd3HierarchicalTransformer",
+    display_name="普通 T",
     algorithm_class=Matd3HierarchicalTransformer,
     default_config_path=PROJECT_ROOT / "configs" / "algorithms" / "matd3_hierarchical_transformer.yaml",
     description="MATD3 with 14-token hierarchical spatio-temporal transformer actors, physical bilateral gates, and decoupled dual-action heads.",
+    environment_overrides={"ess_sharing": {"observation_mode": "peer_energy_summary"}},
 )

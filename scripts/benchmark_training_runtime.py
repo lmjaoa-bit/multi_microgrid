@@ -38,7 +38,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--algorithm",
-        default="matd3_transformer",
+        default="matd3_hierarchical_transformer",
         help="Any registered algorithm slug",
     )
     parser.add_argument(

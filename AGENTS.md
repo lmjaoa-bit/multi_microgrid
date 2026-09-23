@@ -119,11 +119,13 @@ physical dispatch, actor/critic updates, or environment constraints.
 - Per-algorithm hyperparameters: `configs/algorithms/<algorithm_slug>.yaml`.
 - The YAML `algorithm.name` must equal the selected plugin slug.
 - Tune an experimental algorithm only in its own YAML file.
-- Current runs use `configs/algorithms/matd3_dispatch.yaml` or `configs/algorithms/crossgate.yaml`.
+- Current runs use `configs/algorithms/matd3_dispatch.yaml` or
+  `configs/algorithms/matd3_hierarchical_transformer.yaml`.
 - `algorithms/matd3/` and `configs/algorithms/matd3.yaml` are permanent source references only.
 - CLI `--algorithm matd3` selects `matd3_dispatch`; do not restore the retired action modes.
-- The only current action design is `single_dispatch`; the global default experiment is `matd3`.
-- User-facing names are MATD3 and CrossGate, without action version numbers.
+- The current action design is `single_dispatch_dr`; the global default experiment is `matd3`.
+- Both current plugins use `peer_energy_summary` observations.
+- User-facing names are MATD3 and 普通 T, without action version numbers.
 
 If an experiment requires an environment or reward change, treat it as a separate cross-algorithm
 study. Do not silently change shared physics or rewards while presenting the result as only an

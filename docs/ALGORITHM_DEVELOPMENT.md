@@ -65,7 +65,7 @@ and the recorded Git state is clean. Then promote the run explicitly:
 
 ```powershell
 python scripts/manage_results.py promote `
-  --run outputs/working_runs/pnn_transformer/runs/<run_id> `
+  --run outputs/working_runs/matd3_hierarchical_transformer/runs/<run_id> `
   --release flexible_load_v1
 ```
 
@@ -147,7 +147,8 @@ MG3 EV charging to its departure target.
 
 ## Current methods
 
-Only MATD3 (`matd3_dispatch`, command alias `matd3`) and CrossGate (`crossgate`) are active.
+Only MATD3 (`matd3_dispatch`, command alias `matd3`) and 普通 T
+(`matd3_hierarchical_transformer`) are active. Both use `peer_energy_summary` for new runs.
 Both use `single_dispatch`; ordinary MATD3 is the global default.
 The canonical `algorithms/matd3/` source and its reference YAML remain unchanged and are not a third selectable method.
 Historical outputs retain their original labels. See [EXPERIMENT_PROFILES.md](EXPERIMENT_PROFILES.md).

@@ -28,7 +28,6 @@ def catalog_root(tmp_path):
         "experiment_profiles",
         "experiment_defaults",
         "cooperative",
-        "cooperative_legacy_pre_dr",
     ):
         source = ROOT / "configs" / (name + ".yaml")
         if source.exists():
@@ -43,29 +42,31 @@ def command(*argv):
 def test_default_and_public_selectors_keep_matd3_default(catalog_root):
     assert default_profile(catalog_root) == "matd3"
     assert resolve_training_args(command(), catalog_root).algorithm == "matd3_dispatch"
-    assert {"matd3_dispatch", "crossgate"}.issubset(set(available_algorithm_names()))
+    assert set(available_algorithm_names()) == {
+        "matd3_dispatch", "matd3_hierarchical_transformer"
+    }
     assert get_algorithm_spec("matd3").slug == "matd3_dispatch"
     assert set(catalog("action_designs")) == {"single_dispatch", "single_dispatch_dr"}
-    assert set(catalog("experiment_profiles")) == {"matd3", "crossgate"}
+    assert set(catalog("experiment_profiles")) == {"matd3", "ordinary_t"}
 
-    for selector in ("--experiment", "--policy"):
-        assert resolve_training_args(command(selector, "crossgate"), catalog_root).algorithm == "crossgate"
+    assert resolve_training_args(command("--experiment", "ordinary_t"), catalog_root).algorithm == "matd3_hierarchical_transformer"
+    assert resolve_training_args(command("--policy", "transformer"), catalog_root).algorithm == "matd3_hierarchical_transformer"
 
-    set_default("crossgate", catalog_root)
-    assert resolve_training_args(command(), catalog_root).algorithm == "crossgate"
+    set_default("ordinary_t", catalog_root)
+    assert resolve_training_args(command(), catalog_root).algorithm == "matd3_hierarchical_transformer"
     assert resolve_training_args(command("--policy", "mlp"), catalog_root).algorithm == "matd3_dispatch"
     set_default(None, catalog_root)
     assert resolve_training_args(command(), catalog_root).algorithm == "matd3_dispatch"
 
 
-def test_matd3_and_crossgate_are_intentionally_on_different_environment_generations():
+def test_matd3_and_ordinary_t_share_the_environment_generation():
     matd3 = profile("matd3")
-    crossgate = profile("crossgate")
+    ordinary_t = profile("ordinary_t")
 
     assert matd3["action_design"] == "single_dispatch_dr"
     assert matd3["environment"] == "cooperative_standard"
-    assert crossgate["action_design"] == "single_dispatch"
-    assert crossgate["environment"] == "cooperative_legacy_pre_dr"
+    assert ordinary_t["action_design"] == "single_dispatch_dr"
+    assert ordinary_t["environment"] == "cooperative_standard"
 
 
 def test_dr_action_design_declares_two_raw_controls():
@@ -96,7 +97,7 @@ def test_invalid_selections_and_conflicts(catalog_root):
     ]:
         with pytest.raises(ValueError):
             resolve_training_args(command(*argv), catalog_root)
-    for slug in ("crossgate_actor", "matd3_single_dispatch", "milp_ess_sharing_mpc"):
+    for slug in ("crossgate", "matd3_single_dispatch", "milp_ess_sharing_mpc"):
         with pytest.raises(KeyError):
             get_algorithm_spec(slug)
     with pytest.raises(ValueError):
@@ -119,22 +120,23 @@ def test_contract_uses_explicit_action_design_instead_of_ess_control_mode():
     assert matd3_contract["action_design"]["raw_action_dim"] == 2
     assert matd3_contract["action_design"]["control_mode"] == "single_dispatch"
 
-    cross_selected = profile("crossgate")
-    cross_cfg_path = cross_selected["config"]
-    cross_cfg = yaml.safe_load(cross_cfg_path.read_text(encoding="utf-8"))
-    cross_spec = get_algorithm_spec(cross_selected["algorithm"])
-    cross_contract = experiment_contract(
-        cross_spec,
-        cross_spec.build_environment_config(cross_cfg),
-        cross_cfg_path,
-        selected_experiment="crossgate",
+    ordinary_selected = profile("ordinary_t")
+    ordinary_cfg_path = ordinary_selected["config"]
+    ordinary_cfg = yaml.safe_load(ordinary_cfg_path.read_text(encoding="utf-8"))
+    ordinary_spec = get_algorithm_spec(ordinary_selected["algorithm"])
+    ordinary_contract = experiment_contract(
+        ordinary_spec,
+        ordinary_spec.build_environment_config(ordinary_cfg),
+        ordinary_cfg_path,
+        selected_experiment="ordinary_t",
     )
-    assert cross_contract["action_design"]["id"] == "single_dispatch"
-    assert cross_contract["action_design"]["raw_action_dim"] == 1
-    assert cross_contract["action_design"]["control_mode"] == "single_dispatch"
+    assert ordinary_contract["policy"] == "transformer"
+    assert ordinary_contract["action_design"]["id"] == "single_dispatch_dr"
+    assert ordinary_contract["action_design"]["raw_action_dim"] == 2
+    assert ordinary_contract["observation_mode"] == matd3_contract["observation_mode"] == "peer_energy_summary"
 
-    assert matd3_contract["resolved_environment_hash"] != cross_contract["resolved_environment_hash"]
-    assert matd3_contract["physical_config_hash"] != cross_contract["physical_config_hash"]
+    assert matd3_contract["resolved_environment_hash"] == ordinary_contract["resolved_environment_hash"]
+    assert matd3_contract["physical_config_hash"] == ordinary_contract["physical_config_hash"]
 
     modified = deepcopy(matd3_cfg)
     modified["p2p"]["pair_capacity_kw"] *= 0.5

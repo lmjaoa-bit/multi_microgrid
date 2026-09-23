@@ -58,6 +58,7 @@ def _apply_style() -> None:
     import matplotlib as mpl
 
     mpl.rcParams.update({
+        "font.family": ["Noto Sans SC", "Microsoft YaHei", "DejaVu Sans"],
         "figure.facecolor": "white",
         "axes.facecolor": "white",
         "axes.edgecolor": INK,

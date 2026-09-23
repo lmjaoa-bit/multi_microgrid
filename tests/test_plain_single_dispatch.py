@@ -1,6 +1,5 @@
 from pathlib import Path
 
-import pytest
 import torch
 from torch import nn
 import yaml
@@ -65,36 +64,15 @@ def test_plain_matd3_uses_two_raw_actions_and_three_effective_critic_controls():
     assert resolved.config.name == "cooperative.yaml"
 
 
-def test_crossgate_remains_on_frozen_pre_dr_contract():
-    selected, spec, env, settings, cross = build("crossgate")
-    assert selected["action_design"] == "single_dispatch"
-    assert selected["config"].name == "cooperative_legacy_pre_dr.yaml"
-    assert env.action_dim == cross.action_dim == 1
-    assert "silo_ratio" not in env.obs_builder.schema("mg1")
-    contract = experiment_contract(
-        spec, env.config, selected["config"], selected_experiment="crossgate"
+def test_plain_and_ordinary_t_use_the_same_physics_and_peer_summary():
+    selected_matd3, spec_matd3, env_matd3, _, _ = build("matd3")
+    selected_t, spec_t, env_t, _, _ = build("ordinary_t")
+    matd3_contract = experiment_contract(
+        spec_matd3, env_matd3.config, selected_matd3["config"], selected_experiment="matd3"
     )
-    assert contract["action_design"]["id"] == "single_dispatch"
-    assert contract["action_design"]["raw_action_dim"] == 1
-
-
-def test_dr_and_legacy_profiles_do_not_claim_identical_physics():
-    selected_dr, spec_dr, env_dr, _, _ = build("matd3")
-    selected_old, spec_old, env_old, _, _ = build("crossgate")
-    dr_contract = experiment_contract(
-        spec_dr, env_dr.config, selected_dr["config"], selected_experiment="matd3"
+    t_contract = experiment_contract(
+        spec_t, env_t.config, selected_t["config"], selected_experiment="ordinary_t"
     )
-    old_contract = experiment_contract(
-        spec_old, env_old.config, selected_old["config"], selected_experiment="crossgate"
-    )
-    assert dr_contract["physical_config_hash"] != old_contract["physical_config_hash"]
-    assert dr_contract["resolved_environment_hash"] != old_contract["resolved_environment_hash"]
-
-
-def test_plain_rejects_legacy_crossgate_checkpoint(tmp_path):
-    _, _, _, _, baseline = build("matd3")
-    _, _, _, _, grouped = build("crossgate")
-    checkpoint = tmp_path / "grouped.pt"
-    grouped.save(checkpoint)
-    with pytest.raises(ValueError, match="different algorithm"):
-        baseline.load(checkpoint)
+    assert env_matd3.observation_dims == env_t.observation_dims
+    assert env_matd3.ess_sharing_observation_mode == env_t.ess_sharing_observation_mode == "peer_energy_summary"
+    assert matd3_contract["physical_config_hash"] == t_contract["physical_config_hash"]

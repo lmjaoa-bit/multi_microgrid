@@ -1,8 +1,4 @@
 # Physical inputs, constraints, prices and rewards live in these YAML files.
 cooperative_standard:
   config: configs/cooperative.yaml
-  description: Heterogeneous industrial-commercial-residential DR environment for plain MATD3 validation.
-
-cooperative_legacy_pre_dr:
-  config: configs/cooperative_legacy_pre_dr.yaml
-  description: Frozen pre-DR environment retained for algorithms not yet migrated to controllable loads.
+  description: Shared heterogeneous DR environment for MATD3 and 普通 T.

@@ -13,11 +13,11 @@ from envs.multi_microgrid_env import MultiMicrogridEnv
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_CONFIG = ROOT / "configs" / "cooperative.yaml"
-ALGORITHMS = ("matd3", "pnn", "matd3_transformer", "pnn_transformer")
+ALGORITHMS = ("matd3", "matd3_hierarchical_transformer")
 
 
 @pytest.mark.parametrize("slug", ALGORITHMS)
-def test_four_algorithm_replay_update_and_checkpoint_smoke(
+def test_two_algorithm_replay_update_and_checkpoint_smoke(
     slug: str, tmp_path: Path
 ) -> None:
     spec = get_algorithm_spec(slug)
@@ -61,4 +61,4 @@ def test_four_algorithm_replay_update_and_checkpoint_smoke(
 
     network = settings["algorithm"].get("network", {})
     if "transformer" in spec.slug:
-        assert network["forecast_horizon"] == 4
+        assert network["forecast_horizon"] == 8

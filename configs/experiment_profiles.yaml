@@ -3,8 +3,8 @@ matd3:
   policy: mlp
   action_design: single_dispatch_dr
   environment: cooperative_standard
-crossgate:
-  algorithm: crossgate
-  policy: crossgate
-  action_design: single_dispatch
-  environment: cooperative_legacy_pre_dr
+ordinary_t:
+  algorithm: matd3_hierarchical_transformer
+  policy: transformer
+  action_design: single_dispatch_dr
+  environment: cooperative_standard
