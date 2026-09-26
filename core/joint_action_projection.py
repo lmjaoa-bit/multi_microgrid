@@ -16,7 +16,7 @@ class JointActionProjector:
     the same physical semantics.
     """
 
-    semantics = "single_dispatch_dr_v1"
+    semantics = "single_dispatch_dr_v2"
 
     def __init__(self, config, schema, normalizers, price_norm):
         self.ids = [str(mg["id"]) for mg in config["microgrids"]]
@@ -48,7 +48,8 @@ class JointActionProjector:
                 raise ValueError(f"{mg}: unsupported DR type {kind!r}")
             if scale_kw <= 0.0:
                 raise ValueError(f"{mg}: DR electrical power scale must be positive")
-            self.dr[mg] = {"type": kind, "scale_kw": scale_kw}
+            self.dr[mg] = {"type": kind, "scale_kw": scale_kw,
+                           "cohorts": bool(dr_cfg.get("cohorts"))}
 
     def _dr_requested(self, raw: torch.Tensor, agent_index: int) -> torch.Tensor:
         if self.dr[self.ids[agent_index]]["type"] == "commercial_hvac":
@@ -76,7 +77,9 @@ class JointActionProjector:
             upper = state[:, self.index[f"{mg}_dr_max"]]
             if torch.any(lower > upper + 1e-7):
                 raise ValueError(f"{mg}: invalid DR feasible interval in global state")
-            effective = torch.maximum(lower, torch.minimum(requested, upper))
+            effective = (lower + requested * (upper - lower)
+                         if self.dr[mg]["cohorts"] else
+                         torch.maximum(lower, torch.minimum(requested, upper)))
             flexible_kw = self._flexible_load_kw(mg, effective)
             load_index = self.index[f"{mg}_load"]
             base_kw = state[:, load_index] * float(self.norm[mg]["load"])

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 class ExternalGrid:
     """Loosely coupled external-grid balancing interface for v1."""
 
-    import_limit_kw: float
+    import_limit_kw: float | None
     export_limit_kw: float
 
     def settle(self, residual_net_kw: float) -> dict[str, float]:
@@ -18,7 +18,7 @@ class ExternalGrid:
             grid_import = unmet = 0.0
         else:
             demand = -net
-            grid_import = min(demand, self.import_limit_kw)
+            grid_import = demand if self.import_limit_kw is None else min(demand, self.import_limit_kw)
             unmet = max(0.0, demand - grid_import)
             grid_export = curtailment = 0.0
         residual = net + grid_import + unmet - grid_export - curtailment

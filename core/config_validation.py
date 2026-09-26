@@ -106,7 +106,12 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if rejected:
         raise ValueError(f"Unsupported P2P configuration keys: {sorted(rejected)}")
     p2p = config["p2p"]
-    _number(p2p.get("pair_capacity_kw"), "p2p.pair_capacity_kw", 1e-9)
+    if p2p.get("pair_capacity_kw") is not None:
+        _number(p2p["pair_capacity_kw"], "p2p.pair_capacity_kw", 1e-9)
+    if not isinstance(p2p.get("allow_ess_to_ess", False), bool):
+        raise ValueError("p2p.allow_ess_to_ess must be boolean")
+    if float(p2p.get("loss_rate", 0.0)) != 0.0:
+        raise ValueError("The energy pool currently requires loss_rate=0")
     if not isinstance(p2p.get("allow_grid_resale"), bool):
         raise ValueError("p2p.allow_grid_resale must be boolean")
 
@@ -138,8 +143,8 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if terminal.get("mode") not in {"none", "penalty", "hard"}:
         raise ValueError("terminal_soc.mode must be none, penalty or hard")
     _number(terminal.get("tolerance"), "terminal_soc.tolerance", 0.0)
-    if action_design == "single_dispatch_dr" and terminal.get("mode") != "penalty":
-        raise ValueError("single_dispatch_dr requires terminal penalty semantics")
+    if action_design == "single_dispatch_dr" and terminal.get("mode") == "hard":
+        raise ValueError("single_dispatch_dr supports none or penalty terminal semantics")
 
     observation = config.get("observation", {})
     horizon = observation.get("future_horizon", 4)
@@ -195,6 +200,8 @@ def validate_config(config: Mapping[str, Any]) -> None:
         if not 0.0 <= soc_min < soc_max <= 1.0 or not soc_min <= initial <= soc_max:
             raise ValueError(f"{mg_id}: invalid SOC bounds or initial SOC")
         for key in ("import_limit_kw", "export_limit_kw"):
+            if key == "import_limit_kw" and mg.get("grid", {}).get(key) is None:
+                continue
             _number(mg.get("grid", {}).get(key), f"{mg_id}.grid.{key}", 0.0)
 
         if action_design == "single_dispatch_dr":

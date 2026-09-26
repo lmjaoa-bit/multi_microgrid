@@ -196,6 +196,8 @@ class EpisodeMetricsCollector:
             "grid_power": [], "battery_power": [],
         }
         self.hourly_rows: list[dict[str, Any]] = []
+        self.ev_sessions: dict[str, list[dict[str, Any]]] = {}
+        self.ev_departure_events: dict[str, list[dict[str, Any]]] = {}
 
     def _economic_step(self, mg: str, info: Mapping[str, Any]) -> dict[str, float]:
         cost = info["costs"][mg]
@@ -210,6 +212,7 @@ class EpisodeMetricsCollector:
             "unmet_load_cost": float(cost.get("unmet_load_cost", 0.0)),
             "renewable_curtailment_cost": float(cost.get("curtailment_cost", 0.0)),
             "terminal_soc_penalty": float(cost.get("terminal_soc_penalty", 0.0)),
+            "ev_departure_penalty": float(cost.get("ev_departure_penalty", 0.0)),
             # Individual accounting includes the internal P2P transfer. Transfers
             # sum to zero, so the sum still equals team physical profit.
             "physical_profit": float(cost.get("physical_profit", 0.0)) + payment,
@@ -271,6 +274,10 @@ class EpisodeMetricsCollector:
         plan = info["plans"][mg]
         dr_plan = info.get("dr_plans", {}).get(mg, {})
         state_after = info.get("dr_state_after", {}).get(mg, {})
+        if mg in info.get("ev_sessions", {}):
+            self.ev_sessions[mg] = [dict(item) for item in info["ev_sessions"][mg]]
+        if mg in info.get("ev_departure_events", {}):
+            self.ev_departure_events[mg] = [dict(item) for item in info["ev_departure_events"][mg]]
         dt = float(self.env.delta_t)
         totals = self.dr_totals[mg]
         totals["flexible_load_energy_kwh"] += float(plan.get("flexible_load_kw", 0.0)) * dt
@@ -299,7 +306,8 @@ class EpisodeMetricsCollector:
         """Re-clear the same DR offers without pair limits for diagnostics only."""
         p2p = info["p2p"]
         actual_total = float(p2p.get("total_p2p_kwh", 0.0))
-        pair_capacity = float(getattr(self.env.energy_pool, "pair_capacity_kw", float("inf")))
+        raw_capacity = getattr(self.env.energy_pool, "pair_capacity_kw", None)
+        pair_capacity = float(raw_capacity) if raw_capacity is not None else math.inf
         pair_usage = {key: 0.0 for key in self.physical_pairs}
         flows = p2p.get("pair_flows_kwh", {})
         dt = max(float(self.env.delta_t), EPSILON)
@@ -316,7 +324,7 @@ class EpisodeMetricsCollector:
             for key in self.physical_pairs
         }
 
-        if not self.dr_enabled or not hasattr(
+        if not math.isfinite(pair_capacity) or not self.dr_enabled or not hasattr(
             self.env.energy_pool, "allocate_structured_unconstrained"
         ):
             return {
@@ -380,8 +388,8 @@ class EpisodeMetricsCollector:
             grid = self.env.grids[mg]
             grid_violation = max(
                 0.0,
-                float(settlement["grid_import_kw"]) - grid.import_limit_kw,
-                float(settlement["grid_export_kw"]) - grid.export_limit_kw,
+                float(settlement["grid_import_kw"]) - grid.import_limit_kw if grid.import_limit_kw is not None else 0.0,
+                float(settlement["grid_export_kw"]) - grid.export_limit_kw if grid.export_limit_kw is not None else 0.0,
             )
             soc_by_mg[mg] = soc_violation
             battery_by_mg[mg] = battery_violation
@@ -700,12 +708,27 @@ class EpisodeMetricsCollector:
             summary.update({
                 "ev_charge_energy_kwh": float(totals["ev_charge_energy_kwh"]),
                 "departure_soc": departure_soc,
-                "target_soc": float(cfg["target_soc"]),
+                "target_soc": float(cfg.get("target_soc", 0.8)),
                 "target_met": bool(
-                    departure_soc is not None and departure_soc >= float(cfg["target_soc"]) - 1e-7
+                    departure_soc is not None and departure_soc >= float(cfg.get("target_soc", 0.8)) - 1e-7
                 ),
                 "target_missed_rate": safe_ratio(totals["target_missed_steps"], self.steps),
             })
+        if kind == "ev_charging" and mg in self.ev_sessions:
+            sessions = self.ev_sessions[mg]
+            events = self.ev_departure_events.get(mg, [])
+            demand = sum(float(item["demand_kwh"]) for item in sessions)
+            shortfall = sum(float(item.get("shortfall_kwh", item.get("ev_departure_shortfall_kwh", 0.0))) for item in events)
+            completed = sum(float(item.get("shortfall_kwh", item.get("ev_departure_shortfall_kwh", 0.0))) <= self.tolerance for item in events)
+            summary.update({
+                "sessions": sessions, "departure_events": events,
+                "demand_kwh": demand, "departure_shortfall_kwh": shortfall,
+                "departure_count": len(events), "completed_group_count": completed,
+                "group_completion_rate": safe_ratio(completed, len(sessions)),
+                "energy_satisfaction_rate": 1.0 - safe_ratio(shortfall, demand),
+                "target_met": completed == len(sessions),
+            })
+            summary.pop("departure_soc", None)
         return summary
 
     def finalize_episode(self) -> dict[str, Any]:
@@ -738,11 +761,15 @@ class EpisodeMetricsCollector:
                 energy[mg]["renewable_used_kwh"], energy[mg]["renewable_available_kwh"]
             )
 
+            energy[mg]["curtailment_kwh"] = energy[mg]["renewable_curtailment_kwh"]
+            energy[mg]["curtailment_rate"] = safe_ratio(energy[mg]["curtailment_kwh"], energy[mg]["renewable_available_kwh"])
+            energy[mg]["renewable_non_curtailment_rate"] = energy[mg]["renewable_utilization_rate"]
+
         p2p_buy = {mg: energy[mg]["p2p_buy_kwh"] for mg in self.agent_ids}
         p2p_sell = {mg: energy[mg]["p2p_sell_kwh"] for mg in self.agent_ids}
-        pair_capacity = float(
-            getattr(self.env.energy_pool, "pair_capacity_kw", float("inf"))
-        )
+        pair_capacity = getattr(self.env.energy_pool, "pair_capacity_kw", None)
+        if pair_capacity is not None and not math.isfinite(float(pair_capacity)):
+            pair_capacity = None
         p2p_stats = {
             "total_energy_kwh": float(self.p2p_total),
             "pair_capacity_kw": pair_capacity,
@@ -827,6 +854,9 @@ class EpisodeMetricsCollector:
             target = float(battery.initial_soc)
             soc_stats[mg] = {
                 "initial_soc": float(values[0]),
+                "initial_energy_kwh": float(values[0]) * battery.capacity_kwh,
+                "final_energy_kwh": terminal * battery.capacity_kwh,
+                "energy_delta_kwh": (terminal - float(values[0])) * battery.capacity_kwh,
                 "min_soc": float(np.min(values)),
                 "max_soc": float(np.max(values)),
                 "terminal_soc": terminal,
@@ -907,6 +937,12 @@ class EpisodeMetricsCollector:
             "economic_breakdown_by_microgrid": economics,
             "energy_statistics_by_microgrid": energy,
             "renewable_utilization_rate": safe_ratio(total_used, total_available),
+            "renewable_non_curtailment_rate": safe_ratio(total_used, total_available),
+            "curtailment_kwh": sum(x["renewable_curtailment_kwh"] for x in energy.values()),
+            "curtailment_rate": safe_ratio(sum(x["renewable_curtailment_kwh"] for x in energy.values()), total_available),
+            "renewable_accounting_definition": "available minus curtailed; includes exports and storage charging, not final internal renewable consumption",
+            "ev_sessions": self.ev_sessions,
+            "ev_departure_events": self.ev_departure_events,
             "p2p_statistics": p2p_stats,
             "p2p_total_energy_kwh": float(self.p2p_total),
             "constraint_statistics": constraints,

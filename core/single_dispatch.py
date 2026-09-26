@@ -12,7 +12,9 @@ class SingleDispatchProjector:
         self.index = {name: i for i, name in enumerate(schema)}
         self.norm, self.price_norm = normalizers, price_norm
         self.batteries = {str(mg["id"]): dict(mg["battery"]) for mg in config["microgrids"]}
-        self.pair_capacity = float(config["p2p"]["pair_capacity_kw"])
+        capacity = config["p2p"].get("pair_capacity_kw")
+        self.pair_capacity = float("inf") if capacity is None else float(capacity)
+        self.allow_ess_to_ess = bool(config["p2p"].get("allow_ess_to_ess", False))
         self.enabled = (config.get("env", {}).get("mode", "cooperative") == "cooperative"
                         and config["p2p"].get("enabled", True)
                         and config.get("ess_sharing", {}).get("ess_p2p_enabled", True))
@@ -38,7 +40,9 @@ class SingleDispatchProjector:
             local = torch.minimum(discharge, deficit)
             offer_raw = (discharge - local).clamp_min(0)
             remaining = (dis_max - local).clamp_min(0)
-            demand = (deficit - local).clamp_min(0) + (charge - surplus).clamp_min(0)
+            demand = (deficit - local).clamp_min(0)
+            if self.allow_ess_to_ess:
+                demand = demand + (charge - surplus).clamp_min(0)
             if f"{mg}_grid_buy_price" in self.index:
                 buy, sell = col("grid_buy_price") * norm["price"], col("grid_sell_price") * norm["price"]
             else:

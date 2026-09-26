@@ -133,7 +133,11 @@ def solve_dispatch(
     terminal_cfg = config["terminal_soc"]
     rate = float(terminal_cfg["penalty_per_kwh"])
     p2p_cfg = config["p2p"]
-    pair_capacity_kw = float(p2p_cfg["pair_capacity_kw"])
+    # Bound unlimited interfaces by total physically available source power.
+    physical_supply = sum(float(np.max(data.renewable_kw[m])) +
+                          float(cfg_by_id[m]["battery"]["max_discharge_kw"]) for m in ids)
+    pair_capacity_kw = (physical_supply if p2p_cfg["pair_capacity_kw"] is None
+                        else float(p2p_cfg["pair_capacity_kw"]))
     allow_grid_resale = bool(p2p_cfg["allow_grid_resale"])
     model = highspy.Highs()
     model.setOptionValue("output_flag", bool(solver_output))
@@ -141,7 +145,9 @@ def solve_dispatch(
     variables: dict[str, dict[tuple[Any, ...], Any]] = {name: {} for name in (
         "energy", "charge", "discharge", "battery_mode", "grid_import", "grid_export",
         "grid_mode", "curtailment", "unmet", "flow", "renewable_export_mode",
-        "terminal_positive", "terminal_negative")}
+        "terminal_positive", "terminal_negative", "res_load", "res_charge", "ess_load",
+        "grid_load", "grid_charge", "res_peer_load", "res_peer_charge", "ess_peer_load",
+        "ess_export_mode")}
 
     def price_at(values: np.ndarray | Mapping[str, np.ndarray], mg: str, t: int) -> float:
         series = values[mg] if isinstance(values, Mapping) else values
@@ -195,7 +201,7 @@ def solve_dispatch(
                                     dr[(mg, "silo", t)] +
                                     (device.production_tph * duty - device.downstream_tph) * dt)
                 gap = dvar("silo_terminal_excess", mg, data.horizon, lb=0.0, ub=inf,
-                           obj=rate * device.rated_power_kw / device.production_tph)
+                           obj=(0.0 if device_cfg.get("terminal_mode") == "none" else rate) * device.rated_power_kw / device.production_tph)
                 model.addConstr(gap >= dr[(mg, "silo", data.horizon)] -
                                 device.initial_silo_t - device.terminal_tolerance_t)
                 model.addConstr(gap >= device.initial_silo_t -
@@ -236,9 +242,9 @@ def solve_dispatch(
                 ):
                     state = dr[(mg,key,data.horizon)]
                     hot = dvar(key+"_terminal_hot",mg,data.horizon,lb=0.0,ub=inf,
-                               obj=rate*heat_capacity/device.cop_cool)
+                               obj=(0.0 if device_cfg.get("terminal_mode") == "none" else rate)*heat_capacity/device.cop_cool)
                     cold = dvar(key+"_terminal_cold",mg,data.horizon,lb=0.0,ub=inf,
-                                obj=rate*heat_capacity/device.cop_heat)
+                                obj=(0.0 if device_cfg.get("terminal_mode") == "none" else rate)*heat_capacity/device.cop_heat)
                     model.addConstr(hot >= state-initial-tolerance)
                     model.addConstr(cold >= initial-state-tolerance)
                     dr_terminal[mg].extend([hot,cold])
@@ -263,6 +269,17 @@ def solve_dispatch(
                                 dr[(mg,"ev_energy",data.horizon)])
                 dr_terminal[mg].append(shortfall)
 
+    import_bounds = {}
+    for mg in ids:
+        device = dr_devices.get(mg)
+        dr_bound = (float(device.rated_power_kw) if hasattr(device, "initial_silo_t") else
+                    max(float(device.heat_max_kw), float(device.cool_max_kw))
+                    if hasattr(device, "initial_t_air") else
+                    float(device.max_charge_kw) if device is not None else 0.0)
+        physical_demand = float(np.max(data.load_kw[mg])) + dr_bound + float(cfg_by_id[mg]["battery"]["max_charge_kw"])
+        configured = cfg_by_id[mg]["grid"]["import_limit_kw"]
+        import_bounds[mg] = physical_demand if configured is None else float(configured)
+
     for mg in ids:
         battery = cfg_by_id[mg]["battery"]
         capacity = float(battery["capacity_kwh"])
@@ -284,7 +301,7 @@ def solve_dispatch(
                             obj=float(battery["degradation_cost_per_kwh"]) * dt, type=continuous)
             battery_mode = add("battery_mode", (mg, t), lb=0.0, ub=1.0, type=integer)
             grid_import = add("grid_import", (mg, t), lb=0.0,
-                              ub=float(cfg_by_id[mg]["grid"]["import_limit_kw"]),
+                              ub=import_bounds[mg],
                               obj=price_at(data.buy_price, mg, t) * dt, type=continuous)
             grid_export = add("grid_export", (mg, t), lb=0.0,
                               ub=float(cfg_by_id[mg]["grid"]["export_limit_kw"]),
@@ -302,7 +319,7 @@ def solve_dispatch(
             model.addConstr(discharge <= float(battery["max_discharge_kw"]) * (1.0 - battery_mode))
             model.addConstr(discharge * dt / float(battery["eta_discharge"])
                             <= variables["energy"][(mg, t)] - minimum)
-            big_m = max(float(cfg_by_id[mg]["grid"]["import_limit_kw"]),
+            big_m = max(import_bounds[mg],
                         float(cfg_by_id[mg]["grid"]["export_limit_kw"]))
             model.addConstr(grid_import <= big_m * grid_mode)
             model.addConstr(grid_export <= big_m * (1.0 - grid_mode))
@@ -318,51 +335,52 @@ def solve_dispatch(
             model, variables["flow"], ids, data.horizon, pair_capacity_kw
         )
 
+    # Source/use ledgers forbid storage-to-storage, storage-to-grid and resale.
+    # Imported renewable power terminates at a load or charger; it cannot be relayed.
     for t in range(data.horizon):
+        if cooperative:
+            for source in ids:
+                for destination in ids:
+                    if source == destination:
+                        continue
+                    key = (source, destination, t)
+                    for name in ("res_peer_load", "res_peer_charge", "ess_peer_load"):
+                        add(name, key, lb=0, ub=pair_capacity_kw, type=continuous)
+                    model.addConstr(variables["flow"][key] == sum(
+                        variables[name][key] for name in
+                        ("res_peer_load", "res_peer_charge", "ess_peer_load")))
+                    if p2p_export_source == "renewable_only":
+                        model.addConstr(variables["ess_peer_load"][key] == 0)
         for mg in ids:
-            incoming = sum((variables["flow"][(other, mg, t)] for other in ids if other != mg), 0.0) if cooperative else 0.0
-            outgoing = sum((variables["flow"][(mg, other, t)] for other in ids if other != mg), 0.0) if cooperative else 0.0
-            if cooperative and not allow_grid_resale:
-                model.addConstr(
-                    outgoing <= pair_capacity_kw * (len(ids) - 1)
-                    * (1.0 - variables["grid_mode"][(mg, t)])
-                )
-            if cooperative and p2p_export_source == "renewable_only":
-                renewable_surplus = max(
-                    0.0,
-                    float(data.renewable_kw[mg][t]) - float(data.load_kw[mg][t]),
-                )
-                local_load_deficit = max(
-                    0.0,
-                    float(data.load_kw[mg][t]) - float(data.renewable_kw[mg][t]),
-                )
-                model.addConstr(variables["discharge"][(mg, t)] <= local_load_deficit)
-                if renewable_surplus <= 1e-12:
-                    model.addConstr(outgoing == 0.0)
-                else:
-                    battery = cfg_by_id[mg]["battery"]
-                    export_mode = variables["renewable_export_mode"][(mg, t)]
-                    maximum_outgoing = pair_capacity_kw * (len(ids) - 1)
-                    model.addConstr(outgoing <= maximum_outgoing * (1.0 - export_mode))
-                    model.addConstr(
-                        outgoing + variables["charge"][(mg, t)]
-                        <= renewable_surplus
-                        + float(battery["max_charge_kw"]) * export_mode
-                    )
-            if include_dr and cooperative:
-                # A source-aware relaxation: peer exports must be backed by
-                # renewable surplus before flexible demand or ESS discharge.
-                # The actual local-first sequential pool is still stricter.
-                model.addConstr(outgoing <= max(0.0,
-                    float(data.renewable_kw[mg][t]) - float(data.load_kw[mg][t])) +
-                    variables["discharge"][(mg,t)])
-            model.addConstr(float(data.renewable_kw[mg][t]) + variables["discharge"][(mg, t)]
-                            + variables["grid_import"][(mg, t)] + incoming + variables["unmet"][(mg, t)]
-                            == float(data.load_kw[mg][t]) +
-                            (dr_power[(mg,t)] if include_dr else 0.0) +
-                            variables["charge"][(mg, t)]
-                            + variables["grid_export"][(mg, t)] + outgoing
-                            + variables["curtailment"][(mg, t)])
+            key = (mg, t)
+            for name in ("res_load", "res_charge", "ess_load", "grid_load", "grid_charge"):
+                add(name, key, lb=0, ub=inf, type=continuous)
+            def peer_sum(name: str, incoming: bool = False) -> Any:
+                return sum((variables[name][(other,mg,t) if incoming else (mg,other,t)]
+                            for other in ids if other != mg), 0.0) if cooperative else 0.0
+            res_out = peer_sum("res_peer_load") + peer_sum("res_peer_charge")
+            ess_out = peer_sum("ess_peer_load")
+            peer_load = peer_sum("res_peer_load", True) + peer_sum("ess_peer_load", True)
+            model.addConstr(float(data.renewable_kw[mg][t]) ==
+                variables["res_load"][key] + variables["res_charge"][key] + res_out +
+                variables["grid_export"][key] + variables["curtailment"][key])
+            model.addConstr(variables["discharge"][key] == variables["ess_load"][key] + ess_out)
+            model.addConstr(variables["grid_import"][key] ==
+                            variables["grid_load"][key] + variables["grid_charge"][key])
+            model.addConstr(variables["charge"][key] == variables["res_charge"][key] +
+                            variables["grid_charge"][key] + peer_sum("res_peer_charge", True))
+            model.addConstr(float(data.load_kw[mg][t]) + (dr_power[key] if include_dr else 0) ==
+                variables["res_load"][key] + variables["ess_load"][key] +
+                variables["grid_load"][key] + peer_load + variables["unmet"][key])
+            if cooperative:
+                if not allow_grid_resale:
+                    model.addConstr(res_out + ess_out <= pair_capacity_kw * max(0,len(ids)-1) *
+                                    (1-variables["grid_mode"][key]))
+                export_mode = add("ess_export_mode", key, lb=0, ub=1, type=integer)
+                model.addConstr(ess_out <= float(cfg_by_id[mg]["battery"]["max_discharge_kw"]) * export_mode)
+                # An ESS seller first supplies its entire local load deficit.
+                model.addConstr(variables["grid_load"][key] + peer_load + variables["unmet"][key]
+                                <= import_bounds[mg] * (1-export_mode))
     tolerance = float(terminal_cfg["tolerance"])
     rate = float(terminal_cfg["penalty_per_kwh"])
     if apply_terminal_condition and terminal_cfg["mode"] != "none":
@@ -475,6 +493,8 @@ def solve_dispatch(
     if include_dr:
         for mg in ids:
             device = dr_devices[mg]
+            if cfg_by_id[mg]["dr"].get("terminal_mode") == "none" and not getattr(device, "cohort_mode", False):
+                continue
             if hasattr(device, "initial_silo_t"):
                 excess = max(0.0, abs(float(model.val(dr[(mg,"silo",data.horizon)])) -
                                      device.initial_silo_t) - device.terminal_tolerance_t)

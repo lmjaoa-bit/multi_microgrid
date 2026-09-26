@@ -86,6 +86,7 @@ def evaluate_day_coalitions(
                 members,
                 cooperative=len(members) > 1,
                 solver_output=solver_output,
+                include_dr=all(m.get("dr") for m in cfg["microgrids"] if m["id"] in members),
             )
         except Exception as exc:  # one failed coalition invalidates only this day's allocation
             values[key] = None

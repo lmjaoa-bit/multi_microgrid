@@ -16,10 +16,12 @@ class CooperativeEnergySharing:
     """Deterministic, lossless sharing pool coordinated from physical imbalances."""
 
     def __init__(self, delta_t: float = 1.0, enabled: bool = True,
-                 pair_capacity_kw: float = float("inf")) -> None:
+                 pair_capacity_kw: float | None = None,
+                 allow_ess_to_ess: bool = False) -> None:
         self.delta_t = float(delta_t)
         self.enabled = bool(enabled)
-        self.pair_capacity_kw = float(pair_capacity_kw)
+        self.pair_capacity_kw = float("inf") if pair_capacity_kw is None else float(pair_capacity_kw)
+        self.allow_ess_to_ess = bool(allow_ess_to_ess)
         if self.pair_capacity_kw <= 0.0:
             raise ValueError("pair_capacity_kw must be positive")
 
@@ -265,7 +267,8 @@ class CooperativeEnergySharing:
         stage(remaining_res, remaining_load, "renewable_p2p_sell_kw", "p2p_to_load_kw")
         stage(remaining_ess, remaining_load, "ess_p2p_sell_kw", "p2p_to_load_kw")
         stage(remaining_res, remaining_charge, "renewable_p2p_sell_kw", "p2p_to_battery_kw")
-        stage(remaining_ess, remaining_charge, "ess_p2p_sell_kw", "p2p_to_battery_kw")
+        if self.allow_ess_to_ess:
+            stage(remaining_ess, remaining_charge, "ess_p2p_sell_kw", "p2p_to_battery_kw")
 
         pair_flows = {key: power * self.delta_t for key, power in flows_kw.items()}
         for mg in ids:
