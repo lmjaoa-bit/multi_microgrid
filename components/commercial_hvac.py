@@ -5,6 +5,11 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from components.hvac_viability import (
+    HVACForecastSnapshot,
+    HVACViabilityResult,
+    solve_hvac_viability,
+)
 from components.controllable_load import (
     clipped_raw,
     delivered_fraction as clamp_delivered_fraction,
@@ -61,6 +66,9 @@ class CommercialHVACDR:
         self.last_projection = False
         self._bounds_cache_key: tuple[int, float, float] | None = None
         self._bounds_cache_value: tuple[float, float] | None = None
+        self.forecast_viability = bool(config.get("forecast_viability", False))
+        self._viability_result: HVACViabilityResult | None = None
+        self._viability_t: int | None = None
 
     @property
     def q_min_kw(self) -> float:
@@ -73,6 +81,8 @@ class CommercialHVACDR:
     def _invalidate_bounds_cache(self) -> None:
         self._bounds_cache_key = None
         self._bounds_cache_value = None
+        self._viability_result = None
+        self._viability_t = None
 
     def reset(self, episode_frame: pd.DataFrame, base_load_kw: np.ndarray) -> None:
         if len(episode_frame) < self.episode_length:
@@ -175,12 +185,51 @@ class CommercialHVACDR:
         closest = float(np.clip(0.5 * (low + high), self.q_min_kw, self.q_max_kw))
         return closest, closest
 
+
+    def prepare_viability(
+        self, t: int, snapshot: HVACForecastSnapshot
+    ) -> HVACViabilityResult:
+        if not self.forecast_viability:
+            raise RuntimeError("HVAC forecast viability is not enabled")
+        if self._viability_t == int(t) and self._viability_result is not None:
+            if self._viability_result.snapshot_id == snapshot.snapshot_id:
+                return self._viability_result
+        result = solve_hvac_viability(
+            self.t_air,
+            self.t_mass,
+            snapshot,
+            config=self.config,
+            delta_t=self.delta_t,
+        )
+        self._viability_t = int(t)
+        self._viability_result = result
+        self._bounds_cache_key = (
+            int(t), round(float(self.t_air), 10), round(float(self.t_mass), 10)
+        )
+        self._bounds_cache_value = (
+            float(result.min_signed_power_kw),
+            float(result.max_signed_power_kw),
+        )
+        if not result.feasible:
+            self.comfort_infeasible = True
+        return result
+
     def feasible_bounds(self, t: int) -> tuple[float, float]:
         if not 0 <= int(t) < self.episode_length:
             return (0.0, 0.0)
         key = (int(t), round(float(self.t_air), 10), round(float(self.t_mass), 10))
         if self._bounds_cache_key == key and self._bounds_cache_value is not None:
             return self._bounds_cache_value
+
+        if self.forecast_viability:
+            if self._viability_t != int(t) or self._viability_result is None:
+                raise RuntimeError(
+                    "HVAC viability bounds were not prepared from the current forecast snapshot"
+                )
+            return (
+                float(self._viability_result.min_signed_power_kw),
+                float(self._viability_result.max_signed_power_kw),
+            )
 
         q_low, q_high = self._one_step_bounds_q(t)
         result = (
@@ -310,4 +359,24 @@ class CommercialHVACDR:
             "thermal_recovery_pressure": float(recovery_pressure),
             "comfort_infeasible": float(self.comfort_infeasible),
             "terminal_thermal_infeasible": float(self.terminal_thermal_infeasible),
+            "hvac_viability_feasible": (
+                float(self._viability_result.feasible)
+                if self._viability_result is not None else 1.0
+            ),
+            "hvac_viability_current_min_slack_c": (
+                float(self._viability_result.current_min_slack_c)
+                if self._viability_result is not None else 0.0
+            ),
+            "hvac_viability_future_min_slack_sum_c": (
+                float(self._viability_result.future_min_slack_sum_c)
+                if self._viability_result is not None else 0.0
+            ),
+            "hvac_viability_status": (
+                self._viability_result.status
+                if self._viability_result is not None else "legacy_one_step"
+            ),
+            "hvac_forecast_snapshot_id": (
+                self._viability_result.snapshot_id
+                if self._viability_result is not None else ""
+            ),
         }

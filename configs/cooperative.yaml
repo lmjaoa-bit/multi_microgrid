@@ -114,6 +114,7 @@ microgrids:
     dr:
       type: commercial_hvac
       terminal_mode: none
+      forecast_viability: true
       r_out_air_c_per_kw: 0.22
       r_air_mass_c_per_kw: 0.08
       c_air_kwh_per_c: 15.0

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+import hashlib
 import numpy as np
 import pandas as pd
 
@@ -19,6 +20,9 @@ class SharedForecastProvider:
         self.profiles = profiles
         self.agent_ids = list(profiles.agent_ids)
         self.future_h = int(config.get("observation", {}).get("future_horizon", 4))
+        self.forecast_horizon = max(
+            self.future_h, int(config.get("time", {}).get("episode_length", 24))
+        )
         self.noisy = bool(config.get("observation", {}).get("noisy_forecast", True))
         observation = config.get("observation", {})
         self.temporal_correlation = float(
@@ -32,7 +36,7 @@ class SharedForecastProvider:
         self.rng = np.random.default_rng(self.seed)
         self._public_arrays: dict[str, np.ndarray] = {}
         self._local_arrays: dict[str, dict[str, np.ndarray]] = {}
-        self._valid_array = np.empty((0, self.future_h), dtype=np.float64)
+        self._valid_array = np.empty((0, self.forecast_horizon), dtype=np.float64)
         self.context: pd.DataFrame | None = None
         self.deterministic = False
         self.heterogeneous_tariffs = has_heterogeneous_tariffs(config)
@@ -51,7 +55,7 @@ class SharedForecastProvider:
         sigma = self.config.get("observation", {}).get("forecast_sigma_1h", {})
         episode_length = int(self.config.get("time", {}).get("episode_length", 24))
         times = np.arange(episode_length + 1, dtype=np.int64)[:, None]
-        horizons = np.arange(1, self.future_h + 1, dtype=np.int64)[None, :]
+        horizons = np.arange(1, self.forecast_horizon + 1, dtype=np.int64)[None, :]
         raw_indices = times + horizons
         context_valid = raw_indices < len(self.context)
         if self.mask_beyond_episode:
@@ -75,7 +79,7 @@ class SharedForecastProvider:
             correlated[:, 0] = innovations[:, 0]
             rho = self.temporal_correlation
             innovation_scale = np.sqrt(max(0.0, 1.0 - rho * rho))
-            for k in range(1, self.future_h):
+            for k in range(1, self.forecast_horizon):
                 correlated[:, k] = (
                     rho * correlated[:, k - 1]
                     + innovation_scale * innovations[:, k]
@@ -97,8 +101,10 @@ class SharedForecastProvider:
 
         ghi_source = self.context["ghi_w_per_m2"].to_numpy(dtype=np.float64)
         wind_source = self.context["wind_speed_mps"].to_numpy(dtype=np.float64)
-        ghi = ghi_source[indices].copy() * multiplier("ghi")
-        wind_speed = wind_source[indices].copy() * multiplier("wind_speed")
+        ghi_multiplier = multiplier("ghi")
+        wind_multiplier = multiplier("wind_speed")
+        ghi = ghi_source[indices].copy() * ghi_multiplier
+        wind_speed = wind_source[indices].copy() * wind_multiplier
         shared_price = None
         if not self.heterogeneous_tariffs:
             shared_price = (
@@ -131,8 +137,8 @@ class SharedForecastProvider:
             if has_local_weather:
                 pv = np.asarray(exogenous["pv_kw"], dtype=np.float64)[indices].copy()
                 wind = np.asarray(exogenous["wind_kw"], dtype=np.float64)[indices].copy()
-                pv *= multiplier("ghi")
-                wind *= multiplier("wind_speed")
+                pv *= ghi_multiplier
+                wind *= wind_multiplier
                 pv = finish_nonnegative(pv)
                 wind = finish_nonnegative(wind)
             else:
@@ -152,6 +158,12 @@ class SharedForecastProvider:
                 temperature = self.context[column].to_numpy(dtype=np.float64)[indices].copy()
                 temperature += correlated_error("temperature")
                 self._local_arrays[mg_id]["temperature_c"] = finish_signed(temperature)
+                ghi_column = str(dr_cfg.get("ghi_column", "ghi_w_per_m2"))
+                local_ghi = (
+                    self.context[ghi_column].to_numpy(dtype=np.float64)[indices].copy()
+                    * ghi_multiplier
+                )
+                self._local_arrays[mg_id]["ghi_w_per_m2"] = finish_nonnegative(local_ghi)
 
             if self.heterogeneous_tariffs:
                 buy_source = self.context[buy_price_column(mg_id)].to_numpy(dtype=np.float64)
@@ -196,3 +208,76 @@ class SharedForecastProvider:
 
     def combined(self, mg_id: str, t: int, k: int) -> dict[str, float]:
         return {**self.local(mg_id, t, k), **self.public(t, k)}
+
+
+    def hvac_viability_inputs(
+        self, mg_id: str, t: int, episode_length: int, delta_t: float
+    ) -> dict[str, Any]:
+        """Return one immutable-cache view for intervals t..episode_end-1.
+
+        Interval t uses current measured exogenous data.  Later intervals use
+        forecasts frozen at time t; no hidden future truth is consulted after t.
+        """
+        if self.context is None:
+            raise RuntimeError("Forecast provider has not been initialized")
+        mg_id = str(mg_id)
+        start = int(t)
+        end = int(episode_length)
+        if start >= end:
+            return {
+                "snapshot_id": f"{mg_id}:{start}:terminal",
+                "boundary_timestamps": tuple(),
+                "temperature_c": np.empty(0),
+                "ghi_w_per_m2": np.empty(0),
+                "base_load_kw": np.empty(0),
+            }
+        h_count = end - start
+        if h_count - 1 > self.forecast_horizon:
+            raise RuntimeError(
+                "HVAC viability horizon exceeds forecast cache; refusing future truth fallback"
+            )
+        dr_cfg = self.profiles.mg_cfg[mg_id].get("dr", {})
+        temp_column = str(dr_cfg["temperature_column"])
+        ghi_column = str(dr_cfg["ghi_column"])
+        temperatures = np.empty(h_count, dtype=np.float64)
+        ghi = np.empty(h_count, dtype=np.float64)
+        loads = np.empty(h_count, dtype=np.float64)
+        current_ex = self.profiles.exogenous(mg_id, self.context.iloc[start])
+        temperatures[0] = float(self.context.iloc[start][temp_column])
+        ghi[0] = max(0.0, float(self.context.iloc[start][ghi_column]))
+        loads[0] = float(current_ex["load_kw"])
+        for offset in range(1, h_count):
+            if self.valid(start, offset) <= 0.0:
+                raise RuntimeError(
+                    f"HVAC viability forecast missing at t={start}, horizon={offset}"
+                )
+            local = self.local(mg_id, start, offset)
+            temperatures[offset] = float(local["temperature_c"])
+            ghi[offset] = float(local["ghi_w_per_m2"])
+            loads[offset] = float(local["load_kw"])
+
+        boundaries = [
+            str(pd.Timestamp(self.context.iloc[start]["timestamp"]))
+        ]
+        for offset in range(1, h_count + 1):
+            absolute = start + offset
+            if absolute < len(self.context):
+                boundaries.append(
+                    str(pd.Timestamp(self.context.iloc[absolute]["timestamp"]))
+                )
+            else:
+                boundaries.append(str(
+                    pd.Timestamp(boundaries[-1])
+                    + pd.to_timedelta(float(delta_t), unit="h")
+                ))
+        digest = hashlib.sha256()
+        digest.update("|".join(boundaries).encode())
+        for array in (temperatures, ghi, loads):
+            digest.update(np.asarray(array, dtype=np.float64).tobytes())
+        return {
+            "snapshot_id": digest.hexdigest(),
+            "boundary_timestamps": tuple(boundaries),
+            "temperature_c": temperatures,
+            "ghi_w_per_m2": ghi,
+            "base_load_kw": loads,
+        }

@@ -8,6 +8,7 @@ import yaml
 
 from components.controllable_load import build_controllable_load
 from components.commercial_hvac import CommercialHVACDR
+from components.hvac_viability import HVACForecastSnapshot
 from components.ev_charging import EVChargingDR
 from components.industrial_mill import IndustrialMillDR
 from core.action_codec import ActionCodec
@@ -188,10 +189,62 @@ class MultiMicrogridEnv:
             for mg in self.agent_ids
         }
 
+    def _prepare_hvac_viability(self, index: int) -> None:
+        if not self.dr_enabled or not 0 <= int(index) < self.episode_length:
+            return
+        for mg in self.agent_ids:
+            device = self.dr_devices[mg]
+            if not isinstance(device, CommercialHVACDR) or not device.forecast_viability:
+                continue
+            source = self.forecasts.hvac_viability_inputs(
+                mg, int(index), self.episode_length, self.delta_t
+            )
+            timestamps = tuple(source["boundary_timestamps"])
+            occupied = []
+            lows = []
+            highs = []
+            for interval in range(self.episode_length - int(index)):
+                ts_interval = pd.Timestamp(timestamps[interval])
+                is_occupied = (
+                    ts_interval.dayofweek < 5
+                    and ts_interval.hour in device.occupied_hours
+                )
+                occupied.append(is_occupied)
+                ts_result = pd.Timestamp(timestamps[interval + 1])
+                result_occupied = (
+                    ts_result.dayofweek < 5
+                    and ts_result.hour in device.occupied_hours
+                    and int(index) + interval + 1 < self.episode_length
+                )
+                low, high = (
+                    device.occupied_comfort
+                    if result_occupied else device.unoccupied_comfort
+                )
+                lows.append(low)
+                highs.append(high)
+            snapshot = HVACForecastSnapshot(
+                snapshot_id=str(source["snapshot_id"]),
+                boundary_timestamps=timestamps,
+                outside_temperature_c=np.asarray(
+                    source["temperature_c"], dtype=np.float64
+                ),
+                ghi_w_per_m2=np.asarray(
+                    source["ghi_w_per_m2"], dtype=np.float64
+                ),
+                base_load_kw=np.asarray(
+                    source["base_load_kw"], dtype=np.float64
+                ),
+                interval_occupied=np.asarray(occupied, dtype=bool),
+                comfort_low_c=np.asarray(lows, dtype=np.float64),
+                comfort_high_c=np.asarray(highs, dtype=np.float64),
+            )
+            device.prepare_viability(int(index), snapshot)
+
     def _dr_states(self, index: int) -> dict[str, dict[str, float]]:
         if not self.dr_enabled:
             return {}
         bounded = min(max(0, int(index)), self.episode_length)
+        self._prepare_hvac_viability(bounded)
         return {mg: self.dr_devices[mg].state(bounded) for mg in self.agent_ids}
 
     def _battery_flex(self, index: int) -> dict[str, dict[str, float]]:
