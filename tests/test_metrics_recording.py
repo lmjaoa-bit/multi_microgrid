@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+from types import SimpleNamespace
 from pathlib import Path
 
 import numpy as np
@@ -214,3 +215,67 @@ def test_append_actor_diagnostics_supports_heterogeneous_agents(tmp_path: Path) 
     with csv_path.open(encoding="utf-8", newline="") as f:
         reader2 = list(csv.DictReader(f))
     assert len(reader2) == 6
+
+
+def test_ess_offer_energy_accounting_applies_delta_t_once() -> None:
+    battery = SimpleNamespace(soc=0.5, initial_soc=0.5, capacity_kwh=100.0)
+    env = SimpleNamespace(
+        agent_ids=["mg1"],
+        action_design="single_dispatch",
+        delta_t=0.5,
+        cores={"mg1": SimpleNamespace(battery=battery)},
+    )
+    collector = EpisodeMetricsCollector(env)
+    info = {
+        "plans": {
+            "mg1": {
+                "renewable_kw": 0.0,
+                "load_kw": 0.0,
+                "ess_to_local_kw": 0.0,
+                "ess_p2p_offer_uncapped_kw": 30.0,
+                "ess_p2p_offer_projection_reduction_kw": 10.0,
+            }
+        },
+        "settlements": {
+            "mg1": {
+                "grid_import_kw": 0.0,
+                "grid_export_kw": 0.0,
+                "renewable_curtailment_kw": 0.0,
+                "unmet_load_kw": 0.0,
+            }
+        },
+        "devices": {
+            "mg1": {
+                "charge_kw": 0.0,
+                "discharge_kw": 12.0,
+                "throughput_kwh": 6.0,
+            }
+        },
+        "p2p": {
+            "by_microgrid": {
+                "mg1": {
+                    "p2p_buy_kw": 0.0,
+                    "p2p_sell_kw": 12.0,
+                    "renewable_p2p_sell_kw": 0.0,
+                    "ess_p2p_sell_kw": 12.0,
+                    "p2p_to_load_kw": 0.0,
+                    "p2p_to_battery_kw": 0.0,
+                    "renewable_p2p_offer_kw": 0.0,
+                    "ess_p2p_offer_kw": 20.0,
+                    "ess_p2p_unmatched_kw": 8.0,
+                }
+            }
+        },
+    }
+    step = collector._energy_step("mg1", info)
+    assert step["ess_p2p_offer_uncapped_kwh"] == 15.0
+    assert step["ess_p2p_offer_projection_reduction_kwh"] == 5.0
+    assert step["ess_p2p_sell_kwh"] == 6.0
+    assert step["ess_p2p_unmatched_kwh"] == 4.0
+    assert step["ess_p2p_offer_uncapped_kwh"] == (
+        step["ess_p2p_offer_projection_reduction_kwh"]
+        + step["ess_p2p_sell_kwh"]
+        + step["ess_p2p_unmatched_kwh"]
+    )
+    # throughput_kwh is already an energy value from BatteryModel.commit.
+    assert step["battery_throughput_kwh"] == 6.0
