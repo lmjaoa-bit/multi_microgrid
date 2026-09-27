@@ -370,7 +370,7 @@ def summarize_day_services(
             ))))
             shortfalls.append(max(0.0, _float_field(
                 row, f"{mg}_ev_departure_shortfall_kwh", strict=current_schema, missing=missing
-            ))))
+            )))
         departure_count = max(counts, default=0)
         completed_count = max(completed, default=0)
         shortfall = max(shortfalls, default=0.0)
