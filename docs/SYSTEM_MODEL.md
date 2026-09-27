@@ -130,6 +130,21 @@ ESS_ch_actual
 
 P2P 使用实际成交双方外部售/购电价的中间价。内部 P2P 付款预算平衡，只改变个体账面收益分配，不增加团队奖励。
 
+### 4.1 非弃电率不等于联盟内部消纳率
+
+当前新报表显示的 Renewable Non-Curtailment，历史兼容字段名仍可能为 `renewable_utilization_rate`。其定义为：
+
+NonCurtailment = (RenewableAvailable - Curtailment) / RenewableAvailable.
+
+因此该指标包含：
+
+- 本地负荷使用；
+- P2P 供给其他微网；
+- 风光给 ESS 充电；
+- 外送大电网。
+
+所以它回答的是“新能源有没有被弃掉”，不是“新能源是否在联盟内部被吸收”。若研究问题是本地/联盟风光消纳，应另外报告 grid export，并结合来源账本统计联盟内部负荷与储能吸收量，不能仅凭该非弃电率得出内部消纳提高的结论。
+
 ## 5. 三类柔性设备
 
 ### 5.1 MG1 工业磨机
@@ -263,6 +278,18 @@ r_t = sum_i physical_profit(i,t) / 100.
 因此不存在“为了午夜恢复而提前硬投影”的现行规则，也不存在 ESS/磨机/HVAC 日末恢复惩罚。每个测试日表示给定相同日初资源条件下的独立日运营收益，不能直接解释为连续多日库存轨迹或直接年化收益。
 
 EV 离站 shortfall 是服务事件成本，不属于日末恢复约束。
+
+## 8.1 Checkpoint 选择
+
+MATD3 Dispatch 与普通 Transformer 当前使用同一套 constrained-profit 验证选择规则。候选 checkpoint 必须满足：
+
+- strict_feasible_day_rate = 1；
+- unmet_energy_mean_kwh = 0；
+- HVAC comfort rate = 1；
+- mill downstream service completion rate = 1；
+- EV departure success rate = 1。
+
+满足上述服务门槛后再按 validation team profit 选择。由于 ESS/HVAC/磨机的日末恢复在当前配置中关闭，它们的 terminal success 不参与门槛；磨机 production coverage 也不是服务完成率，因此不要求等于 1。
 
 ## 9. MILP 对照边界
 
