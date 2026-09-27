@@ -3,8 +3,11 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+import components.hvac_viability as hvac_viability
+from components.commercial_hvac import CommercialHVACDR
 from components.hvac_viability import (
     HVACForecastSnapshot,
+    HVACViabilitySolverError,
     solve_hvac_viability,
     thermal_linear_coefficients,
 )
@@ -72,3 +75,77 @@ def test_impossible_comfort_is_reported_as_degraded_with_slack():
     assert not result.feasible
     assert result.status=="degraded_infeasible"
     assert result.current_min_slack_c > 0.0
+
+
+def test_solver_failure_is_not_reported_as_feasible(monkeypatch):
+    def boom(*args, **kwargs):
+        raise RuntimeError("synthetic solver failure")
+
+    monkeypatch.setattr(hvac_viability, "_build_model", boom)
+    with pytest.raises(HVACViabilitySolverError, match="solver failure"):
+        solve_hvac_viability(
+            23.0, 23.0, _snapshot(), config=_cfg(), delta_t=1.0
+        )
+
+
+def test_same_snapshot_is_cached_and_hidden_truth_cannot_change_bounds():
+    cfg = {
+        **_cfg(),
+        "terminal_air_tolerance_c": 1.0,
+        "terminal_mass_tolerance_c": 0.3,
+        "temperature_column": "temperature_c",
+        "ghi_column": "ghi_w_per_m2",
+        "occupied_hours": list(range(7, 19)),
+        "occupied_comfort_c": [21.0, 25.0],
+        "unoccupied_comfort_c": [16.0, 30.0],
+        "terminal_mode": "none",
+        "forecast_viability": True,
+    }
+    device = CommercialHVACDR(cfg, delta_t=1.0, episode_length=24)
+    device.t_air = 23.0
+    device.t_mass = 23.0
+
+    snap = _snapshot()
+    first = device.prepare_viability(0, snap)
+
+    # Mutating data that is not part of the frozen forecast snapshot must not
+    # change the already-prepared interval.  This models hidden future truth.
+    device._frame = object()
+    second = device.prepare_viability(0, snap)
+    assert second is first
+    assert second.min_signed_power_kw == pytest.approx(first.min_signed_power_kw)
+    assert second.max_signed_power_kw == pytest.approx(first.max_signed_power_kw)
+
+
+def test_changed_snapshot_invalidates_hvac_viability_cache():
+    cfg = {
+        **_cfg(),
+        "terminal_air_tolerance_c": 1.0,
+        "terminal_mass_tolerance_c": 0.3,
+        "temperature_column": "temperature_c",
+        "ghi_column": "ghi_w_per_m2",
+        "occupied_hours": list(range(7, 19)),
+        "occupied_comfort_c": [21.0, 25.0],
+        "unoccupied_comfort_c": [16.0, 30.0],
+        "terminal_mode": "none",
+        "forecast_viability": True,
+    }
+    device = CommercialHVACDR(cfg, delta_t=1.0, episode_length=24)
+    device.t_air = 23.0
+    device.t_mass = 23.0
+    first = device.prepare_viability(0, _snapshot())
+
+    changed = HVACForecastSnapshot(
+        snapshot_id="changed",
+        boundary_timestamps=_snapshot().boundary_timestamps,
+        outside_temperature_c=np.full(3, -5.0),
+        ghi_w_per_m2=np.zeros(3),
+        base_load_kw=np.full(3, 10.0),
+        interval_occupied=np.zeros(3, dtype=bool),
+        comfort_low_c=np.full(3, 16.0),
+        comfort_high_c=np.full(3, 30.0),
+    )
+    second = device.prepare_viability(0, changed)
+    assert second is not first
+    assert second.snapshot_id == "changed"
+    assert device.state(0)["hvac_forecast_snapshot_id"] == "changed"
