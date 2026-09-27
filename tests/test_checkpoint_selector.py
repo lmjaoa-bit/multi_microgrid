@@ -56,7 +56,7 @@ def test_constrained_profit_eligible_outranks_ineligible():
             "team_profit_mean": 150.0,
             "strict_feasible_day_rate": 1.0,
             "unmet_energy_mean_kwh": 0.0,
-            "hvac_terminal_joint_success_rate": 0.50,
+            "mill_downstream_service_completion_rate": 1.0,
         },
         episode=200,
     )
