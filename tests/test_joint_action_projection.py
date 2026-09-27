@@ -198,6 +198,9 @@ def test_v3_trade_channel_is_actual_peer_sale_not_uncapped_request():
     state[:, index["mg1_load"]] = 0.0
     state[:, index["mg2_load"]] = 0.10
     state[:, index["mg3_load"]] = 0.0
+    for mg in ("mg1", "mg2", "mg3"):
+        state[:, index[f"{mg}_dr_min"]] = 0.0
+        state[:, index[f"{mg}_dr_max"]] = 0.0
     raw = torch.tensor(
         [[[0.4, -1.0], [0.0, -1.0], [0.0, -1.0]]],
         dtype=torch.float32,
