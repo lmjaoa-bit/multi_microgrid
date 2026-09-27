@@ -799,6 +799,59 @@ class MultiMicrogridEnv:
                     f"{mg}: finite import limit is incompatible with renewable-first ledger"
                 )
 
+        source_balance_residuals: dict[str, dict[str, float]] = {}
+        for i, mg in enumerate(self.agent_ids):
+            renewable_source = float(actual_current[mg]["renewable_kw"])
+            renewable_uses = (
+                scalar("res_local_load_kw", i)
+                + float(matrices["res_peer_load_kw"][i, :].sum())
+                + scalar("res_local_charge_kw", i)
+                + float(matrices["res_peer_charge_kw"][i, :].sum())
+                + scalar("renewable_surplus_for_export_kw", i)
+            )
+            load_supply = (
+                scalar("res_local_load_kw", i)
+                + float(matrices["res_peer_load_kw"][:, i].sum())
+                + scalar("ess_local_load_kw", i)
+                + float(matrices["ess_peer_load_kw"][:, i].sum())
+                + scalar("grid_load_kw", i)
+            )
+            charge_supply = (
+                scalar("res_local_charge_kw", i)
+                + float(matrices["res_peer_charge_kw"][:, i].sum())
+                + scalar("grid_charge_kw", i)
+            )
+            discharge_uses = (
+                scalar("ess_local_load_kw", i)
+                + float(matrices["ess_peer_load_kw"][i, :].sum())
+            )
+            external_renewable_use = (
+                float(settlements[mg]["grid_export_kw"])
+                + float(settlements[mg]["renewable_curtailment_kw"])
+            )
+            residuals = {
+                "renewable_source_residual_kw":
+                    renewable_source - renewable_uses,
+                "load_sink_residual_kw":
+                    float(actual_current[mg]["load_kw"]) - load_supply,
+                "charge_sink_residual_kw":
+                    scalar("actual_charge_kw", i) - charge_supply,
+                "discharge_source_residual_kw":
+                    scalar("actual_discharge_kw", i) - discharge_uses,
+                "external_surplus_residual_kw":
+                    scalar("renewable_surplus_for_export_kw", i)
+                    - external_renewable_use,
+            }
+            source_balance_residuals[mg] = {
+                key: float(value) for key, value in residuals.items()
+            }
+            for key, value in residuals.items():
+                if abs(float(value)) > 1e-7:
+                    raise RuntimeError(
+                        f"{mg}: renewable-first {key}={float(value):.6g} kW"
+                    )
+            plans[mg].update(source_balance_residuals[mg])
+
         devices = {
             mg: self.cores[mg].commit(plans[mg]) for mg in self.agent_ids
         }
@@ -914,6 +967,7 @@ class MultiMicrogridEnv:
                 name: value[0].detach().cpu().numpy()
                 for name, value in ledger.items()
             },
+            "source_balance_residuals": source_balance_residuals,
             "settlements": settlements,
             "devices": devices,
             "costs": costs,
