@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import copy
+from pathlib import Path
+
 import pytest
 import torch
+import yaml
 
+from core.config_validation import validate_config
 from core.renewable_first_dispatch import clear_renewable_first
 
 
@@ -194,3 +199,38 @@ def test_offer_accounting_reduction_plus_accepted_plus_unmatched():
     accepted = x["ess_peer_load_kw"][0, 0, :].sum()
     unmatched = x["ess_unmatched_kw"][0, 0]
     assert uncapped == pytest.approx(reduction + accepted + unmatched)
+
+
+def _main_config():
+    path = Path(__file__).resolve().parents[1] / "configs" / "cooperative.yaml"
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("mutation,match", [
+    (
+        lambda cfg: cfg["p2p"].__setitem__("pair_capacity_kw", 75.0),
+        "pair_capacity_kw=null",
+    ),
+    (
+        lambda cfg: cfg["p2p"].__setitem__("allow_grid_resale", True),
+        "allow_grid_resale=false",
+    ),
+    (
+        lambda cfg: cfg["microgrids"][0].__setitem__(
+            "tariff", {"mode": "flat", "buy_price_per_kwh": 0.5}
+        ),
+        "shared external tariff",
+    ),
+])
+def test_renewable_first_rejects_unsupported_market_semantics(mutation, match):
+    cfg = _main_config()
+    mutation(cfg)
+    with pytest.raises(ValueError, match=match):
+        validate_config(cfg)
+
+
+def test_legacy_mode_retains_finite_pair_capacity_readability():
+    cfg = _main_config()
+    cfg["dispatch"]["priority_mode"] = "legacy_local_first"
+    cfg["p2p"]["pair_capacity_kw"] = 75.0
+    validate_config(cfg)

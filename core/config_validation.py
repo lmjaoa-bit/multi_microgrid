@@ -211,6 +211,15 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ValueError(
                 "renewable_load_first currently requires p2p.allow_ess_to_ess=false"
             )
+        if bool(config["p2p"].get("allow_grid_resale", False)):
+            raise ValueError(
+                "renewable_load_first currently requires p2p.allow_grid_resale=false"
+            )
+        if any("tariff" in mg for mg in config.get("microgrids", [])):
+            raise ValueError(
+                "renewable_load_first currently requires one shared external tariff; "
+                "per-microgrid tariff overrides are unsupported"
+            )
 
     action_design = str(config.get("action_design", "single_dispatch"))
     if action_design not in {"single_dispatch", "single_dispatch_dr"}:
