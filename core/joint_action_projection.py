@@ -118,10 +118,9 @@ class JointActionProjector:
                 col("pv") * float(self.norm[mg]["pv"])
                 + col("wind") * float(self.norm[mg]["wind"])
             )
-            loads.append(
-                col("load") * float(self.norm[mg]["load"])
-                + self._flexible_load_kw(mg, dr_effective[i])
-            )
+            # __call__ already rewrites ess_state[*_load] to base + projected
+            # flexible load before entering the renewable-first clearing path.
+            loads.append(col("load") * float(self.norm[mg]["load"]))
 
         charge_request = torch.stack(charge_requests, dim=1)
         discharge_request = torch.stack(discharge_requests, dim=1)
