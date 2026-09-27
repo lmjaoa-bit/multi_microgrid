@@ -142,3 +142,37 @@ def test_invalid_raw_requests_do_not_change_physical_next_state():
                 current["next_obs"][mg], baseline["next_obs"][mg],
                 atol=1e-7, rtol=0.0,
             )
+
+
+def test_competing_sellers_keep_agent_specific_executed_channels():
+    renewable = torch.zeros((1, 3), dtype=torch.float64)
+    load = torch.tensor([[0.0, 0.0, 10.0]], dtype=torch.float64)
+    charge = torch.zeros_like(load)
+
+    equal = clear_renewable_first(
+        renewable,
+        load,
+        charge,
+        torch.tensor([[5.0, 5.0, 0.0]], dtype=torch.float64),
+        p2p_enabled=True,
+    )
+    skewed = clear_renewable_first(
+        renewable,
+        load,
+        charge,
+        torch.tensor([[8.0, 2.0, 0.0]], dtype=torch.float64),
+        p2p_enabled=True,
+    )
+
+    equal_sales = equal["ess_peer_load_kw"].sum(dim=2)
+    skewed_sales = skewed["ess_peer_load_kw"].sum(dim=2)
+    assert equal_sales.sum().item() == 10.0
+    assert skewed_sales.sum().item() == 10.0
+    assert equal_sales[0].tolist() == [5.0, 5.0, 0.0]
+    assert skewed_sales[0].tolist() == [8.0, 2.0, 0.0]
+    assert not torch.equal(equal_sales, skewed_sales)
+    # Actual battery discharge follows those agent-specific executed flows,
+    # so future SOC/value must remain distinguishable even though coalition
+    # total traded energy is identical.
+    assert torch.equal(equal["actual_discharge_kw"], equal_sales)
+    assert torch.equal(skewed["actual_discharge_kw"], skewed_sales)
