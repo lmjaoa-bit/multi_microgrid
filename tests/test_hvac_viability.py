@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 import components.hvac_viability as hvac_viability
@@ -150,3 +151,94 @@ def test_changed_snapshot_invalidates_hvac_viability_cache():
     assert second.snapshot_id == "changed"
     assert device._viability_result is second
     assert device._viability_t == 0
+
+
+def _device_cfg():
+    return {
+        **_cfg(),
+        "temperature_column": "temperature_c",
+        "ghi_column": "ghi_w_per_m2",
+        "occupied_hours": [7],
+        "occupied_comfort_c": [21.0, 25.0],
+        "unoccupied_comfort_c": [16.0, 30.0],
+        "terminal_air_tolerance_c": 1.0,
+        "terminal_mass_tolerance_c": 0.3,
+        "terminal_mode": "none",
+        "forecast_viability": False,
+    }
+
+
+@pytest.mark.parametrize("q_hvac_kw", [-48.0, 0.0, 72.0])
+def test_linearized_viability_step_matches_device_next_state_with_gains(q_hvac_kw):
+    cfg = _device_cfg()
+    device = CommercialHVACDR(cfg, delta_t=0.5, episode_length=2)
+    frame = pd.DataFrame({
+        "timestamp": pd.to_datetime([
+            "2026-01-01T06:00:00",
+            "2026-01-01T06:30:00",
+        ]),
+        "temperature_c": [4.0, 3.0],
+        "ghi_w_per_m2": [240.0, 180.0],
+    })
+    base_load = np.asarray([18.0, 18.0])
+    device.reset(frame, base_load)
+    air0, mass0 = 20.3, 21.1
+    actual_air, actual_mass = device._next_state(
+        air0, mass0, q_hvac_kw, 0
+    )
+
+    a, b, dt = thermal_linear_coefficients(cfg, 0.5)
+    solar = cfg["solar_gain_kw_per_wm2"] * 240.0
+    q_air = cfg["solar_air_fraction"] * solar
+    q_mass = (1.0 - cfg["solar_air_fraction"]) * solar
+    q_internal = (
+        base_load[0] * cfg["internal_gain_unoccupied_fraction"]
+    )
+    affine = a @ np.asarray([air0, mass0]) + b * q_hvac_kw
+    affine += np.asarray([
+        dt / cfg["c_air_kwh_per_c"] * (
+            4.0 / cfg["r_out_air_c_per_kw"] + q_internal + q_air
+        ),
+        dt / cfg["c_mass_kwh_per_c"] * q_mass,
+    ])
+    assert actual_air == pytest.approx(affine[0], abs=1e-10)
+    assert actual_mass == pytest.approx(affine[1], abs=1e-10)
+
+
+def test_future_occupied_boundary_requires_preheating_before_one_step_violation():
+    cfg = _device_cfg()
+    snapshot = HVACForecastSnapshot(
+        snapshot_id="preheat-two-step",
+        boundary_timestamps=(
+            "2026-01-01T06:00:00",
+            "2026-01-01T06:30:00",
+            "2026-01-01T07:00:00",
+        ),
+        outside_temperature_c=np.asarray([0.0, 0.0]),
+        ghi_w_per_m2=np.zeros(2),
+        base_load_kw=np.zeros(2),
+        interval_occupied=np.asarray([False, False]),
+        # 06:30 is still unoccupied; 07:00 is occupied.
+        comfort_low_c=np.asarray([16.0, 21.0]),
+        comfort_high_c=np.asarray([30.0, 25.0]),
+    )
+    result = solve_hvac_viability(
+        20.0, 20.0, snapshot, config=cfg, delta_t=0.5
+    )
+    assert result.feasible
+    # With q0=0, the 06:30 state is still inside the instantaneous
+    # unoccupied band, so a one-step-only guard would accept no heating.
+    a, _, dt = thermal_linear_coefficients(cfg, 0.5)
+    air_no_heat = (
+        a @ np.asarray([20.0, 20.0])
+        + np.asarray([
+            dt / cfg["c_air_kwh_per_c"] * (
+                0.0 / cfg["r_out_air_c_per_kw"]
+            ),
+            0.0,
+        ])
+    )[0]
+    assert 16.0 <= air_no_heat <= 30.0
+    # The full-horizon viability interval excludes that myopic action because
+    # maximum heating in the next half-hour would otherwise miss 07:00.
+    assert result.min_signed_power_kw > 0.0
