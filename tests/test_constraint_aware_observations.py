@@ -101,6 +101,7 @@ def test_hvac_guidance_uses_thermal_capacity_and_cop(env: MultiMicrogridEnv) -> 
     hvac.t_air = hvac.initial_t_air - 1.0
     hvac.t_mass = hvac.initial_t_mass - 0.5
     hvac._invalidate_bounds_cache()
+    env._prepare_hvac_viability(20)
 
     state = hvac.state(20)
 

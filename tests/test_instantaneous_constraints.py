@@ -62,6 +62,7 @@ def test_hvac_bounds_never_call_terminal_optimizer(
 
     monkeypatch.setattr(hvac, "_solve_terminal_q", forbidden, raising=False)
     hvac._invalidate_bounds_cache()
+    env._prepare_hvac_viability(0)
 
     low, high = hvac.feasible_bounds(0)
 

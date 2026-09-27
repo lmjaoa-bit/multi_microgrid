@@ -83,6 +83,7 @@ def test_independent_mode_does_not_virtualize_peer_renewable():
     result=solve_dispatch(
         cfg,_data([20,0,0],[0,20,0]),["mg1","mg2","mg3"],
         cooperative=False,p2p_export_source="unrestricted",
+        initial_soc_by_microgrid={"mg1": 0.1, "mg2": 0.1, "mg3": 0.1},
     )
     rows=result.trajectories.set_index("microgrid")
     assert rows.loc["mg1","renewable_peer_load_export_kw"]==pytest.approx(0.0)
@@ -109,6 +110,7 @@ def test_two_member_coalition_cannot_use_outside_member_renewable():
         ["mg1", "mg2"],
         cooperative=True,
         p2p_export_source="unrestricted",
+        initial_soc_by_microgrid={"mg1": 0.1, "mg2": 0.1},
     )
     rows = result.trajectories.set_index("microgrid")
     assert set(rows.index) == {"mg1", "mg2"}
