@@ -573,8 +573,12 @@ def _plot_soc(day: pd.DataFrame, env: Mapping[str, Any], label: str, date: str) 
         values = np.r_[initial, day[f"{mg}_soc"].to_numpy(dtype=float)]
         ax.plot(range(25), 100.0 * values, color=BLUE, marker="o", markersize=3.5,
                 linewidth=2.0, label=mg.upper())
-        ax.axhspan(100.0 * (initial - tolerance), 100.0 * (initial + tolerance),
-                   color=GOLD, alpha=0.18, label="Terminal target band")
+        if str(env["terminal_soc"].get("mode", "none")) != "none":
+            ax.axhspan(
+                100.0 * (initial - tolerance),
+                100.0 * (initial + tolerance),
+                color=GOLD, alpha=0.18, label="Terminal target band",
+            )
         ax.axhline(100.0 * float(battery["soc_min"]), color=GREY, linestyle="--", linewidth=1.0)
         ax.axhline(100.0 * float(battery["soc_max"]), color=GREY, linestyle="--", linewidth=1.0)
         ax.set_ylabel("SOC (%)")
