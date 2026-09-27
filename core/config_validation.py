@@ -195,6 +195,23 @@ def validate_config(config: Mapping[str, Any]) -> None:
     if sharing.get("offer_projection", "peer_demand_cap") != "peer_demand_cap":
         raise ValueError("single_dispatch requires peer_demand_cap projection")
 
+    dispatch_mode = str(
+        config.get("dispatch", {}).get("priority_mode", "legacy_local_first")
+    )
+    if dispatch_mode not in {"legacy_local_first", "renewable_load_first"}:
+        raise ValueError(
+            "dispatch.priority_mode must be legacy_local_first or renewable_load_first"
+        )
+    if dispatch_mode == "renewable_load_first":
+        if config["p2p"].get("pair_capacity_kw") is not None:
+            raise ValueError(
+                "renewable_load_first currently requires p2p.pair_capacity_kw=null"
+            )
+        if bool(config["p2p"].get("allow_ess_to_ess", False)):
+            raise ValueError(
+                "renewable_load_first currently requires p2p.allow_ess_to_ess=false"
+            )
+
     action_design = str(config.get("action_design", "single_dispatch"))
     if action_design not in {"single_dispatch", "single_dispatch_dr"}:
         raise ValueError("action_design must be single_dispatch or single_dispatch_dr")
@@ -263,6 +280,13 @@ def validate_config(config: Mapping[str, Any]) -> None:
             if key == "import_limit_kw" and mg.get("grid", {}).get(key) is None:
                 continue
             _number(mg.get("grid", {}).get(key), f"{mg_id}.grid.{key}", 0.0)
+        if (
+            dispatch_mode == "renewable_load_first"
+            and mg.get("grid", {}).get("import_limit_kw") is not None
+        ):
+            raise ValueError(
+                f"{mg_id}: renewable_load_first currently requires unlimited grid import"
+            )
 
         if action_design == "single_dispatch_dr":
             dr = mg.get("dr")

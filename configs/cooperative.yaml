@@ -40,6 +40,11 @@ ess_sharing:
 
 action_design: single_dispatch_dr
 
+# Explicit semantic version switch. Missing dispatch config remains legacy for
+# historical checkpoints; the main environment opts into the new physics.
+dispatch:
+  priority_mode: renewable_load_first
+
 # Independent natural days; no midnight restoration of ESS or DR inventories.
 terminal_soc:
   mode: none

@@ -44,6 +44,11 @@ class MultiMicrogridEnv:
         self.seed = int(self.config.get("env", {}).get("seed", 42))
         self.mode = str(self.config.get("env", {}).get("mode", "cooperative"))
         self.action_design = str(self.config.get("action_design", "single_dispatch"))
+        self.dispatch_priority_mode = str(
+            self.config.get("dispatch", {}).get(
+                "priority_mode", "legacy_local_first"
+            )
+        )
         self.dr_enabled = self.action_design == "single_dispatch_dr"
         sharing_cfg = self.config.get("ess_sharing", {})
         self.ess_sharing_control_mode = str(sharing_cfg.get("control_mode", "single_dispatch"))
@@ -150,6 +155,10 @@ class MultiMicrogridEnv:
             "global_state_dim": self.global_state_dim,
             "global_state_schema": self.global_state_builder.schema(),
             "action_design": self.action_design,
+            "dispatch_priority_mode": self.dispatch_priority_mode,
+            "action_semantics": getattr(
+                self.action_projector, "semantics", "unknown"
+            ),
         }
 
     def _empty_history(self) -> CoordinationHistory:
@@ -455,7 +464,456 @@ class MultiMicrogridEnv:
             return self._step_dr(actions)
         return self._step_legacy(actions)
 
+
+    def _step_dr_renewable_first(
+        self, actions: Mapping[str, Sequence[float]]
+    ) -> tuple[dict[str, np.ndarray], dict[str, float], bool, dict[str, Any]]:
+        """Execute the exact shared renewable-first tensor ledger."""
+        if self.episode_df is None or self._terminated:
+            raise RuntimeError("Reset the environment before stepping")
+        missing = set(self.agent_ids) - set(actions)
+        if missing:
+            raise KeyError(f"Missing actions for {sorted(missing)}")
+
+        import torch
+
+        row = self.episode_df.iloc[self.t]
+        base_current = self._exogenous_at(self.t)
+        prices = {mg: prices_from_row(row, mg) for mg in self.agent_ids}
+        decoded = {
+            mg: self.action_codec.decode(actions[mg]) for mg in self.agent_ids
+        }
+        dr_states_before = self._dr_states(self.t)
+        state_before = self._build_global_state(
+            base_current, dr_states_before, dtype=np.float64
+        )
+        dr_plans = {
+            mg: self.dr_devices[mg].plan(float(decoded[mg]["dr"]), self.t)
+            for mg in self.agent_ids
+        }
+        actual_current: dict[str, dict[str, float]] = {}
+        for mg in self.agent_ids:
+            base = float(base_current[mg]["load_kw"])
+            flexible = float(dr_plans[mg]["flexible_load_kw"])
+            actual_current[mg] = {
+                **base_current[mg],
+                "base_load_kw": base,
+                "flexible_load_kw": flexible,
+                "actual_load_kw": base + flexible,
+                "load_kw": base + flexible,
+            }
+
+        raw_array = np.asarray(
+            [actions[mg] for mg in self.agent_ids], dtype=np.float64
+        )
+        with torch.no_grad():
+            effective, projected = self.action_projector(
+                torch.as_tensor(state_before, dtype=torch.float64).unsqueeze(0),
+                torch.as_tensor(raw_array, dtype=torch.float64).unsqueeze(0),
+            )
+        ledger = projected[0].get("dispatch_ledger")
+        if ledger is None:
+            raise RuntimeError("renewable_load_first projector did not return a ledger")
+
+        def scalar(name: str, i: int) -> float:
+            return self._tensor_value(ledger[name][:, i])
+
+        matrices = {
+            name: ledger[name][0].detach().cpu().numpy()
+            for name in (
+                "res_peer_load_kw",
+                "ess_peer_load_kw",
+                "res_peer_charge_kw",
+            )
+        }
+
+        plans: dict[str, dict[str, Any]] = {}
+        for i, mg in enumerate(self.agent_ids):
+            effective_dr = float(effective[0, i, 2])
+            physical_dr = float(dr_plans[mg]["effective_normalized"])
+            if abs(effective_dr - physical_dr) > 1e-6:
+                raise RuntimeError(
+                    f"{mg}: rollout DR projection disagrees with training projector"
+                )
+            plan = self.cores[mg].plan_local(
+                row, decoded[mg], exogenous=actual_current[mg]
+            )
+            raw_ess_action = float(decoded[mg]["battery"])
+            battery_cfg = self.cfg_by_id[mg]["battery"]
+            nominal = (
+                raw_ess_action * float(battery_cfg["max_discharge_kw"])
+                if raw_ess_action >= 0.0
+                else raw_ess_action * float(battery_cfg["max_charge_kw"])
+            )
+            requested_power = self._tensor_value(
+                projected[i]["requested_power"]
+            )
+            actual_power = (
+                scalar("actual_discharge_kw", i)
+                - scalar("actual_charge_kw", i)
+            )
+            plan.update({
+                "base_load_kw": float(base_current[mg]["load_kw"]),
+                "flexible_load_kw": float(dr_plans[mg]["flexible_load_kw"]),
+                "actual_load_kw": float(actual_current[mg]["load_kw"]),
+                "load_kw": float(actual_current[mg]["load_kw"]),
+                "raw_ess_action": raw_ess_action,
+                "raw_dr_action": float(decoded[mg]["dr"]),
+                "raw_ess_requested_power_kw": nominal,
+                "projected_ess_requested_power_kw": requested_power,
+                "dispatch_requested_power_kw": requested_power,
+                "effective_ess_dispatch": float(effective[0, i, 0]),
+                "effective_local_action": float(effective[0, i, 0]),
+                "effective_trade_action": float(effective[0, i, 1]),
+                "effective_dr_action": effective_dr,
+                "ess_projection_delta_kw": requested_power - nominal,
+                "ess_projection_delta": (
+                    (requested_power - nominal)
+                    / max(
+                        float(battery_cfg["max_charge_kw"]),
+                        float(battery_cfg["max_discharge_kw"]),
+                        1e-12,
+                    )
+                ),
+                "ess_dispatch_correction_kw": actual_power - requested_power,
+                "ess_projected": bool(abs(requested_power - nominal) > 1e-7),
+                "dr_requested_normalized": self._tensor_value(
+                    projected[i]["dr_requested"]
+                ),
+                "dr_mapping_delta": self._tensor_value(
+                    projected[i].get("dr_mapping_delta", 0.0)
+                ),
+                "dr_safety_correction": self._tensor_value(
+                    projected[i].get("dr_safety_correction", 0.0)
+                ),
+                "dr_projection_delta": self._tensor_value(
+                    projected[i]["dr_projection_delta"]
+                ),
+                "dr_projected": bool(
+                    projected[i]["dr_projected"].reshape(-1)[0].item()
+                ),
+                "battery_charge_requested_kw": self._tensor_value(
+                    projected[i]["requested_charge_kw"]
+                ),
+                "battery_discharge_requested_kw": self._tensor_value(
+                    projected[i]["requested_discharge_kw"]
+                ),
+                "battery_charge_kw": scalar("actual_charge_kw", i),
+                "battery_discharge_kw": scalar("actual_discharge_kw", i),
+                "renewable_to_local_load_kw": scalar("res_local_load_kw", i),
+                "renewable_to_battery_kw": scalar("res_local_charge_kw", i),
+                "local_load_deficit_before_battery_kw":
+                    scalar("load_after_renewable_kw", i),
+                "ess_to_local_requested_kw": scalar("ess_local_load_kw", i),
+                "ess_to_local_kw": scalar("ess_local_load_kw", i),
+                "ess_flexible_discharge_kw":
+                    scalar("ess_offer_uncapped_kw", i),
+                "ess_p2p_offer_uncapped_kw":
+                    scalar("ess_offer_uncapped_kw", i),
+                "ess_p2p_offer_cap_kw": scalar("ess_offer_cap_kw", i),
+                "ess_p2p_offer_kw": scalar("ess_offer_kw", i),
+                "ess_offer_projection_reduction_kw":
+                    scalar("ess_offer_projection_reduction_kw", i),
+                "ess_p2p_unmatched_kw": scalar("ess_unmatched_kw", i),
+                "ess_to_p2p_kw":
+                    float(matrices["ess_peer_load_kw"][i, :].sum()),
+                "renewable_p2p_offer_kw": float(
+                    matrices["res_peer_load_kw"][i, :].sum()
+                    + matrices["res_peer_charge_kw"][i, :].sum()
+                    + scalar("renewable_surplus_for_export_kw", i)
+                ),
+                "p2p_load_demand_kw": float(
+                    matrices["res_peer_load_kw"][:, i].sum()
+                    + matrices["ess_peer_load_kw"][:, i].sum()
+                ),
+                "p2p_charge_demand_kw": float(
+                    matrices["res_peer_charge_kw"][:, i].sum()
+                ),
+                "grid_to_load_kw": scalar("grid_load_kw", i),
+                "grid_to_battery_kw": scalar("grid_charge_kw", i),
+                "sharing_action_masked": bool(
+                    scalar("ess_offer_cap_kw", i) <= 1e-9
+                ),
+                "dispatch_priority_mode": "renewable_load_first",
+            })
+            plans[mg] = plan
+
+        by = {}
+        pair_flows_kwh: dict[str, float] = {}
+        total_payment = 0.0
+        for i, seller in enumerate(self.agent_ids):
+            for j, buyer in enumerate(self.agent_ids):
+                if i == j:
+                    continue
+                power = float(
+                    matrices["res_peer_load_kw"][i, j]
+                    + matrices["ess_peer_load_kw"][i, j]
+                    + matrices["res_peer_charge_kw"][i, j]
+                )
+                if power <= 1e-12:
+                    continue
+                pair_flows_kwh[f"{seller}->{buyer}"] = (
+                    pair_flows_kwh.get(f"{seller}->{buyer}", 0.0)
+                    + power * self.delta_t
+                )
+                total_payment += (
+                    power * self.delta_t
+                    * 0.5 * (prices[seller][1] + prices[buyer][0])
+                )
+
+        for i, mg in enumerate(self.agent_ids):
+            res_sell = float(
+                matrices["res_peer_load_kw"][i, :].sum()
+                + matrices["res_peer_charge_kw"][i, :].sum()
+            )
+            ess_sell = float(matrices["ess_peer_load_kw"][i, :].sum())
+            to_load = float(
+                matrices["res_peer_load_kw"][:, i].sum()
+                + matrices["ess_peer_load_kw"][:, i].sum()
+            )
+            to_battery = float(matrices["res_peer_charge_kw"][:, i].sum())
+            p2p_sell = res_sell + ess_sell
+            p2p_buy = to_load + to_battery
+            payment = 0.0
+            for j, peer in enumerate(self.agent_ids):
+                if j == i:
+                    continue
+                outgoing = float(
+                    matrices["res_peer_load_kw"][i, j]
+                    + matrices["ess_peer_load_kw"][i, j]
+                    + matrices["res_peer_charge_kw"][i, j]
+                )
+                incoming = float(
+                    matrices["res_peer_load_kw"][j, i]
+                    + matrices["ess_peer_load_kw"][j, i]
+                    + matrices["res_peer_charge_kw"][j, i]
+                )
+                payment += outgoing * self.delta_t * 0.5 * (
+                    prices[mg][1] + prices[peer][0]
+                )
+                payment -= incoming * self.delta_t * 0.5 * (
+                    prices[peer][1] + prices[mg][0]
+                )
+            by[mg] = {
+                "p2p_buy_kw": p2p_buy,
+                "p2p_sell_kw": p2p_sell,
+                "p2p_net_kw": p2p_buy - p2p_sell,
+                "p2p_transfer_payment": payment,
+                "renewable_p2p_sell_kw": res_sell,
+                "ess_p2p_sell_kw": ess_sell,
+                "p2p_to_load_kw": to_load,
+                "p2p_to_battery_kw": to_battery,
+                "renewable_p2p_offer_kw":
+                    float(plans[mg]["renewable_p2p_offer_kw"]),
+                "ess_p2p_offer_kw":
+                    float(plans[mg]["ess_p2p_offer_kw"]),
+                "ess_p2p_unmatched_kw":
+                    float(plans[mg]["ess_p2p_unmatched_kw"]),
+            }
+
+        total_p2p_kwh = float(sum(pair_flows_kwh.values()))
+        transfer_price = (
+            total_payment / total_p2p_kwh
+            if total_p2p_kwh > 1e-12
+            else 0.5 * (
+                sum(p[1] for p in prices.values()) / len(prices)
+                + sum(p[0] for p in prices.values()) / len(prices)
+            )
+        )
+        if abs(sum(item["p2p_net_kw"] for item in by.values())) > 1e-8:
+            raise RuntimeError("Renewable-first P2P energy is not conserved")
+        if abs(sum(item["p2p_transfer_payment"] for item in by.values())) > 1e-8:
+            raise RuntimeError("Renewable-first P2P payments are not balanced")
+
+        settlements: dict[str, dict[str, float]] = {}
+        for i, mg in enumerate(self.agent_ids):
+            residual_net = (
+                scalar("renewable_surplus_for_export_kw", i)
+                - scalar("grid_load_kw", i)
+                - scalar("grid_charge_kw", i)
+            )
+            settlements[mg] = self.grids[mg].settle(residual_net)
+            if abs(settlements[mg]["power_balance_residual_kw"]) > 1e-7:
+                raise RuntimeError(f"{mg}: external-grid power balance failed")
+            if (
+                abs(settlements[mg]["grid_import_kw"]
+                    - scalar("grid_load_kw", i)
+                    - scalar("grid_charge_kw", i)) > 1e-7
+            ):
+                raise RuntimeError(
+                    f"{mg}: finite import limit is incompatible with renewable-first ledger"
+                )
+
+        devices = {
+            mg: self.cores[mg].commit(plans[mg]) for mg in self.agent_ids
+        }
+        dr_devices_after: dict[str, dict[str, float]] = {}
+        for mg in self.agent_ids:
+            plans[mg]["actual_load_served_fraction"] = 1.0
+            plans[mg]["dr_supply_infeasible"] = False
+            dr_devices_after[mg] = self.dr_devices[mg].commit(
+                dr_plans[mg], delivered_fraction=1.0
+            )
+
+        costs = {}
+        for mg in self.agent_ids:
+            costs[mg] = self.accounting.calculate(
+                prices[mg][0], prices[mg][1], settlements[mg],
+                devices[mg]["degradation_cost"], self.delta_t,
+            )
+            transfer = float(by[mg]["p2p_transfer_payment"])
+            costs[mg]["p2p_transfer_payment"] = transfer
+            departure_shortfall = float(
+                dr_devices_after.get(mg, {}).get(
+                    "ev_departure_shortfall_kwh", 0.0
+                )
+            )
+            departure_penalty = departure_shortfall * float(
+                self.cfg_by_id[mg].get("dr", {}).get(
+                    "departure_penalty_per_kwh", 0.0
+                )
+            )
+            costs[mg]["ev_departure_penalty"] = departure_penalty
+            costs[mg]["physical_profit"] -= departure_penalty
+            costs[mg]["individual_accounting_profit"] = float(
+                costs[mg]["physical_profit"] + transfer
+            )
+
+        tolerance = float(self.config["terminal_soc"]["tolerance"])
+        terminal = self.t + 1 >= len(self.episode_df)
+        terminal_breakdown = self._apply_terminal_constraint_penalties(
+            costs, terminal
+        )
+        terminal_soc_infeasible = {}
+        for mg in self.agent_ids:
+            battery = self.cores[mg].battery
+            terminal_soc_infeasible[mg] = bool(
+                terminal
+                and self.config["terminal_soc"]["mode"] != "none"
+                and abs(float(battery.soc) - float(battery.initial_soc))
+                > tolerance + 1e-6
+            )
+        team_profit = sum(
+            costs[mg]["physical_profit"] for mg in self.agent_ids
+        )
+        team_reward = team_profit / self.accounting.reward_scale
+        rewards = {mg: float(team_reward) for mg in self.agent_ids}
+
+        requested_buy = sum(
+            float(plans[mg]["p2p_load_demand_kw"])
+            + float(plans[mg]["p2p_charge_demand_kw"])
+            for mg in self.agent_ids
+        )
+        requested_sell = sum(
+            float(plans[mg]["renewable_p2p_offer_kw"])
+            + float(plans[mg]["ess_p2p_offer_kw"])
+            for mg in self.agent_ids
+        )
+        self.history = {
+            "total_p2p_kwh": total_p2p_kwh,
+            "total_buy_demand_kwh": requested_buy * self.delta_t,
+            "total_sell_offer_kwh": requested_sell * self.delta_t,
+            "clearing_ratio": (
+                total_p2p_kwh / max(requested_sell * self.delta_t, 1e-9)
+                if requested_sell > 1e-9 else 0.0
+            ),
+            "by_microgrid": {
+                mg: {
+                    "p2p_net_kwh": by[mg]["p2p_net_kw"] * self.delta_t,
+                    "grid_net_kwh": (
+                        settlements[mg]["grid_import_kw"]
+                        - settlements[mg]["grid_export_kw"]
+                    ) * self.delta_t,
+                    "ess_p2p_offer_kwh":
+                        float(plans[mg]["ess_p2p_offer_kw"]) * self.delta_t,
+                    "ess_p2p_accepted_kwh":
+                        by[mg]["ess_p2p_sell_kw"] * self.delta_t,
+                    "ess_p2p_unmatched_kwh":
+                        float(plans[mg]["ess_p2p_unmatched_kw"]) * self.delta_t,
+                }
+                for mg in self.agent_ids
+            },
+        }
+
+        info = {
+            "timestamp": str(row["timestamp"]),
+            "mode": self.mode,
+            "action_design": self.action_design,
+            "dispatch_priority_mode": self.dispatch_priority_mode,
+            "action_semantics": getattr(
+                self.action_projector, "semantics", "unknown"
+            ),
+            "decoded_actions": decoded,
+            "plans": plans,
+            "dr_plans": dr_plans,
+            "dr_devices": dr_devices_after,
+            "p2p": {
+                "by_microgrid": by,
+                "pair_flows_kwh": pair_flows_kwh,
+                "total_p2p_kwh": total_p2p_kwh,
+                "transfer_price_per_kwh": transfer_price,
+                "transfer_payment_sum":
+                    sum(x["p2p_transfer_payment"] for x in by.values()),
+            },
+            "dispatch_ledger": {
+                name: value[0].detach().cpu().numpy()
+                for name, value in ledger.items()
+            },
+            "settlements": settlements,
+            "devices": devices,
+            "costs": costs,
+            "team_profit": float(team_profit),
+            "team_reward": float(team_reward),
+            "shaping_reward": 0.0,
+            "terminal_soc_penalty": {
+                mg: float(terminal_breakdown[mg]["total_penalty"])
+                for mg in self.agent_ids
+            },
+            "terminal_constraint_penalty": terminal_breakdown,
+            "terminal_constraint_penalty_total": float(sum(
+                item["total_penalty"]
+                for item in terminal_breakdown.values()
+            )),
+            "terminal_soc_infeasible": terminal_soc_infeasible,
+            "ev_sessions": {
+                mg: [dict(item) for item in getattr(
+                    self.dr_devices.get(mg), "sessions", []
+                )]
+                for mg in self.agent_ids
+                if isinstance(self.dr_devices.get(mg), EVChargingDR)
+            },
+            "ev_departure_events": {
+                mg: [dict(item) for item in getattr(
+                    self.dr_devices.get(mg), "departure_events", []
+                )]
+                for mg in self.agent_ids
+                if isinstance(self.dr_devices.get(mg), EVChargingDR)
+            },
+            "data_quality_flags": list(self.data.data_quality_flags),
+        }
+
+        self.t += 1
+        self._terminated = terminal
+        next_exogenous = self._exogenous_at(self.t)
+        next_dr_states = self._dr_states(self.t)
+        self._last_observations = self._observations(
+            next_exogenous, next_dr_states
+        )
+        self._last_global_state = self._build_global_state(
+            next_exogenous, next_dr_states
+        )
+        info["dr_state_after"] = next_dr_states
+        info["global_state_after"] = self.global_state()
+        return (
+            {mg: value.copy() for mg, value in self._last_observations.items()},
+            rewards,
+            terminal,
+            info,
+        )
+
     def _step_dr(self, actions: Mapping[str, Sequence[float]]) -> tuple[dict[str, np.ndarray], dict[str, float], bool, dict[str, Any]]:
+        if self.dispatch_priority_mode == "renewable_load_first":
+            return self._step_dr_renewable_first(actions)
         if self.episode_df is None or self._terminated:
             raise RuntimeError("Reset the environment before stepping")
         missing = set(self.agent_ids) - set(actions)
