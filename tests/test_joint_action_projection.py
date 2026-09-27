@@ -146,3 +146,36 @@ def test_joint_projector_rejects_wrong_raw_shape():
         assert "[batch, agents, 2]" in str(exc)
     else:
         raise AssertionError("wrong raw action shape should fail")
+
+
+def test_renewable_first_projection_includes_dr_flexible_load():
+    config = synthetic_config()
+    config["dispatch"] = {"priority_mode": "renewable_load_first"}
+    config["p2p"] = {"pair_capacity_kw": None, "enabled": False}
+    schema = synthetic_schema()
+    normalizers = {
+        mg: {"load": 100.0, "pv": 100.0, "wind": 100.0, "price": 1.0}
+        for mg in ("mg1", "mg2", "mg3")
+    }
+    projector = JointActionProjector(
+        config, schema, normalizers, price_norm=1.0
+    )
+    state = synthetic_state(schema)
+    # MG1 base load = 20 kW. DR raw +1 maps to 0.75 duty, i.e. +15 kW.
+    # With no renewable and P2P disabled, a full ESS discharge must therefore
+    # execute 35 kW locally, not just the 20 kW base load.
+    raw = torch.tensor(
+        [[[1.0, 1.0], [0.0, 0.0], [0.0, 0.0]]],
+        dtype=torch.float32,
+    )
+    effective, plans = projector(state, raw)
+    ledger = plans[0]["dispatch_ledger"]
+    assert torch.allclose(
+        ledger["ess_local_load_kw"][0, 0], torch.tensor(35.0)
+    )
+    assert torch.allclose(
+        ledger["grid_load_kw"][0, 0], torch.tensor(0.0)
+    )
+    assert torch.allclose(
+        effective[0, 0, 0], torch.tensor(35.0 / 50.0)
+    )

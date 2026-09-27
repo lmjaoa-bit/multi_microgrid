@@ -674,8 +674,9 @@ class MultiMicrogridEnv:
                 "renewable_p2p_offer_kw": float(
                     matrices["res_peer_load_kw"][i, :].sum()
                     + matrices["res_peer_charge_kw"][i, :].sum()
-                    + scalar("renewable_surplus_for_export_kw", i)
                 ),
+                "renewable_external_surplus_kw":
+                    scalar("renewable_surplus_for_export_kw", i),
                 "p2p_load_demand_kw": float(
                     matrices["res_peer_load_kw"][:, i].sum()
                     + matrices["ess_peer_load_kw"][:, i].sum()
