@@ -50,6 +50,21 @@ def test_audit_is_read_only_and_marks_missing_historical_evidence(tmp_path):
     manifest=json.loads((output/"audit_manifest.json").read_text(encoding="utf-8"))
     assert manifest["source_hashes_unchanged"] is True
     assert manifest["missing_evidence_days"]==["2026-01-01"]
+    assert manifest["source_dates"] == ["2026-01-01"]
+    assert manifest["configuration_source"] is None
+    assert manifest["missing_fields_by_day"] == {
+        "2026-01-01": ["physical_configuration"]
+    }
+    assert set(manifest["source_files"]) >= {
+        "test_summary.json",
+        "test_daily_metrics.csv",
+        "config_snapshot.yaml",
+        "test_hourly_trajectories/2026-01-01.csv",
+    }
+    for metadata in manifest["source_files"].values():
+        assert len(metadata["sha256"]) == 64
+        assert metadata["size_bytes"] >= 0
+        assert metadata["modified_time_utc"].endswith("+00:00")
     assert result["historical_reinterpretation"] is False
 
 
