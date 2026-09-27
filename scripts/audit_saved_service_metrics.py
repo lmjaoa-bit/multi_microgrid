@@ -118,6 +118,7 @@ def audit_saved_run(run: str|Path, output: str|Path) -> dict[str,Any]:
     )
 
     audited=[]
+    audited_nested=[]
     for row in daily:
         date=str(row.get("date","")).strip()
         hourly_path=source/"test_hourly_trajectories"/f"{date}.csv"
@@ -143,11 +144,13 @@ def audit_saved_run(run: str|Path, output: str|Path) -> dict[str,Any]:
                 _as_bool(row.get("feasible_day",False)),
                 schema,
             )
+        nested={"date":date, **metrics}
+        audited_nested.append(nested)
         result={"date":date}
         _flatten("",metrics,result)
         audited.append(result)
 
-    aggregate=aggregate_service_days(audited)
+    aggregate=aggregate_service_days(audited_nested)
     after={str(p.relative_to(source)):_sha256(p) for p in source_paths}
     if before != after:
         raise RuntimeError("Source run changed while auditing; refusing output")

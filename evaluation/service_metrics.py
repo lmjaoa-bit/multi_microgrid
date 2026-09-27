@@ -420,10 +420,10 @@ def summarize_day_services(
         "ev_departure_success_rate": ev_result["departure_success_rate"],
     }
     for mg in ids:
-        result[f"unmet_energy_{mg}_kwh"] = float(unmet_by_mgVmg])
+        result[f"unmet_energy_{mg}_kwh"] = float(unmet_by_mg[mg])
         result[f"unmet_load_hour_rate_{mg}"] = float(unmet_hours_by_mg[mg] / steps)
         result[f"dr_supply_infeasible_rate_{mg}"] = float(
-            dr_infeasible_hours_by_mgVmg] / steps
+            dr_infeasible_hours_by_mg[mg] / steps
         )
     return result
 
@@ -494,7 +494,7 @@ def aggregate_service_days(
             bool(row.get("dr_supply_infeasible_day", False)) for row in complete_rows
         )),
         "dr_supply_infeasible_day_rate": (
-            float(np.mean([bool(row.get("dr_supply_infeasible_day", False) for row in complete_rows]))
+            float(np.mean([bool(row.get("dr_supply_infeasible_day", False)) for row in complete_rows]))
             if complete_rows else None
         ),
         "hvac_comfort_success_count": int(hvac_occ_success),
