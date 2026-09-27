@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
 import yaml
 
 from algorithms.registry import get_algorithm_spec
@@ -58,6 +59,14 @@ def test_two_algorithm_replay_update_and_checkpoint_smoke(
     restored = spec.create(env, settings, device="cpu", seed=18)
     restored.load(checkpoint)
     assert restored.update_steps == model.update_steps
+
+    legacy_checkpoint = tmp_path / f"{spec.slug}_legacy_v2.pt"
+    payload = torch.load(checkpoint, map_location="cpu", weights_only=False)
+    payload["action_semantics"] = "single_dispatch_dr_v2"
+    torch.save(payload, legacy_checkpoint)
+    incompatible = spec.create(env, settings, device="cpu", seed=19)
+    with pytest.raises(ValueError, match="action semantics"):
+        incompatible.load(legacy_checkpoint)
 
     network = settings["algorithm"].get("network", {})
     if "transformer" in spec.slug:
