@@ -129,14 +129,35 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
         physics.pop("ess_sharing", None)
     design["control_mode"] = mode
     design["raw_action_dim"] = len(design["raw_actions"]) or None
+    dispatch_priority_mode = str(
+        env_config.get("dispatch", {}).get(
+            "priority_mode", "legacy_local_first"
+        )
+    )
+    dispatch_semantics = (
+        "renewable_load_first_v1"
+        if dispatch_priority_mode == "renewable_load_first"
+        else "legacy_local_first_v1"
+    )
+    hvac_safety_mode = "legacy_one_step"
+    for item in env_config.get("microgrids", []):
+        dr = item.get("dr", {})
+        if str(dr.get("type", "")) == "commercial_hvac":
+            hvac_safety_mode = (
+                "forecast_viability"
+                if bool(dr.get("forecast_viability", False))
+                else "legacy_one_step"
+            )
+            break
     return {
         "schema_version": 2,
         "service_metrics_schema_version": "service_metrics_v2",
-        "dispatch_priority_mode": str(
-            env_config.get("dispatch", {}).get(
-                "priority_mode", "legacy_local_first"
-            )
-        ),
+        "metrics_schema_version": "service_metrics_v2",
+        "dispatch_priority_mode": dispatch_priority_mode,
+        "dispatch_semantics": dispatch_semantics,
+        "hvac_safety_mode": hvac_safety_mode,
+        "oracle_allocation_mode": "source_priority_free_allocation",
+        "full_information_oracle": True,
         "action_semantics": (
             "single_dispatch_dr_v3"
             if (
