@@ -210,4 +210,4 @@ def test_v3_trade_channel_is_actual_peer_sale_not_uncapped_request():
     assert plans[0]["uncapped_offer"].item() == 20.0
     assert plans[0]["offer"].item() == 10.0
     assert plans[0]["ess_peer_sell_kw"].item() == 10.0
-    assert effective[0, 0, 1].item() == 10.0 / 50.0
+    assert effective[0, 0, 1].item() == pytest.approx(10.0 / 50.0)

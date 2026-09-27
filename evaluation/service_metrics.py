@@ -364,13 +364,13 @@ def summarize_day_services(
         for row in hourly_rows:
             counts.append(int(round(_float_field(
                 row, f"{mg}_ev_departure_count", strict=current_schema, missing=missing
-            )))
+            ))))
             completed.append(int(round(_float_field(
                 row, f"{mg}_ev_completed_group_count", strict=current_schema, missing=missing
             ))))
             shortfalls.append(max(0.0, _float_field(
                 row, f"{mg}_ev_departure_shortfall_kwh", strict=current_schema, missing=missing
-            )))
+            ))))
         departure_count = max(counts, default=0)
         completed_count = max(completed, default=0)
         shortfall = max(shortfalls, default=0.0)

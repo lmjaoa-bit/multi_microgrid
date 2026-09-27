@@ -91,20 +91,17 @@ def test_feasible_ess_charge_is_not_projection_just_because_p2p_is_masked():
     assert not plan["ess_projected"]
 
 
-def test_grid_capacity_reduces_optional_ess_charging_before_actual_load():
-    env = MultiMicrogridEnv(CONFIG, split="test")
-    env.reset(seed=44, deterministic=True)
-    env.grids["mg3"] = type(env.grids["mg3"])(import_limit_kw=5.0, export_limit_kw=200.0)
-    actions = {
-        "mg1": np.asarray([0.0, 0.0]),
-        "mg2": np.asarray([0.0, 0.0]),
-        "mg3": np.asarray([-1.0, 1.0]),
-    }
-    _, _, _, info = env.step(actions)
-    plan = info["plans"]["mg3"]
-    assert plan["grid_to_load_kw"] <= 5.0 + 1e-9
-    assert plan["grid_to_battery_kw"] <= max(0.0, 5.0 - plan["grid_to_load_kw"]) + 1e-9
-    assert plan["battery_charge_curtailed_kw"] >= 0.0
+def test_renewable_first_rejects_finite_grid_import_at_startup():
+    config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
+    config["_project_root"] = str(ROOT)
+    mg3 = next(item for item in config["microgrids"] if item["id"] == "mg3")
+    mg3["grid"]["import_limit_kw"] = 5.0
+
+    with pytest.raises(
+        ValueError,
+        match="renewable_load_first currently requires unlimited grid import",
+    ):
+        MultiMicrogridEnv(config, split="test")
 
 
 def test_matd3_dispatch_dr_replay_and_update_use_projected_three_channel_actions():

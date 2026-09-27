@@ -62,7 +62,22 @@ def test_cooperative_oracle_power_balance() -> None:
                 - frame["battery_charge_kw"] - frame["grid_export_kw"]
                 - frame["p2p_export_kw"] - frame["curtailment_kw"])
     assert residual.abs().max() < 1e-6
-    assert not ((frame["grid_import_kw"] > 1e-8) & (frame["p2p_export_kw"] > 1e-8)).any()
+    # Simultaneous grid import and P2P export is legal under v3 when the
+    # exported energy has a renewable/ESS source and the imported energy ends
+    # at local load/charging. Prove source/use conservation instead of applying
+    # the old total-flow mutex.
+    assert np.allclose(
+        frame["grid_import_kw"],
+        frame["grid_to_load_kw"] + frame["grid_to_charge_kw"],
+        atol=1e-7,
+    )
+    assert np.allclose(
+        frame["p2p_export_kw"],
+        frame["renewable_peer_load_export_kw"]
+        + frame["renewable_peer_charge_export_kw"]
+        + frame["ess_peer_load_export_kw"],
+        atol=1e-7,
+    )
     ids = [str(mg["id"]) for mg in config["microgrids"]]
     for i, first in enumerate(ids):
         for second in ids[i + 1:]:
