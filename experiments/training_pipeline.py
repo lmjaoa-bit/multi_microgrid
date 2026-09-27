@@ -673,6 +673,26 @@ def train(args: argparse.Namespace) -> dict[str, object]:
 
     algorithm.save(final_checkpoint)
     if not best_checkpoint.exists():
+        if validation_enabled and selector.mode == "constrained_profit":
+            error = RuntimeError(
+                "No service-eligible validation checkpoint was found; "
+                "refusing to label final_model.pt as best_model.pt."
+            )
+            write_training_error(
+                run_dir,
+                error,
+                completed_episode=training_episodes,
+                update_step=int(getattr(algorithm, "update_steps", 0)),
+                durable_recovery_point=durable_recovery_point,
+            )
+            write_run_status(
+                run_dir,
+                "FAILED",
+                completed_episode=training_episodes,
+                total_steps=total_steps,
+                durable_recovery_point=durable_recovery_point,
+            )
+            raise error
         algorithm.save(best_checkpoint)
         best_episode = training_episodes
         best_validation_score = float(history[-1]["team_profit"])

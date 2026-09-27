@@ -134,7 +134,7 @@ class CheckpointSelector:
     ) -> bool:
         """Determines if candidate outranks current_best according to lexicographic rules."""
         if current_best is None:
-            return True
+            return candidate.eligible if self.mode == "constrained_profit" else True
 
         if self.mode == "profit_only":
             if candidate.objective_value > current_best.objective_value:

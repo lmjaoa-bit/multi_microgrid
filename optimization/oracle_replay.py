@@ -2,7 +2,8 @@
 
 This validator checks industrial/HVAC/EV and ESS state transitions only.
 It deliberately does NOT certify P2P market execution or equal actionability
-of the oracle's joint energy flows in the local-first RL environment.
+of the oracle's free-allocation joint energy flows in the deterministic
+renewable-first proportional-clearing RL environment.
 """
 from __future__ import annotations
 

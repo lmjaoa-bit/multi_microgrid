@@ -229,3 +229,31 @@ def test_current_algorithms_share_identical_service_checkpoint_selection():
         "mill_downstream_service_completion_rate",
         "ev_departure_success_rate",
     }
+
+
+def test_constrained_profit_rejects_first_ineligible_as_best():
+    selector = CheckpointSelector({
+        "mode": "constrained_profit",
+        "objective": "team_profit_mean",
+        "constraints": {"strict_feasible_day_rate": {"min": 1.0}},
+    })
+    candidate = selector.evaluate(
+        {"team_profit_mean": 999.0, "strict_feasible_day_rate": 0.0},
+        episode=100,
+    )
+    assert candidate.eligible is False
+    assert selector.is_better(candidate, None) is False
+
+
+def test_constrained_profit_accepts_first_eligible_as_best():
+    selector = CheckpointSelector({
+        "mode": "constrained_profit",
+        "objective": "team_profit_mean",
+        "constraints": {"strict_feasible_day_rate": {"min": 1.0}},
+    })
+    candidate = selector.evaluate(
+        {"team_profit_mean": 10.0, "strict_feasible_day_rate": 1.0},
+        episode=100,
+    )
+    assert candidate.eligible is True
+    assert selector.is_better(candidate, None) is True
