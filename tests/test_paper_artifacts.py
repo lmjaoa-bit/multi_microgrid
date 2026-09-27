@@ -317,14 +317,34 @@ def test_comparison_markdown_does_not_require_optional_tabulate(
     assert "Total operating cost" in (output / "performance_comparison.md").read_text(encoding="utf-8")
 
 
-def test_standard_figure_generation_includes_paper_group(tmp_path: Path) -> None:
+def test_standard_figure_generation_keeps_canonical_fifteen_slots(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     _write_run_fixture(run_dir, display_name="MATD3", cost=100.0)
 
     paths = generate_figures(run_dir, formats=("png",))
 
-    assert len(paths) == 24
-    assert (run_dir / "figures" / "22_representative_dr_service.png") in paths
+    assert len(paths) == 15
+    assert {path.stem for path in paths} == {
+        f"{index:02d}_" + {
+            0: "experiment_summary",
+            1: "training_convergence",
+            2: "joint_team_profit",
+            3: "cooperation_surplus",
+            4: "cooperation_gain_pct",
+            5: "microgrid_profit_settlement",
+            6: "res_utilization",
+            7: "curtailment_comparison",
+            8: "grid_interaction",
+            9: "individual_rationality",
+            10: "p2p_trading_matrix",
+            11: "ess_performance",
+            12: "constraint_feasibility",
+            13: "equal_vs_shapley_surplus_allocation",
+            14: "transfer_payments",
+        }[index]
+        for index in range(15)
+    }
+    assert not (run_dir / "figures" / "22_representative_dr_service.png").exists()
 
 
 def test_comparison_cli_builds_table_from_explicit_runs(tmp_path: Path) -> None:

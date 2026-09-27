@@ -114,6 +114,10 @@ jobs:
               assert actor and all(math.isfinite(x) for x in actor)
               assert (run_dir / 'checkpoints' / 'best_model.pt').is_file()
               assert (run_dir / 'checkpoints' / 'final_model.pt').is_file()
+              pngs = sorted((run_dir / 'figures').glob('*.png'))
+              pdfs = sorted((run_dir / 'figures').glob('*.pdf'))
+              assert len(pngs) == 15, [p.name for p in pngs]
+              assert len(pdfs) == 15, [p.name for p in pdfs]
               assert int(summary.get('milp_failure_count', 0)) == 0
               assert int(summary.get('shapley_invalid_day_count', 0)) == 0
               assert float(summary.get('shapley_budget_balance_max_error', 0.0) or 0.0) <= 1e-6

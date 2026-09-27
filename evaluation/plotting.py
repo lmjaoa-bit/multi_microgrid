@@ -556,5 +556,8 @@ def generate_figures(
         fig.axes[0].text(0.01, 0.02, "Positive = receives payment; negative = pays into coalition",
                          transform=fig.axes[0].transAxes, fontsize=8, color="#59636A")
     written += _save(fig, figure_dir, "14_transfer_payments", formats)
-    written += generate_paper_artifacts(root, formats=formats)
+    # Keep the canonical training-run figure set fixed at 00..14.
+    # Paper-specific representative-day figures remain available through
+    # generate_paper_artifacts(), but are generated explicitly so a normal run
+    # does not silently change its artifact contract.
     return written
