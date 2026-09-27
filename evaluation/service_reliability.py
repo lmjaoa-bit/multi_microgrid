@@ -138,7 +138,6 @@ def _daily_service_metrics(
     config: Mapping[str, Any] | None = None,
     schema_version: str = "legacy_unknown",
 ) -> dict[str, Any]:
-    del agent_ids, delta_t
     from evaluation.service_metrics import summarize_day_services
     if config is None:
         # Historical runs without an embedded full physical contract are
