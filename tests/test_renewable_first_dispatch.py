@@ -8,7 +8,7 @@ import torch
 import yaml
 
 from core.config_validation import validate_config
-from core.renewable_first_dispatch import clear_renewable_first
+from core.renewable_first_dispatch import clear_renewable_first, proportional_cross_flow
 
 
 def _clear(res, load, charge=None, discharge=None, *, p2p=True):
@@ -234,3 +234,30 @@ def test_legacy_mode_retains_finite_pair_capacity_readability():
     cfg["dispatch"]["priority_mode"] = "legacy_local_first"
     cfg["p2p"]["pair_capacity_kw"] = 75.0
     validate_config(cfg)
+
+
+def test_proportional_flow_zero_supply_or_demand_is_finite_and_zero():
+    supply = torch.zeros((2, 3), dtype=torch.float64, requires_grad=True)
+    demand = torch.tensor(
+        [[0.0, 3.0, 2.0], [0.0, 0.0, 0.0]], dtype=torch.float64
+    )
+    flow = proportional_cross_flow(supply, demand)
+    assert torch.equal(flow, torch.zeros_like(flow))
+    assert torch.isfinite(flow).all()
+    grad = torch.autograd.grad(flow.sum(), supply)[0]
+    assert torch.isfinite(grad).all()
+
+
+def test_proportional_flow_never_self_trades():
+    supply = torch.tensor([[5.0, 0.0, 0.0]], dtype=torch.float64)
+    demand = torch.tensor([[0.0, 2.0, 3.0]], dtype=torch.float64)
+    flow = proportional_cross_flow(supply, demand)
+    assert torch.diagonal(flow, dim1=1, dim2=2).abs().sum().item() == 0.0
+    assert flow.sum().item() == pytest.approx(5.0)
+
+
+def test_proportional_flow_rejects_same_node_supply_and_demand():
+    supply = torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float64)
+    demand = torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float64)
+    with pytest.raises(ValueError, match="simultaneous supplier and demander"):
+        proportional_cross_flow(supply, demand)
