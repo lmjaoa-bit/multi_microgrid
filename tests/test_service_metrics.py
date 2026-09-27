@@ -83,3 +83,25 @@ def test_cooperative_value_capture_is_ratio_of_sums():
     assert result["cooperative_value_capture_ratio_total"] == pytest.approx(10.0 / 12.0)
     assert result["cooperative_value_capture_ratio_daily_mean"] == pytest.approx(0.7)
     assert result["aggregation_method"] == "ratio_of_sums"
+
+
+def test_legacy_schema_without_physical_config_is_explicitly_incomplete():
+    result = summarize_day_services(
+        [{"timestamp": "2026-09-01T00:00:00"}],
+        {"time": {"delta_t": 1.0}, "microgrids": []},
+        True,
+        "legacy_unknown",
+    )
+    assert result["data_complete"] is False
+    assert result["strict_feasible_day"] is None
+    assert result["missing_fields"] == ["physical_configuration"]
+
+
+def test_current_schema_without_physical_config_is_rejected():
+    with pytest.raises(ServiceMetricDataError):
+        summarize_day_services(
+            [{"timestamp": "2026-09-01T00:00:00"}],
+            {"time": {"delta_t": 1.0}, "microgrids": []},
+            True,
+            "service_metrics_v2",
+        )

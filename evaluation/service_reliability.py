@@ -142,15 +142,14 @@ def _daily_service_metrics(
     from evaluation.service_metrics import summarize_day_services
     if config is None:
         # Historical runs without an embedded full physical contract are
-        # audit-only.  Missing evidence remains null/incomplete rather than
-        # silently reconstructed from today's YAML defaults.
-        return summarize_day_services(
-            hourly_rows,
-            {"time": {"delta_t": 1.0}, "microgrids": []},
-            bool(feasible_day),
-            str(schema_version),
-            tolerance=float(tolerance),
-        )
+        # audit-only.  Do not treat an empty device set as complete evidence.
+        return {
+            "metrics_schema_version": str(schema_version),
+            "data_complete": False,
+            "missing_fields": ["physical_configuration"],
+            "physical_feasible_day": bool(feasible_day),
+            "strict_feasible_day": None,
+        }
     return summarize_day_services(
         hourly_rows,
         config,

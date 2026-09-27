@@ -117,6 +117,20 @@ def summarize_day_services(
     if not np.isfinite(dt) or dt <= 0.0:
         raise ValueError("time.delta_t must be positive and finite")
     ids = [str(item["id"]) for item in config.get("microgrids", [])]
+    if not ids:
+        if current_schema:
+            raise ServiceMetricDataError(
+                "service_metrics_v2 requires embedded microgrid physical configuration"
+            )
+        return {
+            "metrics_schema_version": str(schema_version),
+            "data_complete": False,
+            "missing_fields": ["physical_configuration"],
+            "physical_feasible_day": (
+                None if physical_feasible is None else bool(physical_feasible)
+            ),
+            "strict_feasible_day": None,
+        }
     missing: set[str] = set()
 
     unmet_by_mg = {mg: 0.0 for mg in ids}
