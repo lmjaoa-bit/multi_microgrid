@@ -38,12 +38,14 @@ class DispatchResult:
     trajectories: pd.DataFrame
     pair_flows_kwh: dict[str, float]
     cost_breakdown: dict[str, float] | None = None
+    metadata: dict[str, Any] | None = None
 
     def summary(self) -> dict[str, Any]:
         return {"mode": self.mode, "status": self.status, "total_cost": self.total_cost,
                 "total_profit": self.total_profit, "profit_by_microgrid": self.profit_by_microgrid,
                 "total_p2p_energy_kwh": float(sum(self.pair_flows_kwh.values())),
-                **({"cost_breakdown": self.cost_breakdown} if self.cost_breakdown is not None else {})}
+                **({"cost_breakdown": self.cost_breakdown} if self.cost_breakdown is not None else {}),
+                **({"metadata": self.metadata} if self.metadata is not None else {})}
 
 
 def load_config(config: str | Path | Mapping[str, Any]) -> dict[str, Any]:
@@ -429,15 +431,92 @@ def solve_dispatch(
             model.addConstr(float(data.load_kw[mg][t]) + (dr_power[key] if include_dr else 0) ==
                 variables["res_load"][key] + variables["ess_load"][key] +
                 variables["grid_load"][key] + peer_load + variables["unmet"][key])
+            # Source-specific ledgers already forbid grid resale and ESS->ESS/grid.
+            # Do not add a total grid-import/P2P-export mutex: a microgrid may
+            # legitimately export renewable or ESS energy while grid-charging
+            # after coalition load service has been satisfied.
+
+        # Renewable-first priority is imposed on physical source totals while
+        # preserving the oracle's deliberate within-coalition free allocation.
+        # For cooperative solves with the current unlimited pair-capacity
+        # configuration, the whole coalition is one pool. Independent solves
+        # use one single-member pool per microgrid, so no virtual cross-MG
+        # renewable transfer is introduced.
+        priority_groups = [ids] if cooperative else [[mg] for mg in ids]
+        for group_index, group in enumerate(priority_groups):
+            renewable_total = float(sum(
+                float(data.renewable_kw[mg][t]) for mg in group
+            ))
+            demand_total = sum(
+                (
+                    float(data.load_kw[mg][t])
+                    + (dr_power[(mg, t)] if include_dr else 0.0)
+                    for mg in group
+                ),
+                0.0,
+            )
+            res_to_load = sum(
+                (variables["res_load"][(mg, t)] for mg in group), 0.0
+            )
             if cooperative:
-                if not allow_grid_resale:
-                    model.addConstr(res_out + ess_out <= pair_capacity_kw * max(0,len(ids)-1) *
-                                    (1-variables["grid_mode"][key]))
-                export_mode = add("ess_export_mode", key, lb=0, ub=1, type=integer)
-                model.addConstr(ess_out <= float(cfg_by_id[mg]["battery"]["max_discharge_kw"]) * export_mode)
-                # An ESS seller first supplies its entire local load deficit.
-                model.addConstr(variables["grid_load"][key] + peer_load + variables["unmet"][key]
-                                <= import_bounds[mg] * (1-export_mode))
+                res_to_load += sum(
+                    (
+                        variables["res_peer_load"][(src, dst, t)]
+                        for src in group for dst in group if src != dst
+                    ),
+                    0.0,
+                )
+
+            # Finite M proof: demand cannot exceed the sum of each MG's
+            # import_bound, and renewable_total is known. import_bound itself
+            # is max base demand + DR nameplate + battery charge nameplate.
+            # Therefore M >= max(renewable_total, max feasible demand).
+            priority_m = max(
+                1.0,
+                renewable_total,
+                float(sum(import_bounds[mg] for mg in group)),
+            )
+            load_mode = model.addVariable(
+                name=f"renewable_load_priority[{group_index},{t}]",
+                lb=0.0, ub=1.0, type=integer,
+            )
+            model.addConstr(res_to_load <= renewable_total)
+            model.addConstr(res_to_load <= demand_total)
+            model.addConstr(
+                res_to_load >= renewable_total - priority_m * load_mode
+            )
+            model.addConstr(
+                res_to_load >= demand_total - priority_m * (1.0 - load_mode)
+            )
+
+            res_to_charge = sum(
+                (variables["res_charge"][(mg, t)] for mg in group), 0.0
+            )
+            if cooperative:
+                res_to_charge += sum(
+                    (
+                        variables["res_peer_charge"][(src, dst, t)]
+                        for src in group for dst in group if src != dst
+                    ),
+                    0.0,
+                )
+            charge_total = sum(
+                (variables["charge"][(mg, t)] for mg in group), 0.0
+            )
+            renewable_after_load = renewable_total - res_to_load
+            charge_mode = model.addVariable(
+                name=f"renewable_charge_priority[{group_index},{t}]",
+                lb=0.0, ub=1.0, type=integer,
+            )
+            model.addConstr(res_to_charge <= renewable_after_load)
+            model.addConstr(res_to_charge <= charge_total)
+            model.addConstr(
+                res_to_charge >= renewable_after_load - priority_m * charge_mode
+            )
+            model.addConstr(
+                res_to_charge >= charge_total - priority_m * (1.0 - charge_mode)
+            )
+
     tolerance = float(terminal_cfg["tolerance"])
     rate = float(terminal_cfg["penalty_per_kwh"])
     if apply_terminal_condition and terminal_cfg["mode"] != "none":
@@ -540,6 +619,26 @@ def solve_dispatch(
                          "soc": value("energy", (mg, t + 1)) / float(battery["capacity_kwh"]),
                          "grid_import_kw": grid_import, "grid_export_kw": grid_export,
                          "p2p_import_kw": incoming, "p2p_export_kw": outgoing,
+                         "renewable_to_local_load_kw": value("res_load", (mg, t)),
+                         "renewable_to_local_charge_kw": value("res_charge", (mg, t)),
+                         "ess_to_local_load_kw": value("ess_load", (mg, t)),
+                         "grid_to_load_kw": value("grid_load", (mg, t)),
+                         "grid_to_charge_kw": value("grid_charge", (mg, t)),
+                         "renewable_peer_load_export_kw": (
+                             sum(value("res_peer_load", (mg, other, t))
+                                 for other in ids if other != mg)
+                             if cooperative else 0.0
+                         ),
+                         "renewable_peer_charge_export_kw": (
+                             sum(value("res_peer_charge", (mg, other, t))
+                                 for other in ids if other != mg)
+                             if cooperative else 0.0
+                         ),
+                         "ess_peer_load_export_kw": (
+                             sum(value("ess_peer_load", (mg, other, t))
+                                 for other in ids if other != mg)
+                             if cooperative else 0.0
+                         ),
                          "curtailment_kw": curtailment, "unmet_load_kw": unmet,
                          **dr_row})
     if apply_terminal_condition and terminal_cfg["mode"] == "penalty":
@@ -588,4 +687,16 @@ def solve_dispatch(
                           ("cooperative" if cooperative else "independent"),
                           status, -total_profit,
                           total_profit, profit_by, pd.DataFrame(rows), pair_totals,
-                          cost_breakdown if include_dr else None)
+                          cost_breakdown if include_dr else None,
+                          {
+                              "source_priority": "renewable_load_first",
+                              "allocation": "source_priority_free_allocation",
+                              "perfect_foresight": bool(include_dr),
+                              "p2p_export_source": p2p_export_source,
+                              "grid_resale_allowed": False,
+                              "ess_to_ess_allowed": False,
+                              "ess_to_external_grid_allowed": False,
+                              "priority_scope": (
+                                  "coalition" if cooperative else "single_microgrid"
+                              ),
+                          })
