@@ -40,6 +40,14 @@ validation:
   interval: 100
   deterministic_policy: true
   fixed_scenarios: true
+  selection:
+    mode: constrained_profit
+    objective: team_profit_mean
+    constraints:
+      strict_feasible_day_rate: {min: 1.0}
+      unmet_energy_mean_kwh: {max: 0.0, atol: 1.0e-7}
+      mill_downstream_service_completion_rate: {min: 1.0, atol: 1.0e-7}
+      ev_departure_success_rate: {min: 1.0, atol: 1.0e-7}
 logging:
   diagnostic_interval: 20
   incremental_history: true

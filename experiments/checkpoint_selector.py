@@ -44,6 +44,7 @@ class CheckpointSelector:
                         ConstraintSpec(name=str(name), min_val=min_val, max_val=max_val, atol=atol)
                     )
         self.epsilon = 1e-9
+        self.requires_eligible_checkpoint = self.mode == "constrained_profit"
 
     def evaluate(self, summary: Mapping[str, Any], episode: int) -> CheckpointCandidate:
         """Evaluate a validation summary against configured constraints."""

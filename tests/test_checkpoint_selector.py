@@ -32,7 +32,7 @@ def test_constrained_profit_eligible_outranks_ineligible():
         "constraints": {
             "strict_feasible_day_rate": {"min": 1.0},
             "unmet_energy_mean_kwh": {"max": 0.0, "atol": 1e-9},
-            "hvac_terminal_joint_success_rate": {"min": 0.4545},
+            "mill_downstream_service_completion_rate": {"min": 1.0},
         },
     }
     selector = CheckpointSelector(cfg)
@@ -43,7 +43,7 @@ def test_constrained_profit_eligible_outranks_ineligible():
             "team_profit_mean": 200.0,
             "strict_feasible_day_rate": 1.0,
             "unmet_energy_mean_kwh": 5.0,  # violates max 0.0
-            "hvac_terminal_joint_success_rate": 0.50,
+            "mill_downstream_service_completion_rate": 1.0,
         },
         episode=100,
     )
@@ -162,3 +162,45 @@ def test_constrained_profit_tie_breaking():
         {"team_profit_mean": 110.0, "strict_feasible_day_rate": 0.5}, episode=300
     )
     assert selector.is_better(c3, c2) is True
+
+
+def test_current_service_selection_ignores_disabled_terminal_and_production_coverage():
+    selector = CheckpointSelector({
+        "mode": "constrained_profit",
+        "objective": "team_profit_mean",
+        "constraints": {
+            "strict_feasible_day_rate": {"min": 1.0},
+            "unmet_energy_mean_kwh": {"max": 0.0, "atol": 1e-7},
+            "mill_downstream_service_completion_rate": {"min": 1.0, "atol": 1e-7},
+            "ev_departure_success_rate": {"min": 1.0, "atol": 1e-7},
+        },
+    })
+    candidate = selector.evaluate({
+        "team_profit_mean": 10.0,
+        "strict_feasible_day_rate": 1.0,
+        "unmet_energy_mean_kwh": 0.0,
+        "mill_downstream_service_completion_rate": 1.0,
+        "mill_production_coverage_ratio": 0.7056,
+        "mill_terminal_success_rate": None,
+        "hvac_terminal_joint_success_rate": None,
+        "ev_departure_success_rate": 1.0,
+    }, episode=100)
+    assert candidate.eligible is True
+    assert selector.requires_eligible_checkpoint is True
+
+
+def test_current_service_selection_rejects_missing_required_service_metric():
+    selector = CheckpointSelector({
+        "mode": "constrained_profit",
+        "objective": "team_profit_mean",
+        "constraints": {
+            "strict_feasible_day_rate": {"min": 1.0},
+            "mill_downstream_service_completion_rate": {"min": 1.0},
+        },
+    })
+    candidate = selector.evaluate({
+        "team_profit_mean": 100.0,
+        "strict_feasible_day_rate": 1.0,
+    }, episode=100)
+    assert candidate.eligible is False
+    assert math.isinf(candidate.total_violation)
