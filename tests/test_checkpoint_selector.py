@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 import pytest
+import yaml
 
 from experiments.checkpoint_selector import CheckpointCandidate, CheckpointSelector
 
@@ -204,3 +206,26 @@ def test_current_service_selection_rejects_missing_required_service_metric():
     }, episode=100)
     assert candidate.eligible is False
     assert math.isinf(candidate.total_violation)
+
+
+def test_current_algorithms_share_identical_service_checkpoint_selection():
+    root = Path(__file__).resolve().parents[1]
+    selections = []
+    for name in (
+        "matd3_dispatch.yaml",
+        "matd3_hierarchical_transformer.yaml",
+    ):
+        cfg = yaml.safe_load(
+            (root / "configs" / "algorithms" / name).read_text(encoding="utf-8")
+        )
+        selections.append(cfg["validation"]["selection"])
+    assert selections[0] == selections[1]
+    selection = selections[0]
+    assert selection["mode"] == "constrained_profit"
+    assert set(selection["constraints"]) == {
+        "strict_feasible_day_rate",
+        "unmet_energy_mean_kwh",
+        "hvac_comfort_rate",
+        "mill_downstream_service_completion_rate",
+        "ev_departure_success_rate",
+    }
