@@ -98,3 +98,41 @@ def test_legacy_mode_keeps_legacy_allocation_metadata():
     )
     assert result.metadata["source_priority"]=="legacy_local_first"
     assert result.metadata["allocation"]=="legacy_oracle_allocation"
+
+
+def test_two_member_coalition_cannot_use_outside_member_renewable():
+    cfg = _cfg()
+    data = _data([20, 0, 0], [0, 0, 50])
+    result = solve_dispatch(
+        cfg,
+        data,
+        ["mg1", "mg2"],
+        cooperative=True,
+        p2p_export_source="unrestricted",
+    )
+    rows = result.trajectories.set_index("microgrid")
+    assert set(rows.index) == {"mg1", "mg2"}
+    assert rows.loc["mg1", "grid_to_load_kw"] > 0.0
+    assert rows["renewable_peer_load_export_kw"].sum() == pytest.approx(0.0)
+
+
+def test_d3_peer_renewable_load_priority_allows_grid_charging_at_seller():
+    cfg = _cfg()
+    # Make grid charging economically attractive after A's 30 kW renewable
+    # has first served B's 30 kW load. This is legal: the exported power is
+    # renewable; the imported power terminates at A's own battery.
+    data = _data([0, 30, 0], [30, 0, 0])
+    result = solve_dispatch(
+        cfg,
+        data,
+        ["mg1", "mg2", "mg3"],
+        cooperative=True,
+        p2p_export_source="unrestricted",
+    )
+    rows = result.trajectories.set_index("microgrid")
+    assert rows.loc["mg1", "renewable_peer_load_export_kw"] == pytest.approx(30.0)
+    assert rows.loc["mg2", "grid_to_load_kw"] == pytest.approx(0.0, abs=1e-7)
+    # The source/use model must not prohibit simultaneous renewable export
+    # and grid import merely because both happen at the same microgrid.
+    assert rows.loc["mg1", "grid_import_kw"] >= -1e-9
+    assert result.metadata["grid_resale_allowed"] is False
