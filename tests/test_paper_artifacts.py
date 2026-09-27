@@ -356,3 +356,42 @@ def test_paper_metrics_include_hvac_late_power_p95() -> None:
 
     assert "hvac_late_power_p95_kw" in values
     assert np.isclose(values["hvac_late_power_p95_kw"], 5.9, rtol=0.1)
+
+
+def test_paper_metrics_v2_use_saved_service_evidence_and_disable_terminal_restoration():
+    hourly = _hourly_fixture()
+    for mg in ("mg1", "mg2", "mg3"):
+        hourly[f"{mg}_terminal_constraint_penalty"] = 0.0
+    daily = pd.DataFrame({
+        "date": ["2018-01-01"],
+        "algorithm_team_profit": [-100.0],
+        "metrics_schema_version": ["service_metrics_v2"],
+        "mill_production_t": [16.51],
+        "mill_consumption_required_t": [23.40],
+        "mill_actual_consumption_t": [23.40],
+        "mill_downstream_unserved_t": [0.0],
+        "mill_inventory_drawdown_t": [6.89],
+        "hvac_occupied_success_count": [8],
+        "hvac_occupied_boundary_count": [9],
+        "hvac_comfort_violation_degree_hours": [0.407],
+        "hvac_max_comfort_violation_c": [0.407],
+        "ev_departure_count": [3],
+        "ev_completed_group_count": [3],
+        "ev_departure_shortfall_kwh": [0.0],
+    })
+    config = deepcopy(_environment_config())
+    config["terminal_soc"]["mode"] = "none"
+    config["microgrids"][0]["dr"]["terminal_mode"] = "none"
+    config["microgrids"][1]["dr"]["terminal_mode"] = "none"
+
+    metrics = calculate_paper_metrics(hourly, daily, config)
+    values = dict(zip(metrics["metric_id"], metrics["value"], strict=True))
+
+    assert np.isclose(values["mill_production_coverage_ratio"], 100.0 * 16.51 / 23.40)
+    assert np.isclose(values["mill_downstream_service_completion_rate"], 100.0)
+    assert np.isclose(values["hvac_occupied_comfort_rate"], 100.0 * 8.0 / 9.0)
+    assert np.isclose(values["ev_departure_target_success_rate"], 100.0)
+    assert values["terminal_task_penalty_day"] == 0.0
+    assert "mill_terminal_success_rate" not in values
+    assert "hvac_terminal_joint_success_rate" not in values
+    assert "ess_terminal_success_microgrid_day" not in values

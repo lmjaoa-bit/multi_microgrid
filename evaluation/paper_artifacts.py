@@ -118,6 +118,10 @@ def calculate_paper_metrics(
         raise ValueError("Paper metrics require at least one saved test day")
 
     rows: list[dict[str, Any]] = []
+    current_service_v2 = bool(
+        "metrics_schema_version" in daily.columns
+        and daily["metrics_schema_version"].astype(str).eq("service_metrics_v2").all()
+    )
     ess_equivalent = pd.Series(0.0, index=dates, dtype=float)
     success_columns: dict[str, pd.Series] = {}
     total_throughput = 0.0
@@ -142,14 +146,21 @@ def calculate_paper_metrics(
 
     success_frame = pd.DataFrame(success_columns)
     abs_dev = pd.concat(absolute_deviations, ignore_index=True)
-    rows.extend([
-        _metric("ess_terminal_success_microgrid_day", "ESS", "Terminal SOC success rate", "%", success_frame.to_numpy().mean(), "higher"),
-        _metric("ess_all_microgrids_terminal_success_day", "ESS", "All-microgrid terminal SOC success rate", "%", success_frame.all(axis=1).mean(), "higher"),
-        _metric("ess_terminal_abs_deviation", "ESS", "Mean absolute terminal SOC deviation", "p.u.", abs_dev.mean(), "lower"),
-        _metric("ess_terminal_excess_kwh_day", "ESS", "Terminal SOC excess-equivalent energy", "kWh/day", ess_equivalent.mean(), "lower"),
-        _metric("ess_throughput_kwh_day", "ESS", "Battery throughput", "kWh/day", total_throughput, "lower"),
-        _metric("ess_equivalent_cycles_day", "ESS", "Mean equivalent full cycles", "cycles/day", np.mean(equivalent_cycles), "lower"),
-    ])
+    if current_service_v2 and str(terminal_cfg.get("mode", "none")) == "none":
+        rows.extend([
+            _metric("ess_end_soc_abs_deviation", "ESS", "Mean absolute end-of-day SOC deviation (diagnostic)", "p.u.", abs_dev.mean(), "lower"),
+            _metric("ess_throughput_kwh_day", "ESS", "Battery throughput", "kWh/day", total_throughput, "lower"),
+            _metric("ess_equivalent_cycles_day", "ESS", "Mean equivalent full cycles", "cycles/day", np.mean(equivalent_cycles), "lower"),
+        ])
+    else:
+        rows.extend([
+            _metric("ess_terminal_success_microgrid_day", "ESS", "Terminal SOC success rate", "%", success_frame.to_numpy().mean(), "higher"),
+            _metric("ess_all_microgrids_terminal_success_day", "ESS", "All-microgrid terminal SOC success rate", "%", success_frame.all(axis=1).mean(), "higher"),
+            _metric("ess_terminal_abs_deviation", "ESS", "Mean absolute terminal SOC deviation", "p.u.", abs_dev.mean(), "lower"),
+            _metric("ess_terminal_excess_kwh_day", "ESS", "Terminal SOC excess-equivalent energy", "kWh/day", ess_equivalent.mean(), "lower"),
+            _metric("ess_throughput_kwh_day", "ESS", "Battery throughput", "kWh/day", total_throughput, "lower"),
+            _metric("ess_equivalent_cycles_day", "ESS", "Mean equivalent full cycles", "cycles/day", np.mean(equivalent_cycles), "lower"),
+        ])
 
     mill = microgrids["mg1"]["dr"]
     silo_terminal = grouped["mg1_silo_level_t"].last().reindex(dates)
@@ -160,78 +171,155 @@ def calculate_paper_metrics(
         / float(mill["rated_production_tph"])
         * float(mill["rated_power_kw"])
     )
-    production = grouped["mg1_mill_production_tph"].sum()
-    required_production = float(mill["downstream_consumption_tph"]) * 24.0
-    rows.extend([
-        _metric("mill_production_completion_rate", "MG1 industrial mill", "Production completion rate", "%", (production / required_production).mean(), "target_1"),
-        _metric("mill_terminal_success_rate", "MG1 industrial mill", "Terminal silo success rate", "%", (silo_gap <= silo_tolerance + 1e-12).mean(), "higher"),
-        _metric("mill_terminal_abs_gap_t", "MG1 industrial mill", "Mean terminal silo gap", "t", silo_gap.mean(), "lower"),
-    ])
+    if current_service_v2:
+        _require_columns(
+            daily,
+            [
+                "mill_production_t",
+                "mill_consumption_required_t",
+                "mill_actual_consumption_t",
+                "mill_downstream_unserved_t",
+                "mill_inventory_drawdown_t",
+            ],
+        )
+        production = pd.to_numeric(daily["mill_production_t"], errors="raise").sum()
+        required_production = pd.to_numeric(
+            daily["mill_consumption_required_t"], errors="raise"
+        ).sum()
+        actual_consumption = pd.to_numeric(
+            daily["mill_actual_consumption_t"], errors="raise"
+        ).sum()
+        downstream_unserved = pd.to_numeric(
+            daily["mill_downstream_unserved_t"], errors="raise"
+        ).sum()
+        coverage = production / required_production if required_production > 1e-12 else 0.0
+        service = actual_consumption / required_production if required_production > 1e-12 else 0.0
+        rows.extend([
+            _metric("mill_production_coverage_ratio", "MG1 industrial mill", "Actual production coverage ratio", "%", coverage, "target_1"),
+            _metric("mill_downstream_service_completion_rate", "MG1 industrial mill", "Downstream service completion rate", "%", service, "higher"),
+            _metric("mill_downstream_unserved_t_day", "MG1 industrial mill", "Downstream unserved material", "t/day", downstream_unserved / day_count, "lower"),
+            _metric("mill_inventory_drawdown_t_day", "MG1 industrial mill", "Mean end-of-day inventory drawdown", "t/day", pd.to_numeric(daily["mill_inventory_drawdown_t"], errors="raise").mean(), "diagnostic"),
+        ])
+    else:
+        production = grouped["mg1_mill_production_tph"].sum()
+        required_production = float(mill["downstream_consumption_tph"]) * 24.0
+        rows.extend([
+            _metric("mill_production_completion_rate", "MG1 industrial mill", "Production completion rate", "%", (production / required_production).mean(), "target_1"),
+            _metric("mill_terminal_success_rate", "MG1 industrial mill", "Terminal silo success rate", "%", (silo_gap <= silo_tolerance + 1e-12).mean(), "higher"),
+            _metric("mill_terminal_abs_gap_t", "MG1 industrial mill", "Mean terminal silo gap", "t", silo_gap.mean(), "lower"),
+        ])
 
     hvac = microgrids["mg2"]["dr"]
-    occupied = ordered["mg2_occupied"].astype(float) > 0.5
-    comfort_low = np.where(occupied, float(hvac["occupied_comfort_c"][0]), float(hvac["unoccupied_comfort_c"][0]))
-    comfort_high = np.where(occupied, float(hvac["occupied_comfort_c"][1]), float(hvac["unoccupied_comfort_c"][1]))
-    comfort_violation = np.maximum(0.0, comfort_low - ordered["mg2_t_air_c"]) + np.maximum(
-        0.0, ordered["mg2_t_air_c"] - comfort_high
-    )
-    occupied_violation = comfort_violation[occupied]
-    occupied_days = max(1, ordered.loc[occupied, "date"].nunique())
-    first_outdoor = grouped["mg2_t_out_c"].first().reindex(dates)
-    initial_air = np.clip(23.0 + 0.20 * (first_outdoor - 23.0), 18.0, 28.0)
-    initial_mass = np.clip(23.0 + 0.10 * (first_outdoor - 23.0), 18.0, 28.0)
-    terminal_air = grouped["mg2_t_air_c"].last().reindex(dates)
-    terminal_mass = grouped["mg2_t_mass_c"].last().reindex(dates)
-    if {"mg2_terminal_air_gap_c", "mg2_terminal_mass_gap_c"}.issubset(ordered.columns):
-        signed_air_gap = grouped["mg2_terminal_air_gap_c"].last().reindex(dates)
-        signed_mass_gap = grouped["mg2_terminal_mass_gap_c"].last().reindex(dates)
-        air_gap = signed_air_gap.abs()
-        mass_gap = signed_mass_gap.abs()
-    else:
-        signed_air_gap = initial_air - terminal_air
-        signed_mass_gap = initial_mass - terminal_mass
-        air_gap = signed_air_gap.abs()
-        mass_gap = signed_mass_gap.abs()
-    air_tolerance = float(hvac["terminal_air_tolerance_c"])
-    mass_tolerance = float(hvac["terminal_mass_tolerance_c"])
-    air_cop = np.where(signed_air_gap < 0.0, float(hvac["cop_cool"]), float(hvac["cop_heat"]))
-    mass_cop = np.where(signed_mass_gap < 0.0, float(hvac["cop_cool"]), float(hvac["cop_heat"]))
-    hvac_equivalent = (
-        (air_gap - air_tolerance).clip(lower=0.0) * float(hvac["c_air_kwh_per_c"]) / air_cop
-        + (mass_gap - mass_tolerance).clip(lower=0.0) * float(hvac["c_mass_kwh_per_c"]) / mass_cop
-    )
-    comfort_rate = float((occupied_violation <= 1e-9).mean()) if len(occupied_violation) else 1.0
-    episode_length = int(env.get("episode_length", 24))
-    late_mask = ordered["hour"] >= (episode_length - 2)
+    late_mask = ordered["hour"] >= (int(env.get("time", {}).get("episode_length", 24)) - 2)
     late_power = ordered.loc[late_mask, "mg2_hvac_effective_signed_power_kw"]
     if late_power.empty or not np.all(np.isfinite(late_power)):
         raise ValueError("Paper metrics require finite mg2_hvac_effective_signed_power_kw for late hours")
     late_power_p95 = float(np.quantile(late_power.abs(), 0.95))
-    rows.extend([
-        _metric("hvac_occupied_comfort_rate", "MG2 HVAC", "Occupied comfort compliance rate", "%", comfort_rate, "higher"),
-        _metric("hvac_occupied_degree_hours", "MG2 HVAC", "Occupied temperature violation", "°C·h/occupied day", occupied_violation.sum() / occupied_days, "lower"),
-        _metric("hvac_terminal_joint_success_rate", "MG2 HVAC", "Joint terminal thermal success rate", "%", ((air_gap <= air_tolerance + 1e-12) & (mass_gap <= mass_tolerance + 1e-12)).mean(), "higher"),
-        _metric("hvac_late_power_p95_kw", "MG2 HVAC", "Late HVAC absolute power p95", "kW", late_power_p95, "lower"),
-    ])
+    if current_service_v2:
+        _require_columns(
+            daily,
+            [
+                "hvac_occupied_success_count",
+                "hvac_occupied_boundary_count",
+                "hvac_comfort_violation_degree_hours",
+                "hvac_max_comfort_violation_c",
+            ],
+        )
+        occ_success = pd.to_numeric(
+            daily["hvac_occupied_success_count"], errors="raise"
+        ).sum()
+        occ_count = pd.to_numeric(
+            daily["hvac_occupied_boundary_count"], errors="raise"
+        ).sum()
+        comfort_rate = occ_success / occ_count if occ_count > 0 else 0.0
+        rows.extend([
+            _metric("hvac_occupied_comfort_rate", "MG2 HVAC", "Occupied comfort compliance rate", "%", comfort_rate, "higher"),
+            _metric("hvac_occupied_degree_hours", "MG2 HVAC", "Occupied temperature violation", "°C·h/day", pd.to_numeric(daily["hvac_comfort_violation_degree_hours"], errors="raise").sum() / day_count, "lower"),
+            _metric("hvac_max_comfort_violation_c", "MG2 HVAC", "Maximum comfort-bound violation", "°C", pd.to_numeric(daily["hvac_max_comfort_violation_c"], errors="raise").max(), "lower"),
+            _metric("hvac_late_power_p95_kw", "MG2 HVAC", "Late HVAC absolute power p95", "kW", late_power_p95, "lower"),
+        ])
+    else:
+        occupied = ordered["mg2_occupied"].astype(float) > 0.5
+        comfort_low = np.where(occupied, float(hvac["occupied_comfort_c"][0]), float(hvac["unoccupied_comfort_c"][0]))
+        comfort_high = np.where(occupied, float(hvac["occupied_comfort_c"][1]), float(hvac["unoccupied_comfort_c"][1]))
+        comfort_violation = np.maximum(0.0, comfort_low - ordered["mg2_t_air_c"]) + np.maximum(
+            0.0, ordered["mg2_t_air_c"] - comfort_high
+        )
+        occupied_violation = comfort_violation[occupied]
+        occupied_days = max(1, ordered.loc[occupied, "date"].nunique())
+        first_outdoor = grouped["mg2_t_out_c"].first().reindex(dates)
+        initial_air = np.clip(23.0 + 0.20 * (first_outdoor - 23.0), 18.0, 28.0)
+        initial_mass = np.clip(23.0 + 0.10 * (first_outdoor - 23.0), 18.0, 28.0)
+        terminal_air = grouped["mg2_t_air_c"].last().reindex(dates)
+        terminal_mass = grouped["mg2_t_mass_c"].last().reindex(dates)
+        if {"mg2_terminal_air_gap_c", "mg2_terminal_mass_gap_c"}.issubset(ordered.columns):
+            signed_air_gap = grouped["mg2_terminal_air_gap_c"].last().reindex(dates)
+            signed_mass_gap = grouped["mg2_terminal_mass_gap_c"].last().reindex(dates)
+            air_gap = signed_air_gap.abs()
+            mass_gap = signed_mass_gap.abs()
+        else:
+            signed_air_gap = initial_air - terminal_air
+            signed_mass_gap = initial_mass - terminal_mass
+            air_gap = signed_air_gap.abs()
+            mass_gap = signed_mass_gap.abs()
+        air_tolerance = float(hvac["terminal_air_tolerance_c"])
+        mass_tolerance = float(hvac["terminal_mass_tolerance_c"])
+        air_cop = np.where(signed_air_gap < 0.0, float(hvac["cop_cool"]), float(hvac["cop_heat"]))
+        mass_cop = np.where(signed_mass_gap < 0.0, float(hvac["cop_cool"]), float(hvac["cop_heat"]))
+        hvac_equivalent = (
+            (air_gap - air_tolerance).clip(lower=0.0) * float(hvac["c_air_kwh_per_c"]) / air_cop
+            + (mass_gap - mass_tolerance).clip(lower=0.0) * float(hvac["c_mass_kwh_per_c"]) / mass_cop
+        )
+        comfort_rate = float((occupied_violation <= 1e-9).mean()) if len(occupied_violation) else 1.0
+        rows.extend([
+            _metric("hvac_occupied_comfort_rate", "MG2 HVAC", "Occupied comfort compliance rate", "%", comfort_rate, "higher"),
+            _metric("hvac_occupied_degree_hours", "MG2 HVAC", "Occupied temperature violation", "°C·h/occupied day", occupied_violation.sum() / occupied_days, "lower"),
+            _metric("hvac_terminal_joint_success_rate", "MG2 HVAC", "Joint terminal thermal success rate", "%", ((air_gap <= air_tolerance + 1e-12) & (mass_gap <= mass_tolerance + 1e-12)).mean(), "higher"),
+            _metric("hvac_late_power_p95_kw", "MG2 HVAC", "Late HVAC absolute power p95", "kW", late_power_p95, "lower"),
+        ])
 
     ev = microgrids["mg3"]["dr"]
-    departure_hour = int(ev["departure_hour"])
-    departure = ordered.loc[ordered["hour"] == departure_hour - 1].set_index("date")["mg3_ev_soc"].reindex(dates)
-    target_soc = float(ev["target_soc"])
-    ev_shortfall = (target_soc - departure).clip(lower=0.0) * float(ev["fleet_capacity_kwh"])
-    available_start = int(ev.get("available_start_hour", 0))
-    valley_mask = ordered["hour"].between(available_start, max(available_start, departure_hour - 2))
-    ev_energy = float(ordered["mg3_ev_effective_power_kw"].sum())
-    valley_share = float(ordered.loc[valley_mask, "mg3_ev_effective_power_kw"].sum() / ev_energy) if ev_energy > 0.0 else 0.0
-    rows.extend([
-        _metric("ev_departure_target_success_rate", "MG3 EV", "Departure SOC target success rate", "%", (departure >= target_soc - 1e-7).mean(), "higher"),
-        _metric("ev_departure_shortfall_kwh_day", "MG3 EV", "Departure energy shortfall", "kWh/day", ev_shortfall.mean(), "lower"),
-        _metric("ev_valley_charge_share", "MG3 EV", "Pre-departure low-price charging share", "%", valley_share, "higher"),
-    ])
+    if current_service_v2:
+        _require_columns(
+            daily,
+            [
+                "ev_departure_count",
+                "ev_completed_group_count",
+                "ev_departure_shortfall_kwh",
+            ],
+        )
+        departures = pd.to_numeric(daily["ev_departure_count"], errors="raise").sum()
+        completed = pd.to_numeric(
+            daily["ev_completed_group_count"], errors="raise"
+        ).sum()
+        shortfall = pd.to_numeric(
+            daily["ev_departure_shortfall_kwh"], errors="raise"
+        ).sum()
+        success = completed / departures if departures > 0 else 0.0
+        ev_energy = float(ordered["mg3_ev_effective_power_kw"].sum())
+        rows.extend([
+            _metric("ev_departure_target_success_rate", "MG3 EV", "EV cohort departure success rate", "%", success, "higher"),
+            _metric("ev_departure_shortfall_kwh_day", "MG3 EV", "Departure energy shortfall", "kWh/day", shortfall / day_count, "lower"),
+            _metric("ev_charge_energy_kwh_day", "MG3 EV", "Delivered EV charging energy", "kWh/day", ev_energy / day_count, "diagnostic"),
+        ])
+    else:
+        departure_hour = int(ev["departure_hour"])
+        departure = ordered.loc[ordered["hour"] == departure_hour - 1].set_index("date")["mg3_ev_soc"].reindex(dates)
+        target_soc = float(ev["target_soc"])
+        ev_shortfall = (target_soc - departure).clip(lower=0.0) * float(ev["fleet_capacity_kwh"])
+        available_start = int(ev.get("available_start_hour", 0))
+        valley_mask = ordered["hour"].between(available_start, max(available_start, departure_hour - 2))
+        ev_energy = float(ordered["mg3_ev_effective_power_kw"].sum())
+        valley_share = float(ordered.loc[valley_mask, "mg3_ev_effective_power_kw"].sum() / ev_energy) if ev_energy > 0.0 else 0.0
+        rows.extend([
+            _metric("ev_departure_target_success_rate", "MG3 EV", "Departure SOC target success rate", "%", (departure >= target_soc - 1e-7).mean(), "higher"),
+            _metric("ev_departure_shortfall_kwh_day", "MG3 EV", "Departure energy shortfall", "kWh/day", ev_shortfall.mean(), "lower"),
+            _metric("ev_valley_charge_share", "MG3 EV", "Pre-departure low-price charging share", "%", valley_share, "higher"),
+        ])
 
     for mg in MICROGRIDS:
         scope = ordered
-        if mg == "mg3":
+        if mg == "mg3" and not current_service_v2:
             ev_scope = microgrids["mg3"]["dr"]
             scope = ordered.loc[ordered["hour"].between(
                 int(ev_scope.get("available_start_hour", 0)),
@@ -243,7 +331,9 @@ def calculate_paper_metrics(
         ])
 
     penalty_fields = [f"{mg}_terminal_constraint_penalty" for mg in MICROGRIDS]
-    if set(penalty_fields).issubset(ordered.columns):
+    if current_service_v2 and str(terminal_cfg.get("mode", "none")) == "none":
+        terminal_penalty = pd.Series(0.0, index=dates, dtype=float)
+    elif set(penalty_fields).issubset(ordered.columns):
         terminal_penalty = ordered.assign(
             _terminal_penalty=ordered[penalty_fields].sum(axis=1)
         ).groupby("date")["_terminal_penalty"].sum().reindex(dates)
