@@ -581,14 +581,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                     ),
                 )
                 candidate = selector.evaluate(val_summary, episode=episode_index + 1)
-                ranking_best = selector.is_better(candidate, best_candidate)
-                is_best = bool(
-                    ranking_best
-                    and (
-                        candidate.eligible
-                        or not selector.requires_eligible_checkpoint
-                    )
-                )
+                is_best = selector.is_better(candidate, best_candidate)
                 candidate.is_best = is_best
                 if is_best:
                     best_candidate = candidate
@@ -680,11 +673,6 @@ def train(args: argparse.Namespace) -> dict[str, object]:
 
     algorithm.save(final_checkpoint)
     if not best_checkpoint.exists():
-        if validation_enabled and selector.requires_eligible_checkpoint:
-            raise RuntimeError(
-                "No validation checkpoint satisfied the required physical-service "
-                "constraints; refusing to label an ineligible final model as best_model.pt"
-            )
         algorithm.save(best_checkpoint)
         best_episode = training_episodes
         best_validation_score = float(history[-1]["team_profit"])

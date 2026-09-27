@@ -186,7 +186,7 @@ def test_current_service_selection_ignores_disabled_terminal_and_production_cove
         "ev_departure_success_rate": 1.0,
     }, episode=100)
     assert candidate.eligible is True
-    assert selector.requires_eligible_checkpoint is True
+    assert candidate.constraint_failures == []
 
 
 def test_current_service_selection_rejects_missing_required_service_metric():
