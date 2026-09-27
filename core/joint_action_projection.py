@@ -28,12 +28,20 @@ class JointActionProjector:
         self.dr = {}
         for mg_cfg in config["microgrids"]:
             mg = str(mg_cfg["id"])
-            for suffix in ("dr_min", "dr_max", "load"):
-                name = f"{mg}_{suffix}"
-                if name not in self.index:
-                    raise ValueError(f"Global state is missing required field: {name}")
+            load_name = f"{mg}_load"
+            if load_name not in self.index:
+                raise ValueError(f"Global state is missing required field: {load_name}")
             dr_cfg = dict(mg_cfg.get("dr", {}))
             kind = str(dr_cfg.get("type", ""))
+            if kind == "ev_charging" and dr_cfg.get("cohorts"):
+                min_name = f"{mg}_ev_feasible_min"
+                max_name = f"{mg}_ev_feasible_max"
+            else:
+                min_name = f"{mg}_dr_min"
+                max_name = f"{mg}_dr_max"
+            for name in (min_name, max_name):
+                if name not in self.index:
+                    raise ValueError(f"Global state is missing required field: {name}")
             if kind == "industrial_mill":
                 scale_kw = float(dr_cfg["rated_power_kw"])
             elif kind == "commercial_hvac":
@@ -48,8 +56,13 @@ class JointActionProjector:
                 raise ValueError(f"{mg}: unsupported DR type {kind!r}")
             if scale_kw <= 0.0:
                 raise ValueError(f"{mg}: DR electrical power scale must be positive")
-            self.dr[mg] = {"type": kind, "scale_kw": scale_kw,
-                           "cohorts": bool(dr_cfg.get("cohorts"))}
+            self.dr[mg] = {
+                "type": kind,
+                "scale_kw": scale_kw,
+                "cohorts": bool(dr_cfg.get("cohorts")),
+                "min_name": min_name,
+                "max_name": max_name,
+            }
 
     def _dr_requested(self, raw: torch.Tensor, agent_index: int) -> torch.Tensor:
         if self.dr[self.ids[agent_index]]["type"] == "commercial_hvac":
@@ -73,8 +86,8 @@ class JointActionProjector:
         ess_state = state.clone()
         for i, mg in enumerate(self.ids):
             requested = self._dr_requested(raw[:, i, 1], i)
-            lower = state[:, self.index[f"{mg}_dr_min"]]
-            upper = state[:, self.index[f"{mg}_dr_max"]]
+            lower = state[:, self.index[self.dr[mg]["min_name"]]]
+            upper = state[:, self.index[self.dr[mg]["max_name"]]]
             if torch.any(lower > upper + 1e-7):
                 raise ValueError(f"{mg}: invalid DR feasible interval in global state")
             effective = (lower + requested * (upper - lower)

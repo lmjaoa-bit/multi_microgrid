@@ -80,7 +80,13 @@ def validate_device_trajectories(
                           else -cool / dr.cool_max_kw if cool > 0.0 else 0.0)
                 check(mg, t, "HVAC_simultaneous_heat_cool", heat*cool, 0.0)
             elif kind == "ev_charging":
-                raw_dr = 2.0*float(row["flexible_load_kw"])/dr.max_charge_kw-1.0
+                target_power = float(row["flexible_load_kw"])
+                low, high = dr.feasible_bounds(t)
+                if high > low + 1e-12:
+                    raw_dr = 2.0 * (target_power - low) / (high - low) - 1.0
+                else:
+                    raw_dr = -1.0
+                raw_dr = float(np.clip(raw_dr, -1.0, 1.0))
             else:
                 raise ValueError(f"Unknown oracle DR type: {kind}")
             plan = dr.plan(float(raw_dr), t)

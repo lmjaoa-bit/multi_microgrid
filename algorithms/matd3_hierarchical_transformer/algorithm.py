@@ -308,6 +308,10 @@ class Matd3HierarchicalTransformer(MATD3):
             raise ValueError("Incompatible action semantics")
         if checkpoint.get("projection_signature") != self.projection_signature:
             raise ValueError("Projection signature mismatch")
+        if checkpoint.get("state_schema") != self.state_schema:
+            raise ValueError("Checkpoint state schema does not match")
+        if checkpoint.get("observation_schemas") != self.observation_schemas:
+            raise ValueError("Checkpoint observation schema does not match")
 
         self.actors.load_state_dict(checkpoint["actors"])
         self.target_actors.load_state_dict(checkpoint["target_actors"])

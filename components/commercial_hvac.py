@@ -33,6 +33,7 @@ class CommercialHVACDR:
         self.unoccupied_comfort = tuple(float(x) for x in config["unoccupied_comfort_c"])
         self.terminal_air_tolerance = float(config["terminal_air_tolerance_c"])
         self.terminal_mass_tolerance = float(config["terminal_mass_tolerance_c"])
+        self.terminal_mode = str(config.get("terminal_mode", "none"))
         self.solar_gain = float(config.get("solar_gain_kw_per_wm2", 0.025))
         self.solar_air_fraction = float(config.get("solar_air_fraction", 0.20))
         self.internal_occ_fraction = float(config.get("internal_gain_occupied_fraction", 0.50))
@@ -257,22 +258,28 @@ class CommercialHVACDR:
     def state(self, t: int) -> dict[str, float]:
         low, high = self.feasible_bounds(t)
         remaining_hours = max(self.episode_length - int(t), 0) * self.delta_t
-        terminal_air_gap = float(self.initial_t_air - self.t_air)
-        terminal_mass_gap = float(self.initial_t_mass - self.t_mass)
-        if remaining_hours > 0.0:
-            required_thermal_kw = (
-                terminal_air_gap * self.c_air
-                + terminal_mass_gap * self.c_mass
-            ) / remaining_hours
-            if required_thermal_kw >= 0.0:
-                required_electric_kw = required_thermal_kw / self.cop_heat
-                recovery_pressure = abs(required_electric_kw) / self.heat_max_kw
-            else:
-                required_electric_kw = required_thermal_kw / self.cop_cool
-                recovery_pressure = abs(required_electric_kw) / self.cool_max_kw
-        else:
+        if self.terminal_mode == "none":
+            terminal_air_gap = 0.0
+            terminal_mass_gap = 0.0
             required_electric_kw = 0.0
             recovery_pressure = 0.0
+        else:
+            terminal_air_gap = float(self.initial_t_air - self.t_air)
+            terminal_mass_gap = float(self.initial_t_mass - self.t_mass)
+            if remaining_hours > 0.0:
+                required_thermal_kw = (
+                    terminal_air_gap * self.c_air
+                    + terminal_mass_gap * self.c_mass
+                ) / remaining_hours
+                if required_thermal_kw >= 0.0:
+                    required_electric_kw = required_thermal_kw / self.cop_heat
+                    recovery_pressure = abs(required_electric_kw) / self.heat_max_kw
+                else:
+                    required_electric_kw = required_thermal_kw / self.cop_cool
+                    recovery_pressure = abs(required_electric_kw) / self.cool_max_kw
+            else:
+                required_electric_kw = 0.0
+                recovery_pressure = 0.0
         if 0 <= int(t) < self.episode_length:
             t_out, _, _ = self._exogenous(t)
             comfort_low, comfort_high = self._comfort_bounds(t)

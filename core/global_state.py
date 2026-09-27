@@ -5,6 +5,7 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from components.ev_sessions import cohort_schema, cohort_values
 from core.constraint_observations import ess_terminal_guidance
 from core.tariffs import has_heterogeneous_tariffs, prices_from_row
 
@@ -49,6 +50,9 @@ class GlobalStateBuilder:
                 f"{mg}_dr_min", f"{mg}_dr_max",
             ]
         if kind == "ev_charging":
+            dr = self.cfg_by_id[mg].get("dr", {})
+            if dr.get("cohorts"):
+                return [f"{mg}_{name}" for name in cohort_schema(dr)]
             return [
                 f"{mg}_ev_soc", f"{mg}_ev_soc_gap", f"{mg}_remaining_energy",
                 f"{mg}_hours_to_departure", f"{mg}_ev_available",
@@ -145,6 +149,8 @@ class GlobalStateBuilder:
                 float(state["hvac_feasible_max_kw"]) / scale,
             ]
         if kind == "ev_charging":
+            if dr.get("cohorts"):
+                return cohort_values(dr, state)
             capacity = max(float(dr["fleet_capacity_kwh"]), 1e-9)
             power = max(float(dr["max_charge_kw"]), 1e-9)
             return [

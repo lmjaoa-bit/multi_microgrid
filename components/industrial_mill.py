@@ -26,6 +26,7 @@ class IndustrialMillDR:
         self.silo_max_t = float(config["silo_max_t"])
         self.initial_silo_t = float(config["silo_initial_t"])
         self.terminal_tolerance_t = float(config["terminal_tolerance_t"])
+        self.terminal_mode = str(config.get("terminal_mode", "none"))
         if not 0.0 <= self.silo_min_t < self.initial_silo_t < self.silo_max_t <= self.silo_capacity_t:
             raise ValueError("Invalid raw-meal silo bounds")
         if min(self.rated_power_kw, self.production_tph, self.delta_t) <= 0.0:
@@ -110,17 +111,22 @@ class IndustrialMillDR:
 
     def state(self, t: int) -> dict[str, float]:
         low, high = self.feasible_bounds(t)
-        target_gap = self.silo_t - self.initial_silo_t
         remaining_hours = max(self.episode_length - int(t), 0) * self.delta_t
-        if remaining_hours > 0.0:
-            required_production = (
-                self.downstream_tph
-                + (self.initial_silo_t - self.silo_t) / remaining_hours
-            )
+        if self.terminal_mode == "none":
+            target_gap = 0.0
+            required_production = self.downstream_tph
             production_pressure = required_production / self.production_tph
         else:
-            required_production = 0.0
-            production_pressure = 0.0
+            target_gap = self.silo_t - self.initial_silo_t
+            if remaining_hours > 0.0:
+                required_production = (
+                    self.downstream_tph
+                    + (self.initial_silo_t - self.silo_t) / remaining_hours
+                )
+                production_pressure = required_production / self.production_tph
+            else:
+                required_production = 0.0
+                production_pressure = 0.0
         return {
             "silo_level_t": float(self.silo_t),
             "silo_ratio": float(self.silo_t / self.silo_capacity_t),

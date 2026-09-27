@@ -982,9 +982,21 @@ def aggregate_episode_metrics(episodes: Sequence[Mapping[str, Any]]) -> dict[str
             mg: float(np.mean([day["profit_by_microgrid"][mg] for day in episodes]))
             for mg in ids
         },
-        "renewable_utilization_rate": float(np.mean([
-            day["renewable_utilization_rate"] for day in episodes
-        ])) if episodes else 0.0,
+        "renewable_utilization_rate": (
+            safe_ratio(
+                sum(
+                    sum(values.get("renewable_used_kwh", 0.0)
+                        for values in day.get("energy_statistics_by_microgrid", {}).values())
+                    for day in episodes
+                ),
+                sum(
+                    sum(values.get("renewable_available_kwh", 0.0)
+                        for values in day.get("energy_statistics_by_microgrid", {}).values())
+                    for day in episodes
+                ),
+            )
+            if episodes else 0.0
+        ),
         "p2p_total_energy_kwh": float(np.mean([
             day["p2p_statistics"]["total_energy_kwh"] for day in episodes
         ])) if episodes else 0.0,

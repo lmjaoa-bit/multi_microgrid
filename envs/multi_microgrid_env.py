@@ -72,7 +72,8 @@ class MultiMicrogridEnv:
         } if self.dr_enabled else {}
         self.grids = {
             str(cfg["id"]): ExternalGrid(
-                float(cfg["grid"]["import_limit_kw"]),
+                None if cfg["grid"].get("import_limit_kw") is None
+                else float(cfg["grid"]["import_limit_kw"]),
                 float(cfg["grid"]["export_limit_kw"]),
             )
             for cfg in self.config["microgrids"]
@@ -81,7 +82,11 @@ class MultiMicrogridEnv:
         p2p_enabled = bool(p2p_cfg.get("enabled", True)) and self.mode == "cooperative"
         self.allow_grid_resale = bool(p2p_cfg["allow_grid_resale"])
         self.energy_pool = CooperativeEnergySharing(
-            self.delta_t, p2p_enabled, float(p2p_cfg["pair_capacity_kw"]),
+            self.delta_t,
+            p2p_enabled,
+            None if p2p_cfg.get("pair_capacity_kw") is None
+            else float(p2p_cfg["pair_capacity_kw"]),
+            allow_ess_to_ess=bool(p2p_cfg.get("allow_ess_to_ess", False)),
         )
         cost = self.config["cost"]
         self.accounting = CostAccounting(
@@ -294,12 +299,18 @@ class MultiMicrogridEnv:
         dr_states = self._dr_states(0)
         self._last_observations = self._observations(current, dr_states)
         self._last_global_state = self._build_global_state(current, dr_states)
-        return {mg: value.copy() for mg, value in self._last_observations.items()}, {
+        reset_info = {
             "global_state": self.global_state(),
             "day": str(self.episode_df.iloc[0]["timestamp"]),
             "ctde_spec": self.ctde_spec,
             "data_quality_flags": list(self.data.data_quality_flags),
         }
+        reset_info["ev_sessions"] = {
+            mg: [dict(item) for item in getattr(self.dr_devices.get(mg), "sessions", [])]
+            for mg in self.agent_ids
+            if isinstance(self.dr_devices.get(mg), EVChargingDR)
+        }
+        return {mg: value.copy() for mg, value in self._last_observations.items()}, reset_info
 
     def _soc_potential(self, t: int) -> float:
         """Legacy potential function; the DR environment does not use reward shaping."""
@@ -426,7 +437,9 @@ class MultiMicrogridEnv:
         for buyer in self.agent_ids:
             if buyer == seller or float(prices[buyer][0]) + 1e-10 < seller_price:
                 continue
-            peer_demand = max(0.0, float(load_demands[buyer]) + float(charge_demands[buyer]))
+            # ESS energy may serve peer load only. Peer ESS charging demand is
+            # intentionally excluded from the dispatch offer cap.
+            peer_demand = max(0.0, float(load_demands[buyer]))
             cap += min(peer_demand, float(self.energy_pool.pair_capacity_kw))
         return float(cap)
 
@@ -641,9 +654,15 @@ class MultiMicrogridEnv:
             p2p_to_battery = float(peer["p2p_to_battery_kw"])
             p2p_to_load = float(peer["p2p_to_load_kw"])
             remaining_load = max(0.0, float(plan["p2p_load_demand_kw"]) - p2p_to_load)
-            import_limit = float(self.grids[mg].import_limit_kw)
-            grid_to_load = min(remaining_load, import_limit)
-            remaining_grid_capacity = max(0.0, import_limit - grid_to_load)
+            import_limit = self.grids[mg].import_limit_kw
+            grid_to_load = (
+                remaining_load if import_limit is None
+                else min(remaining_load, float(import_limit))
+            )
+            remaining_grid_capacity = (
+                float("inf") if import_limit is None
+                else max(0.0, float(import_limit) - grid_to_load)
+            )
             grid_charge_request = max(
                 0.0, requested_charge - renewable_to_battery - p2p_to_battery
             )
@@ -702,6 +721,15 @@ class MultiMicrogridEnv:
             )
             transfer = float(sharing.by_microgrid[mg]["p2p_transfer_payment"])
             costs[mg]["p2p_transfer_payment"] = transfer
+            departure_shortfall = float(
+                dr_devices_after.get(mg, {}).get("ev_departure_shortfall_kwh", 0.0)
+            )
+            departure_rate = float(
+                self.cfg_by_id[mg].get("dr", {}).get("departure_penalty_per_kwh", 0.0)
+            )
+            departure_penalty = departure_shortfall * departure_rate
+            costs[mg]["ev_departure_penalty"] = departure_penalty
+            costs[mg]["physical_profit"] -= departure_penalty
             costs[mg]["individual_accounting_profit"] = float(
                 costs[mg]["physical_profit"] + transfer
             )
@@ -713,6 +741,7 @@ class MultiMicrogridEnv:
             battery = self.cores[mg].battery
             terminal_soc_infeasible[mg] = bool(
                 terminal
+                and self.config["terminal_soc"]["mode"] != "none"
                 and abs(float(battery.soc) - float(battery.initial_soc))
                 > tolerance + 1e-6
             )
@@ -774,6 +803,16 @@ class MultiMicrogridEnv:
                 item["total_penalty"] for item in terminal_breakdown.values()
             )),
             "terminal_soc_infeasible": terminal_soc_infeasible,
+            "ev_sessions": {
+                mg: [dict(item) for item in getattr(self.dr_devices.get(mg), "sessions", [])]
+                for mg in self.agent_ids
+                if isinstance(self.dr_devices.get(mg), EVChargingDR)
+            },
+            "ev_departure_events": {
+                mg: [dict(item) for item in getattr(self.dr_devices.get(mg), "departure_events", [])]
+                for mg in self.agent_ids
+                if isinstance(self.dr_devices.get(mg), EVChargingDR)
+            },
             "data_quality_flags": list(self.data.data_quality_flags),
         }
 

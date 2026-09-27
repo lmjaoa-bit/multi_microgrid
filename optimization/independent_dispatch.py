@@ -12,8 +12,20 @@ def solve_independent_dispatch(config: str | Path | Mapping[str, Any], split: st
                                day: str | None = None, solver_output: bool = False) -> DispatchResult:
     """Solve three local counterfactuals without changing a cooperative environment."""
     cfg, data = build_dispatch_data(config, split, day)
-    results = [solve_dispatch(cfg, data, [mg], cooperative=False, solver_output=solver_output)
-               for mg in data.agent_ids]
+    results = [
+        solve_dispatch(
+            cfg,
+            data,
+            [mg],
+            cooperative=False,
+            solver_output=solver_output,
+            include_dr=bool(next(
+                (item.get("dr") for item in cfg["microgrids"] if item["id"] == mg),
+                None,
+            )),
+        )
+        for mg in data.agent_ids
+    ]
     profits = {mg: result.profit_by_microgrid[mg]
                for result in results for mg in result.profit_by_microgrid}
     trajectories = pd.concat([result.trajectories for result in results], ignore_index=True)

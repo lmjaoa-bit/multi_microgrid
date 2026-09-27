@@ -5,6 +5,7 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from components.ev_sessions import cohort_schema, cohort_values
 from core.forecast import SharedForecastProvider
 from core.profiles import HeterogeneousProfileModel
 from core.tariffs import prices_from_row
@@ -54,6 +55,9 @@ class ObservationBuilder:
                 "hvac_feasible_min", "hvac_feasible_max",
             ]
         if kind == "ev_charging":
+            dr = self.cfg_by_id[mg_id].get("dr", {})
+            if dr.get("cohorts"):
+                return cohort_schema(dr)
             return [
                 "ev_soc", "ev_soc_gap", "remaining_energy",
                 "hours_to_departure", "ev_available",
@@ -160,6 +164,8 @@ class ObservationBuilder:
                 float(state["hvac_feasible_max_kw"]) / scale,
             ]
         if kind == "ev_charging":
+            if dr.get("cohorts"):
+                return cohort_values(dr, state)
             capacity = max(float(dr["fleet_capacity_kwh"]), 1e-9)
             power = max(float(dr["max_charge_kw"]), 1e-9)
             return [

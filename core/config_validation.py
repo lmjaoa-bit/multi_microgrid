@@ -85,6 +85,66 @@ def _validate_dr(mg_id: str, dr: Mapping[str, Any]) -> None:
             raise ValueError(f"{mg_id}: invalid EV SOC bounds")
         if float(dr["eta_charge"]) > 1.0:
             raise ValueError(f"{mg_id}.dr.eta_charge must be <= 1")
+        cohorts = dr.get("cohorts")
+        if cohorts:
+            if not isinstance(cohorts, (list, tuple)) or len(cohorts) != 3:
+                raise ValueError(f"{mg_id}.dr.cohorts must contain exactly three groups")
+            expected_ids = {"G1", "G2", "G3"}
+            actual_ids = {str(group.get("group_id", "")) for group in cohorts}
+            if actual_ids != expected_ids:
+                raise ValueError(f"{mg_id}.dr.cohorts must use group ids G1, G2, G3")
+            station_rating = 0.0
+            fleet_capacity = 0.0
+            for group in cohorts:
+                gid = str(group["group_id"])
+                count = int(_number(group.get("count"), f"{mg_id}.dr.{gid}.count", 1.0))
+                if count <= 0 or float(count) != float(group.get("count")):
+                    raise ValueError(f"{mg_id}.dr.{gid}.count must be a positive integer")
+                cap = _number(group.get("capacity_per_vehicle_kwh"),
+                              f"{mg_id}.dr.{gid}.capacity_per_vehicle_kwh", 1e-12)
+                power = _number(group.get("max_charge_per_vehicle_kw"),
+                                f"{mg_id}.dr.{gid}.max_charge_per_vehicle_kw", 1e-12)
+                need = _pair(group.get("need_per_vehicle_kwh"),
+                             f"{mg_id}.dr.{gid}.need_per_vehicle_kwh")
+                if need[0] < 0.0 or need[1] > target * cap + 1e-9:
+                    raise ValueError(f"{mg_id}.dr.{gid}: invalid EV energy-need range")
+                arrivals = group.get("arrival_hours", [])
+                arrival_p = group.get("arrival_probabilities", [])
+                if not arrivals or len(arrivals) != len(arrival_p):
+                    raise ValueError(f"{mg_id}.dr.{gid}: arrival distribution is invalid")
+                if any(not 0 <= int(hour) <= 23 for hour in arrivals):
+                    raise ValueError(f"{mg_id}.dr.{gid}: arrival hours must be within 0..23")
+                if not np.isclose(sum(float(x) for x in arrival_p), 1.0, atol=1e-9):
+                    raise ValueError(f"{mg_id}.dr.{gid}: arrival probabilities must sum to one")
+                if "departure_hours" in group:
+                    departures = group.get("departure_hours", [])
+                    probabilities = group.get("departure_probabilities", [])
+                    if not departures or len(departures) != len(probabilities):
+                        raise ValueError(f"{mg_id}.dr.{gid}: departure distribution is invalid")
+                    if any(not 1 <= int(hour) <= 24 for hour in departures):
+                        raise ValueError(f"{mg_id}.dr.{gid}: departure hours must be within 1..24")
+                    if not np.isclose(sum(float(x) for x in probabilities), 1.0, atol=1e-9):
+                        raise ValueError(f"{mg_id}.dr.{gid}: departure probabilities must sum to one")
+                else:
+                    dwell = group.get("dwell_hours", [])
+                    probabilities = group.get("dwell_probabilities", [])
+                    if not dwell or len(dwell) != len(probabilities):
+                        raise ValueError(f"{mg_id}.dr.{gid}: dwell distribution is invalid")
+                    if any(int(hour) <= 0 for hour in dwell):
+                        raise ValueError(f"{mg_id}.dr.{gid}: dwell hours must be positive")
+                    if not np.isclose(sum(float(x) for x in probabilities), 1.0, atol=1e-9):
+                        raise ValueError(f"{mg_id}.dr.{gid}: dwell probabilities must sum to one")
+                fleet_capacity += count * cap
+                station_rating += count * power
+            if not np.isclose(fleet_capacity, float(dr["fleet_capacity_kwh"]), atol=1e-9):
+                raise ValueError(f"{mg_id}: fleet_capacity_kwh must equal the sum of cohort capacities")
+            if float(dr["max_charge_kw"]) + 1e-9 < station_rating:
+                raise ValueError(f"{mg_id}: station max_charge_kw must cover cohort ratings")
+            _number(dr.get("departure_penalty_per_kwh"),
+                    f"{mg_id}.dr.departure_penalty_per_kwh", 0.0)
+            _number(dr.get("scenario_seed", 42), f"{mg_id}.dr.scenario_seed", 0.0)
+            return
+
         start = int(_number(dr.get("available_start_hour"), f"{mg_id}.dr.available_start_hour", 0.0))
         departure = int(_number(dr.get("departure_hour"), f"{mg_id}.dr.departure_hour", 0.0))
         if not 0 <= start < departure <= 24:

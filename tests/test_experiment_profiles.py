@@ -139,7 +139,7 @@ def test_contract_uses_explicit_action_design_instead_of_ess_control_mode():
     assert matd3_contract["physical_config_hash"] == ordinary_contract["physical_config_hash"]
 
     modified = deepcopy(matd3_cfg)
-    modified["p2p"]["pair_capacity_kw"] *= 0.5
+    modified["p2p"]["pair_capacity_kw"] = 75.0
     changed = experiment_contract(
         matd3_spec,
         matd3_spec.build_environment_config(modified),
