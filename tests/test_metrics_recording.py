@@ -143,7 +143,7 @@ def test_service_reliability_augments_daily_and_summary_outputs(tmp_path: Path) 
     assert reliability["dr_supply_infeasible_day_rate"] == 1.0
     assert reliability["dr_supply_infeasible_rate_mean"] == 0.5
     assert np.isclose(reliability["dr_supply_infeasible_microgrid_hour_rate_mean"], 1.0 / 6.0)
-    assert reliability["strict_feasible_day_rate"] == 0.0
+    assert reliability["strict_feasible_day_rate"] is None
     assert reliability["by_microgrid"]["mg3"]["unmet_energy_total_kwh"] == 2.5
 
     with (run_dir / "test_daily_metrics.csv").open(encoding="utf-8", newline="") as handle:
@@ -151,21 +151,21 @@ def test_service_reliability_augments_daily_and_summary_outputs(tmp_path: Path) 
     assert float(row["unmet_energy_kwh"]) == 2.5
     assert row["unmet_load_day"].lower() == "true"
     assert row["dr_supply_infeasible_day"].lower() == "true"
-    assert row["strict_feasible_day"].lower() == "false"
+    assert row["strict_feasible_day"] in {"", "None"}
     assert float(row["unmet_load_hour_rate"]) == 0.5
     assert float(row["dr_supply_infeasible_rate"]) == 0.5
     assert float(row["unmet_energy_mg3_kwh"]) == 2.5
     assert float(row["dr_supply_infeasible_rate_mg3"]) == 0.5
 
     test_summary = json.loads((run_dir / "test_summary.json").read_text(encoding="utf-8"))
-    assert test_summary["strict_feasible_day_rate"] == 0.0
+    assert test_summary["strict_feasible_day_rate"] is None
     assert test_summary["unmet_energy_total_kwh"] == 2.5
     assert test_summary["service_reliability"]["unmet_load_day_rate"] == 1.0
-    assert test_summary["algorithm"]["service_reliability"]["strict_feasible_day_rate"] == 0.0
-    assert test_summary["matd3"]["service_reliability"]["strict_feasible_day_rate"] == 0.0
+    assert test_summary["algorithm"]["service_reliability"]["strict_feasible_day_rate"] is None
+    assert test_summary["matd3"]["service_reliability"]["strict_feasible_day_rate"] is None
 
     run_summary = json.loads((run_dir / "summary.json").read_text(encoding="utf-8"))
-    assert run_summary["strict_feasible_day_rate"] == 0.0
+    assert run_summary["strict_feasible_day_rate"] is None
     assert run_summary["service_reliability"]["unmet_energy_total_kwh"] == 2.5
 
 
