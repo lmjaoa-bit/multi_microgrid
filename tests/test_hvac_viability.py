@@ -148,4 +148,5 @@ def test_changed_snapshot_invalidates_hvac_viability_cache():
     second = device.prepare_viability(0, changed)
     assert second is not first
     assert second.snapshot_id == "changed"
-    assert device.state(0)["hvac_forecast_snapshot_id"] == "changed"
+    assert device._viability_result is second
+    assert device._viability_t == 0
