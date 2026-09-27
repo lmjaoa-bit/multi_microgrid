@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import numpy as np
+import pandas as pd
 import yaml
 
 from components.controllable_load import build_controllable_load
