@@ -336,7 +336,7 @@ def generate_figures(
         ("Cooperation Surplus", summary.get("cooperation_surplus_mean")),
         ("Cooperation Gain", None if summary.get("cooperation_gain_pct_mean") is None else f"{summary['cooperation_gain_pct_mean']:.1f}%"),
         ("CVCR", summary.get("cooperative_value_capture_ratio")),
-        ("RES Utilization", None if summary.get("res_utilization_mean_pct") is None else f"{summary['res_utilization_mean_pct']:.1f}%"),
+        ("RES Non-Curtailment", None if summary.get("res_utilization_mean_pct") is None else f"{summary['res_utilization_mean_pct']:.1f}%"),
         ("Curtailment Reduction", summary.get("curtailment_reduction_mean_kwh")),
         ("P2P Energy", summary.get("p2p_total_energy_kwh_mean")),
         ("Feasible-Day Rate", None if summary.get("feasible_day_rate") is None else f"{100*summary['feasible_day_rate']:.1f}%"),
@@ -414,7 +414,7 @@ def generate_figures(
     written += _save(
         _bar_figure(["Independent", f"{algorithm_label} Joint", "Cooperative MILP"],
                     [item[0] for item in mean_std], [item[1] for item in mean_std],
-                    title="RES Utilization", ylabel="RES Utilization (%)", percent=True),
+                    title="Renewable Non-Curtailment", ylabel="Non-Curtailment Rate (%)", percent=True),
         figure_dir, "06_res_utilization", formats,
     )
 
