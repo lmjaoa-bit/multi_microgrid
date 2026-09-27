@@ -9,6 +9,7 @@ from optimization.common_constraints import DispatchData, solve_dispatch
 
 def _cfg():
     return {
+        "dispatch": {"priority_mode": "renewable_load_first"},
         "time": {"delta_t": 1.0},
         "cost": {
             "unmet_load_cost_per_kwh": 1000.0,
@@ -64,13 +65,17 @@ def test_coalition_renewable_covers_load_before_grid_or_ess():
 
 def test_received_renewable_does_not_forbid_ess_export_to_other_load():
     cfg=_cfg()
+    cfg["microgrids"][0]["battery"]["initial_soc"] = 0.5
+    cfg["microgrids"][1]["battery"]["initial_soc"] = 0.1
+    cfg["microgrids"][2]["battery"]["initial_soc"] = 0.1
     result=solve_dispatch(
         cfg,_data([10,0,20],[0,10,0]),["mg1","mg2","mg3"],
         cooperative=True,p2p_export_source="unrestricted",
     )
     rows=result.trajectories.set_index("microgrid")
     assert rows.loc["mg2","renewable_peer_load_export_kw"]==pytest.approx(10.0)
-    assert rows["ess_peer_load_export_kw"].sum() >= -1e-9
+    assert rows.loc["mg1","ess_peer_load_export_kw"] > 0.0
+    assert rows.loc["mg1","grid_to_load_kw"] == pytest.approx(0.0, abs=1e-7)
 
 
 def test_independent_mode_does_not_virtualize_peer_renewable():
@@ -82,3 +87,14 @@ def test_independent_mode_does_not_virtualize_peer_renewable():
     rows=result.trajectories.set_index("microgrid")
     assert rows.loc["mg1","renewable_peer_load_export_kw"]==pytest.approx(0.0)
     assert rows.loc["mg1","grid_to_load_kw"] > 0.0
+
+
+def test_legacy_mode_keeps_legacy_allocation_metadata():
+    cfg=_cfg()
+    cfg.pop("dispatch")
+    result=solve_dispatch(
+        cfg,_data([20,0,0],[0,20,0]),["mg1","mg2","mg3"],
+        cooperative=True,p2p_export_source="unrestricted",
+    )
+    assert result.metadata["source_priority"]=="legacy_local_first"
+    assert result.metadata["allocation"]=="legacy_oracle_allocation"

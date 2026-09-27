@@ -135,6 +135,10 @@ def solve_dispatch(
     terminal_cfg = config["terminal_soc"]
     rate = float(terminal_cfg["penalty_per_kwh"])
     p2p_cfg = config["p2p"]
+    dispatch_mode = str(
+        config.get("dispatch", {}).get("priority_mode", "legacy_local_first")
+    )
+    renewable_first = dispatch_mode == "renewable_load_first"
     # Bound unlimited interfaces by total physically available source power.
     physical_supply = sum(float(np.max(data.renewable_kw[m])) +
                           float(cfg_by_id[m]["battery"]["max_discharge_kw"]) for m in ids)
@@ -431,91 +435,134 @@ def solve_dispatch(
             model.addConstr(float(data.load_kw[mg][t]) + (dr_power[key] if include_dr else 0) ==
                 variables["res_load"][key] + variables["ess_load"][key] +
                 variables["grid_load"][key] + peer_load + variables["unmet"][key])
-            # Source-specific ledgers already forbid grid resale and ESS->ESS/grid.
-            # Do not add a total grid-import/P2P-export mutex: a microgrid may
-            # legitimately export renewable or ESS energy while grid-charging
-            # after coalition load service has been satisfied.
-
-        # Renewable-first priority is imposed on physical source totals while
-        # preserving the oracle's deliberate within-coalition free allocation.
-        # For cooperative solves with the current unlimited pair-capacity
-        # configuration, the whole coalition is one pool. Independent solves
-        # use one single-member pool per microgrid, so no virtual cross-MG
-        # renewable transfer is introduced.
-        priority_groups = [ids] if cooperative else [[mg] for mg in ids]
-        for group_index, group in enumerate(priority_groups):
-            renewable_total = float(sum(
-                float(data.renewable_kw[mg][t]) for mg in group
-            ))
-            demand_total = sum(
-                (
-                    float(data.load_kw[mg][t])
-                    + (dr_power[(mg, t)] if include_dr else 0.0)
-                    for mg in group
-                ),
-                0.0,
-            )
-            res_to_load = sum(
-                (variables["res_load"][(mg, t)] for mg in group), 0.0
-            )
             if cooperative:
-                res_to_load += sum(
+                if renewable_first:
+                    # In the renewable-first model, imported grid energy has no
+                    # P2P/export path. ESS export is allowed only after the
+                    # seller's post-renewable local residual load is not being
+                    # carried by grid, unmet load, or another ESS. Incoming
+                    # renewable may serve that local load without blocking the
+                    # seller's own ESS from serving a different microgrid.
+                    export_mode = add(
+                        "ess_export_mode", key, lb=0, ub=1, type=integer
+                    )
+                    model.addConstr(
+                        ess_out
+                        <= float(cfg_by_id[mg]["battery"]["max_discharge_kw"])
+                        * export_mode
+                    )
+                    incoming_ess = peer_sum("ess_peer_load", True)
+                    model.addConstr(
+                        variables["grid_load"][key]
+                        + incoming_ess
+                        + variables["unmet"][key]
+                        <= import_bounds[mg] * (1 - export_mode)
+                    )
+                else:
+                    # Preserve the historical finite-capacity/local-first
+                    # oracle semantics for legacy configs.
+                    if not allow_grid_resale:
+                        model.addConstr(
+                            res_out + ess_out
+                            <= pair_capacity_kw * max(0, len(ids) - 1)
+                            * (1 - variables["grid_mode"][key])
+                        )
+                    export_mode = add(
+                        "ess_export_mode", key, lb=0, ub=1, type=integer
+                    )
+                    model.addConstr(
+                        ess_out
+                        <= float(cfg_by_id[mg]["battery"]["max_discharge_kw"])
+                        * export_mode
+                    )
+                    model.addConstr(
+                        variables["grid_load"][key]
+                        + peer_load
+                        + variables["unmet"][key]
+                        <= import_bounds[mg] * (1 - export_mode)
+                    )
+
+    if renewable_first:
+            # Renewable-first priority is imposed on physical source totals while
+            # preserving the oracle's deliberate within-coalition free allocation.
+            # For cooperative solves with the current unlimited pair-capacity
+            # configuration, the whole coalition is one pool. Independent solves
+            # use one single-member pool per microgrid, so no virtual cross-MG
+            # renewable transfer is introduced.
+            priority_groups = [ids] if cooperative else [[mg] for mg in ids]
+            for group_index, group in enumerate(priority_groups):
+                renewable_total = float(sum(
+                    float(data.renewable_kw[mg][t]) for mg in group
+                ))
+                demand_total = sum(
                     (
-                        variables["res_peer_load"][(src, dst, t)]
-                        for src in group for dst in group if src != dst
+                        float(data.load_kw[mg][t])
+                        + (dr_power[(mg, t)] if include_dr else 0.0)
+                        for mg in group
                     ),
                     0.0,
                 )
-
-            # Finite M proof: demand cannot exceed the sum of each MG's
-            # import_bound, and renewable_total is known. import_bound itself
-            # is max base demand + DR nameplate + battery charge nameplate.
-            # Therefore M >= max(renewable_total, max feasible demand).
-            priority_m = max(
-                1.0,
-                renewable_total,
-                float(sum(import_bounds[mg] for mg in group)),
-            )
-            load_mode = model.addVariable(
-                name=f"renewable_load_priority[{group_index},{t}]",
-                lb=0.0, ub=1.0, type=integer,
-            )
-            model.addConstr(res_to_load <= renewable_total)
-            model.addConstr(res_to_load <= demand_total)
-            model.addConstr(
-                res_to_load >= renewable_total - priority_m * load_mode
-            )
-            model.addConstr(
-                res_to_load >= demand_total - priority_m * (1.0 - load_mode)
-            )
-
-            res_to_charge = sum(
-                (variables["res_charge"][(mg, t)] for mg in group), 0.0
-            )
-            if cooperative:
-                res_to_charge += sum(
-                    (
-                        variables["res_peer_charge"][(src, dst, t)]
-                        for src in group for dst in group if src != dst
-                    ),
-                    0.0,
+                res_to_load = sum(
+                    (variables["res_load"][(mg, t)] for mg in group), 0.0
                 )
-            charge_total = sum(
-                (variables["charge"][(mg, t)] for mg in group), 0.0
-            )
-            renewable_after_load = renewable_total - res_to_load
-            charge_mode = model.addVariable(
-                name=f"renewable_charge_priority[{group_index},{t}]",
-                lb=0.0, ub=1.0, type=integer,
-            )
-            model.addConstr(res_to_charge <= renewable_after_load)
-            model.addConstr(res_to_charge <= charge_total)
-            model.addConstr(
-                res_to_charge >= renewable_after_load - priority_m * charge_mode
-            )
-            model.addConstr(
-                res_to_charge >= charge_total - priority_m * (1.0 - charge_mode)
-            )
+                if cooperative:
+                    res_to_load += sum(
+                        (
+                            variables["res_peer_load"][(src, dst, t)]
+                            for src in group for dst in group if src != dst
+                        ),
+                        0.0,
+                    )
+
+                # Finite M proof: demand cannot exceed the sum of each MG's
+                # import_bound, and renewable_total is known. import_bound itself
+                # is max base demand + DR nameplate + battery charge nameplate.
+                # Therefore M >= max(renewable_total, max feasible demand).
+                priority_m = max(
+                    1.0,
+                    renewable_total,
+                    float(sum(import_bounds[mg] for mg in group)),
+                )
+                load_mode = model.addVariable(
+                    name=f"renewable_load_priority[{group_index},{t}]",
+                    lb=0.0, ub=1.0, type=integer,
+                )
+                model.addConstr(res_to_load <= renewable_total)
+                model.addConstr(res_to_load <= demand_total)
+                model.addConstr(
+                    res_to_load >= renewable_total - priority_m * load_mode
+                )
+                model.addConstr(
+                    res_to_load >= demand_total - priority_m * (1.0 - load_mode)
+                )
+
+                res_to_charge = sum(
+                    (variables["res_charge"][(mg, t)] for mg in group), 0.0
+                )
+                if cooperative:
+                    res_to_charge += sum(
+                        (
+                            variables["res_peer_charge"][(src, dst, t)]
+                            for src in group for dst in group if src != dst
+                        ),
+                        0.0,
+                    )
+                charge_total = sum(
+                    (variables["charge"][(mg, t)] for mg in group), 0.0
+                )
+                renewable_after_load = renewable_total - res_to_load
+                charge_mode = model.addVariable(
+                    name=f"renewable_charge_priority[{group_index},{t}]",
+                    lb=0.0, ub=1.0, type=integer,
+                )
+                model.addConstr(res_to_charge <= renewable_after_load)
+                model.addConstr(res_to_charge <= charge_total)
+                model.addConstr(
+                    res_to_charge >= renewable_after_load - priority_m * charge_mode
+                )
+                model.addConstr(
+                    res_to_charge >= charge_total - priority_m * (1.0 - charge_mode)
+                )
 
     tolerance = float(terminal_cfg["tolerance"])
     rate = float(terminal_cfg["penalty_per_kwh"])
@@ -689,8 +736,14 @@ def solve_dispatch(
                           total_profit, profit_by, pd.DataFrame(rows), pair_totals,
                           cost_breakdown if include_dr else None,
                           {
-                              "source_priority": "renewable_load_first",
-                              "allocation": "source_priority_free_allocation",
+                              "source_priority": (
+                                  "renewable_load_first"
+                                  if renewable_first else "legacy_local_first"
+                              ),
+                              "allocation": (
+                                  "source_priority_free_allocation"
+                                  if renewable_first else "legacy_oracle_allocation"
+                              ),
                               "perfect_foresight": bool(include_dr),
                               "p2p_export_source": p2p_export_source,
                               "grid_resale_allowed": False,
