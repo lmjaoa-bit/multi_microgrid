@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 import numpy as np
+import pandas as pd
 
 from core.tariffs import prices_from_row
 
@@ -273,6 +274,7 @@ class EpisodeMetricsCollector:
             return
         plan = info["plans"][mg]
         dr_plan = info.get("dr_plans", {}).get(mg, {})
+        dr_device = info.get("dr_devices", {}).get(mg, {})
         state_after = info.get("dr_state_after", {}).get(mg, {})
         if mg in info.get("ev_sessions", {}):
             self.ev_sessions[mg] = [dict(item) for item in info["ev_sessions"][mg]]
@@ -288,7 +290,12 @@ class EpisodeMetricsCollector:
         if kind == "industrial_mill":
             totals["mill_energy_kwh"] += float(dr_plan.get("flexible_load_kw", 0.0)) * dt
             totals["mill_effective_duty_sum"] += float(dr_plan.get("effective_duty", 0.0))
-            totals["mill_production_t"] += float(dr_plan.get("production_tph", 0.0)) * dt
+            totals["mill_production_t"] += float(
+                dr_device.get(
+                    "actual_production_t",
+                    float(dr_plan.get("production_tph", 0.0)) * dt,
+                )
+            )
             totals["terminal_infeasible_steps"] += float(bool(dr_plan.get("terminal_infeasible", False)))
         elif kind == "commercial_hvac":
             totals["hvac_energy_kwh"] += float(dr_plan.get("flexible_load_kw", 0.0)) * dt
@@ -497,8 +504,15 @@ class EpisodeMetricsCollector:
             hour = int(timestamp[11:13])
         except (TypeError, ValueError):
             hour = self.steps - 1
+        try:
+            result_timestamp = str(
+                pd.Timestamp(timestamp) + pd.to_timedelta(float(self.env.delta_t), unit="h")
+            )
+        except (TypeError, ValueError):
+            result_timestamp = ""
         row: dict[str, Any] = {
             "date": timestamp[:10], "hour": hour, "timestep": self.steps - 1,
+            "timestamp": timestamp, "result_timestamp": result_timestamp,
             "p2p_unconstrained_total_energy_kwh": float(
                 self._last_p2p_capacity_diag["unconstrained_total_energy_kwh"]
             ),
@@ -596,6 +610,7 @@ class EpisodeMetricsCollector:
                 })
                 row[f"{mg}_executed_action_1"] = float(plan.get("effective_dr_action", 0.0))
                 dr_plan = info.get("dr_plans", {}).get(mg, {})
+                dr_device = info.get("dr_devices", {}).get(mg, {})
                 dr_state = info.get("dr_state_after", {}).get(mg, {})
                 kind = str(self.env.cfg_by_id[mg]["dr"]["type"])
                 if kind == "industrial_mill":
@@ -608,6 +623,44 @@ class EpisodeMetricsCollector:
                         f"{mg}_silo_ratio": float(dr_state.get("silo_ratio", 0.0)),
                         f"{mg}_mill_feasible_min": float(dr_plan.get("feasible_min", 0.0)),
                         f"{mg}_mill_feasible_max": float(dr_plan.get("feasible_max", 0.0)),
+                        f"{mg}_mill_actual_production_t": float(
+                            dr_device.get(
+                                "actual_production_t",
+                                float(dr_plan.get("production_tph", 0.0)) * float(self.env.delta_t),
+                            )
+                        ),
+                        f"{mg}_mill_downstream_required_t": float(
+                            dr_device.get(
+                                "downstream_required_t",
+                                float(dr_plan.get("downstream_consumption_tph", 0.0))
+                                * float(self.env.delta_t),
+                            )
+                        ),
+                        f"{mg}_mill_actual_consumption_t": float(
+                            dr_device.get(
+                                "actual_consumption_t",
+                                float(dr_plan.get("downstream_consumption_tph", 0.0))
+                                * float(self.env.delta_t),
+                            )
+                        ),
+                        f"{mg}_mill_downstream_unserved_t": float(
+                            dr_device.get("downstream_unserved_t", 0.0)
+                        ),
+                        f"{mg}_mill_silo_before_t": float(
+                            dr_device.get("silo_before_t", dr_plan.get("silo_before_t", 0.0))
+                        ),
+                        f"{mg}_mill_silo_after_unclipped_t": float(
+                            dr_device.get(
+                                "silo_after_unclipped_t",
+                                dr_plan.get("silo_after_t", dr_state.get("silo_level_t", 0.0)),
+                            )
+                        ),
+                        f"{mg}_mill_inventory_min_violation_t": float(
+                            dr_device.get("inventory_min_violation_t", 0.0)
+                        ),
+                        f"{mg}_mill_inventory_max_violation_t": float(
+                            dr_device.get("inventory_max_violation_t", 0.0)
+                        ),
                     })
                 elif kind == "commercial_hvac":
                     row.update({
@@ -620,6 +673,21 @@ class EpisodeMetricsCollector:
                         f"{mg}_occupied": float(dr_state.get("occupied", 0.0)),
                         f"{mg}_terminal_air_gap_c": float(dr_state.get("terminal_air_gap_c", 0.0)),
                         f"{mg}_terminal_mass_gap_c": float(dr_state.get("terminal_mass_gap_c", 0.0)),
+                        f"{mg}_result_timestamp": result_timestamp,
+                        f"{mg}_result_occupied": int(bool(dr_state.get("occupied", 0.0))),
+                        f"{mg}_result_comfort_low_c": float(
+                            dr_state.get("t_air_c", dr_plan.get("t_air_after_c", 0.0))
+                            - dr_state.get("comfort_lower_margin_c", 0.0)
+                        ),
+                        f"{mg}_result_comfort_high_c": float(
+                            dr_state.get("t_air_c", dr_plan.get("t_air_after_c", 0.0))
+                            + dr_state.get("comfort_upper_margin_c", 0.0)
+                        ),
+                        f"{mg}_result_comfort_violation_c": float(max(
+                            0.0,
+                            -float(dr_state.get("comfort_lower_margin_c", 0.0)),
+                            -float(dr_state.get("comfort_upper_margin_c", 0.0)),
+                        )),
                         f"{mg}_comfort_infeasible": int(bool(dr_plan.get("comfort_infeasible", False))),
                         f"{mg}_terminal_thermal_infeasible": int(bool(dr_plan.get("terminal_thermal_infeasible", False))),
                     })

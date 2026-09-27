@@ -97,16 +97,33 @@ class IndustrialMillDR:
     ) -> dict[str, float]:
         served = clamp_delivered_fraction(delivered_fraction)
         effective = float(plan["effective_duty"]) * served
-        self.silo_t += (
-            self.production_tph * effective - self.downstream_tph
-        ) * self.delta_t
-        if self.silo_t < self.silo_min_t - 1e-7 or self.silo_t > self.silo_max_t + 1e-7:
+        silo_before = float(self.silo_t)
+        actual_production_tph = self.production_tph * effective
+        actual_production_t = actual_production_tph * self.delta_t
+        downstream_required_t = self.downstream_tph * self.delta_t
+        material_available_t = max(0.0, silo_before + actual_production_t)
+        actual_consumption_t = min(downstream_required_t, material_available_t)
+        downstream_unserved_t = max(0.0, downstream_required_t - actual_consumption_t)
+        silo_unclipped = silo_before + actual_production_t - actual_consumption_t
+        min_violation = max(0.0, self.silo_min_t - silo_unclipped)
+        max_violation = max(0.0, silo_unclipped - self.silo_max_t)
+        if min_violation > 1e-7 or max_violation > 1e-7 or downstream_unserved_t > 1e-7:
             self.terminal_infeasible = True
-        self.silo_t = float(np.clip(self.silo_t, self.silo_min_t, self.silo_max_t))
+        self.silo_t = float(np.clip(silo_unclipped, self.silo_min_t, self.silo_max_t))
         return {
+            "silo_before_t": silo_before,
+            "silo_after_unclipped_t": float(silo_unclipped),
             "silo_level_t": self.silo_t,
             "served_duty": effective,
             "delivered_fraction": served,
+            "actual_production_tph": float(actual_production_tph),
+            "actual_production_t": float(actual_production_t),
+            "downstream_required_t": float(downstream_required_t),
+            "actual_consumption_t": float(actual_consumption_t),
+            "downstream_unserved_t": float(downstream_unserved_t),
+            "inventory_min_violation_t": float(min_violation),
+            "inventory_max_violation_t": float(max_violation),
+            "inventory_clip_adjustment_t": float(self.silo_t - silo_unclipped),
         }
 
     def state(self, t: int) -> dict[str, float]:

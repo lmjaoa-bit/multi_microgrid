@@ -128,199 +128,84 @@ def _extract_rollout_constraint_metrics(
     env: MultiMicrogridEnv,
     daily_metrics: Sequence[Mapping[str, Any]],
     hourly_rows: Sequence[Mapping[str, Any]],
-) -> dict[str, float]:
-    """Extract constraint metrics from in-memory rollout matching formal reporting."""
-    from evaluation.service_reliability import (
-        DEFAULT_TOLERANCE,
-        _aggregate_service_metrics,
-        _daily_service_metrics,
+) -> dict[str, Any]:
+    """Compute rollout service metrics from the same strict v2 implementation used in reports."""
+    from evaluation.service_metrics import (
+        SERVICE_METRICS_SCHEMA_VERSION,
+        aggregate_service_days,
+        summarize_day_services,
     )
 
     if not daily_metrics or not hourly_rows:
         return {
-            "strict_feasible_day_rate": 1.0,
-            "unmet_energy_mean_kwh": 0.0,
-            "hvac_terminal_joint_success_rate": 1.0,
-            "hvac_comfort_rate": 1.0,
-            "mill_terminal_success_rate": 1.0,
-            "mill_production_completion_rate": 1.0,
-            "mill_terminal_or_production_success_rate": 1.0,
-            "ev_departure_success_rate": 1.0,
+            "metrics_schema_version": SERVICE_METRICS_SCHEMA_VERSION,
+            "strict_feasible_day_rate": None,
+            "unmet_energy_mean_kwh": None,
+            "hvac_terminal_joint_success_rate": None,
+            "hvac_comfort_rate": None,
+            "mill_terminal_success_rate": None,
+            "mill_production_completion_rate": None,
+            "mill_production_coverage_ratio": None,
+            "mill_downstream_service_completion_rate": None,
+            "mill_terminal_or_production_success_rate": None,
+            "ev_departure_success_rate": None,
             "mg2_projection_rate": 0.0,
             "mg3_projection_rate": 0.0,
         }
 
     rows_by_date: dict[str, list[Mapping[str, Any]]] = {}
-    for r in hourly_rows:
-        date_str = str(r.get("date", ""))
-        rows_by_date.setdefault(date_str, []).append(r)
+    for row in hourly_rows:
+        rows_by_date.setdefault(str(row.get("date", "")), []).append(row)
+    for rows in rows_by_date.values():
+        rows.sort(key=lambda item: int(item.get("timestep", 0)))
 
-    # 1. Service reliability: strict_feasible_day_rate and unmet_energy_mean_kwh
-    daily_service_list = []
+    daily_services: list[dict[str, Any]] = []
     for day in daily_metrics:
-        d_date = str(day.get("date", ""))
-        d_rows = rows_by_date.get(d_date, [])
-        feasible_episode = bool(day.get("constraint_statistics", {}).get("feasible_episode", True))
-        d_service = _daily_service_metrics(
-            d_rows,
-            env.agent_ids,
-            delta_t=float(getattr(env, "delta_t", 1.0)),
-            feasible_day=feasible_episode,
-            tolerance=DEFAULT_TOLERANCE,
+        date = str(day.get("date", ""))
+        rows = rows_by_date.get(date, [])
+        physical_feasible = bool(
+            day.get("constraint_statistics", {}).get("feasible_episode", True)
         )
-        daily_service_list.append(d_service)
-    agg_service = _aggregate_service_metrics(daily_service_list, env.agent_ids)
-    strict_feasible_day_rate = float(agg_service.get("strict_feasible_day_rate", 1.0))
-    unmet_energy_mean_kwh = float(agg_service.get("unmet_energy_mean_kwh", 0.0))
-
-    # 2. MG2 HVAC metrics: joint terminal thermal success and comfort compliance
-    hvac_cfg = env.cfg_by_id.get("mg2", {}).get("dr")
-    if (hvac_cfg and str(hvac_cfg.get("type")) == "commercial_hvac"
-            and str(hvac_cfg.get("terminal_mode", "none")) != "none"):
-        air_tol = float(hvac_cfg.get("terminal_air_tolerance_c", 1.0))
-        mass_tol = float(hvac_cfg.get("terminal_mass_tolerance_c", 0.5))
-        comfort_bounds = hvac_cfg.get("occupied_comfort_c", [21.0, 25.0])
-        comfort_low, comfort_high = float(comfort_bounds[0]), float(comfort_bounds[1])
-
-        joint_successes: list[bool] = []
-        for day in daily_metrics:
-            d_date = str(day.get("date", ""))
-            d_rows = rows_by_date.get(d_date, [])
-            if not d_rows:
-                continue
-            last_row = d_rows[-1]
-            first_row = d_rows[0]
-            if "mg2_terminal_air_gap_c" in last_row and "mg2_terminal_mass_gap_c" in last_row:
-                air_gap = abs(float(last_row["mg2_terminal_air_gap_c"]))
-                mass_gap = abs(float(last_row["mg2_terminal_mass_gap_c"]))
-            else:
-                first_out = float(first_row.get("mg2_t_out_c", 23.0))
-                init_air = float(np.clip(23.0 + 0.20 * (first_out - 23.0), 18.0, 28.0))
-                init_mass = float(np.clip(23.0 + 0.10 * (first_out - 23.0), 18.0, 28.0))
-                air_gap = abs(float(last_row.get("mg2_t_air_c", 23.0)) - init_air)
-                mass_gap = abs(float(last_row.get("mg2_t_mass_c", 23.0)) - init_mass)
-            joint_success = bool((air_gap <= air_tol + 1e-12) and (mass_gap <= mass_tol + 1e-12))
-            joint_successes.append(joint_success)
-        hvac_joint_success_rate = float(np.mean(joint_successes)) if joint_successes else 1.0
-
-        occupied_successes: list[bool] = []
-        for r in hourly_rows:
-            if float(r.get("mg2_occupied", 0.0)) > 0.5:
-                t_air = float(r.get("mg2_t_air_c", 23.0))
-                viol = max(0.0, comfort_low - t_air) + max(0.0, t_air - comfort_high)
-                occupied_successes.append(viol <= 1e-9)
-        hvac_comfort_rate = float(np.mean(occupied_successes)) if occupied_successes else 1.0
-    else:
-        hvac_joint_success_rate = 1.0
-        hvac_comfort_rate = 1.0
-
-    # 3. MG1 Industrial Mill metric: terminal silo success rate
-    mill_cfg = env.cfg_by_id.get("mg1", {}).get("dr")
-    if (mill_cfg and str(mill_cfg.get("type")) == "industrial_mill"
-            and str(mill_cfg.get("terminal_mode", "none")) != "none"):
-        init_silo = float(mill_cfg.get("silo_initial_t", 20.0))
-        silo_tol = float(mill_cfg.get("terminal_tolerance_t", 1.0))
-        mill_successes: list[bool] = []
-        production_completion: list[float] = []
-        delta_t = float(getattr(env, "delta_t", 1.0))
-        required_production = (
-            float(mill_cfg.get("downstream_consumption_tph", 0.0))
-            * float(getattr(env, "episode_length", 24))
-            * delta_t
-        )
-        for day in daily_metrics:
-            d_date = str(day.get("date", ""))
-            d_rows = rows_by_date.get(d_date, [])
-            if not d_rows:
-                continue
-            last_row = d_rows[-1]
-            silo_last = float(last_row.get("mg1_silo_level_t", init_silo))
-            silo_gap = abs(silo_last - init_silo)
-            mill_successes.append(bool(silo_gap <= silo_tol + 1e-12))
-            produced = sum(
-                float(row.get("mg1_mill_production_tph", 0.0)) * delta_t
-                for row in d_rows
+        daily_services.append(
+            summarize_day_services(
+                rows,
+                env.config,
+                physical_feasible,
+                SERVICE_METRICS_SCHEMA_VERSION,
             )
-            production_completion.append(
-                produced / required_production if required_production > 0.0 else 1.0
-            )
-        mill_terminal_success_rate = float(np.mean(mill_successes)) if mill_successes else 1.0
-        mill_production_completion_rate = (
-            float(np.mean(production_completion)) if production_completion else 1.0
         )
-    else:
-        mill_terminal_success_rate = 1.0
-        mill_production_completion_rate = 1.0
-    mill_terminal_or_production_success_rate = max(
-        mill_terminal_success_rate,
-        mill_production_completion_rate,
-    )
+    aggregate = aggregate_service_days(daily_services)
 
-    # 4. MG3 EV metric: departure SOC target success rate
-    ev_cfg = env.cfg_by_id.get("mg3", {}).get("dr")
-    if ev_cfg and str(ev_cfg.get("type")) == "ev_charging":
-        if ev_cfg.get("cohorts"):
-            completed = 0.0
-            departures = 0.0
-            for day in daily_metrics:
-                d_rows = rows_by_date.get(str(day.get("date", "")), [])
-                if not d_rows:
-                    continue
-                completed += max(
-                    float(r.get("mg3_ev_completed_group_count", 0.0)) for r in d_rows
-                )
-                departures += max(
-                    float(r.get("mg3_ev_departure_count", 0.0)) for r in d_rows
-                )
-            ev_departure_success_rate = completed / departures if departures > 0.0 else 1.0
-        else:
-            dep_hour = int(ev_cfg.get("departure_hour", 18))
-            target_soc = float(ev_cfg.get("target_soc", 0.85))
-            ev_successes: list[bool] = []
-            for day in daily_metrics:
-                d_date = str(day.get("date", ""))
-                d_rows = rows_by_date.get(d_date, [])
-                dep_rows = [r for r in d_rows if int(r.get("hour", -1)) == dep_hour - 1]
-                if dep_rows:
-                    dep_soc = float(dep_rows[0].get("mg3_ev_soc", 0.0))
-                    ev_successes.append(bool(dep_soc >= target_soc - 1e-7))
-                else:
-                    ev_successes.append(False)
-            ev_departure_success_rate = float(np.mean(ev_successes)) if ev_successes else 1.0
-    else:
-        ev_departure_success_rate = 1.0
-
-    # 5. Projection rates for MG2 and MG3
-    mg2_proj_vals = [float(r.get("mg2_dr_projected", 0.0)) for r in hourly_rows]
-    mg2_projection_rate = float(np.mean(mg2_proj_vals)) if mg2_proj_vals else 0.0
-
-    if ev_cfg and str(ev_cfg.get("type")) == "ev_charging":
-        avail_start = int(ev_cfg.get("available_start_hour", 0))
-        dep_h = int(ev_cfg.get("departure_hour", 18))
-        mg3_proj_rows = [
-            float(r.get("mg3_dr_projected", 0.0))
-            for r in hourly_rows
-            if avail_start <= int(r.get("hour", -1)) <= dep_h - 1
+    def projection_rate(mg: str) -> float:
+        values = [
+            float(row.get(
+                f"{mg}_dr_safety_projected",
+                row.get(f"{mg}_dr_projected", 0.0),
+            ))
+            for row in hourly_rows
         ]
-        mg3_projection_rate = float(np.mean(mg3_proj_rows)) if mg3_proj_rows else 0.0
-    else:
-        mg3_proj_vals = [float(r.get("mg3_dr_projected", 0.0)) for r in hourly_rows]
-        mg3_projection_rate = float(np.mean(mg3_proj_vals)) if mg3_proj_vals else 0.0
+        return float(np.mean(values)) if values else 0.0
 
+    production_coverage = aggregate.get("mill_production_coverage_ratio")
     return {
-        "strict_feasible_day_rate": strict_feasible_day_rate,
-        "unmet_energy_mean_kwh": unmet_energy_mean_kwh,
-        "hvac_terminal_joint_success_rate": hvac_joint_success_rate,
-        "hvac_comfort_rate": hvac_comfort_rate,
-        "mill_terminal_success_rate": mill_terminal_success_rate,
-        "mill_production_completion_rate": mill_production_completion_rate,
-        "mill_terminal_or_production_success_rate": mill_terminal_or_production_success_rate,
-        "ev_departure_success_rate": ev_departure_success_rate,
-        "mg2_projection_rate": mg2_projection_rate,
-        "mg3_projection_rate": mg3_projection_rate,
+        "metrics_schema_version": SERVICE_METRICS_SCHEMA_VERSION,
+        "service_metrics": aggregate,
+        "strict_feasible_day_rate": aggregate.get("strict_feasible_day_rate"),
+        "unmet_energy_mean_kwh": aggregate.get("unmet_energy_mean_kwh"),
+        "hvac_terminal_joint_success_rate": aggregate.get("hvac_terminal_joint_success_rate"),
+        "hvac_comfort_rate": aggregate.get("hvac_comfort_rate"),
+        "mill_terminal_success_rate": aggregate.get("mill_terminal_success_rate"),
+        "mill_production_completion_rate": production_coverage,
+        "mill_production_coverage_ratio": production_coverage,
+        "mill_downstream_service_completion_rate": aggregate.get(
+            "mill_downstream_service_completion_rate"
+        ),
+        # Compatibility-only alias: no max(terminal, production) shortcut.
+        "mill_terminal_or_production_success_rate": production_coverage,
+        "ev_departure_success_rate": aggregate.get("ev_departure_success_rate"),
+        "mg2_projection_rate": projection_rate("mg2"),
+        "mg3_projection_rate": projection_rate("mg3"),
     }
-
-
 def evaluate_policy_on_days(
     env: MultiMicrogridEnv,
     days: list[str],
@@ -633,6 +518,8 @@ def _build_joint_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     result["cooperative_milp_cooperation_surplus_std"] = _std(rows, "cooperative_milp_cooperation_surplus")
     result["cooperative_milp_cooperation_gain_pct_mean"] = _mean(rows, "cooperative_milp_cooperation_gain_pct")
     result["cooperative_milp_cooperation_gain_pct_std"] = _std(rows, "cooperative_milp_cooperation_gain_pct")
+    from evaluation.service_metrics import aggregate_cooperative_value
+    result.update(aggregate_cooperative_value(rows))
     return result
 
 
