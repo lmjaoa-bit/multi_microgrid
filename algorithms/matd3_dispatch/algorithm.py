@@ -263,7 +263,7 @@ class Matd3Dispatch(MATD3):
     def save(self, path):
         torch.save({
             "algorithm_slug": "matd3_dispatch",
-            "action_semantics": "single_dispatch_dr_v2",
+            "action_semantics": self.projector.semantics,
             "projection_signature": self.projection_signature,
             "observation_schemas": self.observation_schemas,
             "state_schema": self.state_schema,
@@ -277,7 +277,7 @@ class Matd3Dispatch(MATD3):
     def load(self, path):
         checkpoint = torch.load(Path(path), map_location=self.device, weights_only=True)
         if (checkpoint.get("algorithm_slug") != "matd3_dispatch"
-                or checkpoint.get("action_semantics") != "single_dispatch_dr_v2"):
+                or checkpoint.get("action_semantics") != self.projector.semantics):
             raise ValueError("Checkpoint belongs to a different algorithm/action space")
         if checkpoint.get("projection_signature") != self.projection_signature:
             raise ValueError("Checkpoint physical projection/configuration does not match")

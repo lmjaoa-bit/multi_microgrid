@@ -81,9 +81,7 @@ class ObservationBuilder:
             names.extend([
                 "available_charge_ratio", "available_discharge_ratio", "terminal_soc_gap",
                 "time_to_terminal", "required_avg_power_to_target", "terminal_pressure",
-                "previous_ess_p2p_offer", "previous_ess_p2p_accepted",
-                "previous_ess_p2p_unmatched", "previous_system_buy_demand",
-                "previous_system_sell_offer", "previous_clearing_ratio",
+                "previous_ess_p2p_accepted",
             ])
             if self.observation_mode == "cross_microgrid":
                 for peer in self.agent_ids:
@@ -232,12 +230,7 @@ class ObservationBuilder:
                 ),
                 float(flex.get("required_avg_power_to_target", 0.0)),
                 float(flex.get("terminal_pressure", 0.0)),
-                previous["ess_p2p_offer_kwh"] / n["trade"],
                 previous["ess_p2p_accepted_kwh"] / n["trade"],
-                previous["ess_p2p_unmatched_kwh"] / n["trade"],
-                history["total_buy_demand_kwh"] / system_norm,
-                history["total_sell_offer_kwh"] / system_norm,
-                float(history["clearing_ratio"]),
             ])
             if self.observation_mode == "cross_microgrid":
                 peer_soc = soc_by_microgrid or {}

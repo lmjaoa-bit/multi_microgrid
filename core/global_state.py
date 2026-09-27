@@ -84,11 +84,7 @@ class GlobalStateBuilder:
             for mg in self.agent_ids:
                 names.extend([f"{mg}_available_charge", f"{mg}_available_discharge"])
             for mg in self.agent_ids:
-                names.extend([
-                    f"{mg}_previous_ess_p2p_offer",
-                    f"{mg}_previous_ess_p2p_accepted",
-                    f"{mg}_previous_ess_p2p_unmatched",
-                ])
+                names.append(f"{mg}_previous_ess_p2p_accepted")
             for k in range(1, self.future_h + 1):
                 for mg in self.agent_ids:
                     names.extend([f"{mg}_net_load_t+{k}", f"{mg}_price_t+{k}"])
@@ -96,10 +92,6 @@ class GlobalStateBuilder:
                         names.append(f"{mg}_temperature_t+{k}")
                 if self.include_forecast_validity:
                     names.append(f"forecast_valid_t+{k}")
-            names.extend([
-                "previous_system_buy_demand", "previous_system_sell_offer",
-                "previous_clearing_ratio",
-            ])
         if self.control_mode == "single_dispatch":
             for mg in self.agent_ids:
                 names.extend(f"{mg}_feasible_{name}" for name in (
@@ -220,11 +212,9 @@ class GlobalStateBuilder:
                 ])
             for mg in self.agent_ids:
                 previous = history["by_microgrid"][mg]
-                values.extend([
-                    previous["ess_p2p_offer_kwh"] / self.norm[mg]["trade"],
-                    previous["ess_p2p_accepted_kwh"] / self.norm[mg]["trade"],
-                    previous["ess_p2p_unmatched_kwh"] / self.norm[mg]["trade"],
-                ])
+                values.append(
+                    previous["ess_p2p_accepted_kwh"] / self.norm[mg]["trade"]
+                )
             for k in range(1, self.future_h + 1):
                 for mg in self.agent_ids:
                     forecast = self.forecasts.combined(mg, t, k)
@@ -235,11 +225,6 @@ class GlobalStateBuilder:
                         values.append(float(forecast["temperature_c"]) / 40.0)
                 if self.include_forecast_validity:
                     values.append(self.forecasts.valid(t, k))
-            values.extend([
-                history["total_buy_demand_kwh"] / system_norm,
-                history["total_sell_offer_kwh"] / system_norm,
-                float(history["clearing_ratio"]),
-            ])
         if self.control_mode == "single_dispatch":
             for mg in self.agent_ids:
                 battery = cores[mg].battery

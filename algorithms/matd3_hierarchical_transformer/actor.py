@@ -39,8 +39,7 @@ ESS_FEATURE_NAMES = (
 MARKET_FEATURE_NAMES = (
     "grid_buy_price", "grid_sell_price",
     "previous_p2p_net", "previous_grid_net", "previous_system_p2p",
-    "previous_ess_p2p_offer", "previous_ess_p2p_accepted", "previous_ess_p2p_unmatched",
-    "previous_system_buy_demand", "previous_system_sell_offer", "previous_clearing_ratio",
+    "previous_ess_p2p_accepted",
 )
 
 PEER_SUMMARY_SUFFIXES = (
