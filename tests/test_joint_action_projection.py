@@ -179,3 +179,32 @@ def test_renewable_first_projection_includes_dr_flexible_load():
     assert torch.allclose(
         effective[0, 0, 0], torch.tensor(35.0 / 50.0)
     )
+
+
+def test_v3_trade_channel_is_actual_peer_sale_not_uncapped_request():
+    config = synthetic_config()
+    config["dispatch"] = {"priority_mode": "renewable_load_first"}
+    config["p2p"] = {"pair_capacity_kw": None, "enabled": True}
+    schema = synthetic_schema()
+    index = {name: i for i, name in enumerate(schema)}
+    normalizers = {
+        mg: {"load": 100.0, "pv": 100.0, "wind": 100.0, "price": 1.0}
+        for mg in ("mg1", "mg2", "mg3")
+    }
+    projector = JointActionProjector(
+        config, schema, normalizers, price_norm=1.0
+    )
+    state = synthetic_state(schema)
+    state[:, index["mg1_load"]] = 0.0
+    state[:, index["mg2_load"]] = 0.10
+    state[:, index["mg3_load"]] = 0.0
+    raw = torch.tensor(
+        [[[0.4, -1.0], [0.0, -1.0], [0.0, -1.0]]],
+        dtype=torch.float32,
+    )
+    effective, plans = projector(state, raw)
+    assert plans[0]["requested_discharge_kw"].item() == 20.0
+    assert plans[0]["uncapped_offer"].item() == 20.0
+    assert plans[0]["offer"].item() == 10.0
+    assert plans[0]["ess_peer_sell_kw"].item() == 10.0
+    assert effective[0, 0, 1].item() == 10.0 / 50.0
