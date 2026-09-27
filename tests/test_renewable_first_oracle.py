@@ -122,6 +122,9 @@ def test_d3_peer_renewable_load_priority_allows_grid_charging_at_seller():
     # has first served B's 30 kW load. This is legal: the exported power is
     # renewable; the imported power terminates at A's own battery.
     data = _data([0, 30, 0], [30, 0, 0])
+    # A negative import price makes grid charging strictly attractive, so the
+    # test actually exercises simultaneous renewable P2P export and grid->ESS.
+    data.buy_price["mg1"][0] = -1.0
     result = solve_dispatch(
         cfg,
         data,
@@ -134,5 +137,8 @@ def test_d3_peer_renewable_load_priority_allows_grid_charging_at_seller():
     assert rows.loc["mg2", "grid_to_load_kw"] == pytest.approx(0.0, abs=1e-7)
     # The source/use model must not prohibit simultaneous renewable export
     # and grid import merely because both happen at the same microgrid.
-    assert rows.loc["mg1", "grid_import_kw"] >= -1e-9
+    assert rows.loc["mg1", "grid_to_charge_kw"] > 0.0
+    assert rows.loc["mg1", "grid_import_kw"] == pytest.approx(
+        rows.loc["mg1", "grid_to_charge_kw"], abs=1e-7
+    )
     assert result.metadata["grid_resale_allowed"] is False
