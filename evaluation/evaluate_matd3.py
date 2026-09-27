@@ -206,6 +206,74 @@ def _extract_rollout_constraint_metrics(
         "mg2_projection_rate": projection_rate("mg2"),
         "mg3_projection_rate": projection_rate("mg3"),
     }
+
+def _service_daily_columns(metrics: Mapping[str, Any]) -> dict[str, Any]:
+    """Flatten the stable scalar service evidence written to daily CSV."""
+    hvac = metrics.get("hvac", {})
+    mill = metrics.get("mill", {})
+    ev = metrics.get("ev", {})
+    return {
+        "metrics_schema_version": metrics.get("metrics_schema_version"),
+        "service_data_complete": metrics.get("data_complete"),
+        "service_missing_fields": json.dumps(
+            metrics.get("missing_fields", []), ensure_ascii=False
+        ),
+        "strict_feasible_day": metrics.get("strict_feasible_day"),
+        "unmet_energy_kwh": metrics.get("unmet_energy_kwh"),
+        "unmet_load_hour_count": metrics.get("unmet_load_hour_count"),
+        "unmet_load_hour_rate": metrics.get("unmet_load_hour_rate"),
+        "unmet_load_microgrid_hour_count": metrics.get(
+            "unmet_load_microgrid_hour_count"
+        ),
+        "unmet_load_microgrid_hour_rate": metrics.get(
+            "unmet_load_microgrid_hour_rate"
+        ),
+        "dr_supply_infeasible_hour_count": metrics.get(
+            "dr_supply_infeasible_hour_count"
+        ),
+        "dr_supply_infeasible_rate": metrics.get("dr_supply_infeasible_rate"),
+        "hvac_boundary_success_count": hvac.get("boundary_success_count"),
+        "hvac_boundary_count": hvac.get("boundary_count"),
+        "hvac_all_boundary_comfort_rate": hvac.get(
+            "all_boundary_comfort_rate"
+        ),
+        "hvac_occupied_success_count": hvac.get("occupied_success_count"),
+        "hvac_occupied_boundary_count": hvac.get("occupied_boundary_count"),
+        "hvac_comfort_rate": hvac.get("comfort_rate"),
+        "hvac_comfort_violation_degree_hours": hvac.get(
+            "comfort_violation_degree_hours"
+        ),
+        "hvac_max_comfort_violation_c": hvac.get("max_comfort_violation_c"),
+        "hvac_terminal_applicable": hvac.get("terminal_applicable"),
+        "hvac_terminal_success": hvac.get("terminal_success"),
+        "mill_production_t": mill.get("production_t"),
+        "mill_consumption_required_t": mill.get("consumption_required_t"),
+        "mill_actual_consumption_t": mill.get("actual_consumption_t"),
+        "mill_downstream_unserved_t": mill.get("downstream_unserved_t"),
+        "mill_production_coverage_ratio": mill.get(
+            "production_coverage_ratio"
+        ),
+        "mill_downstream_service_completion_rate": mill.get(
+            "downstream_service_completion_rate"
+        ),
+        "mill_inventory_start_t": mill.get("inventory_start_t"),
+        "mill_inventory_end_t": mill.get("inventory_end_t"),
+        "mill_inventory_drawdown_t": mill.get("inventory_drawdown_t"),
+        "mill_balance_residual_t": mill.get("balance_residual_t"),
+        "mill_inventory_min_violation_t": mill.get(
+            "inventory_min_violation_t"
+        ),
+        "mill_inventory_max_violation_t": mill.get(
+            "inventory_max_violation_t"
+        ),
+        "mill_terminal_applicable": mill.get("terminal_applicable"),
+        "mill_terminal_success": mill.get("terminal_success"),
+        "ev_departure_count": ev.get("departure_count"),
+        "ev_completed_group_count": ev.get("completed_group_count"),
+        "ev_departure_shortfall_kwh": ev.get("departure_shortfall_kwh"),
+        "ev_departure_success_rate": ev.get("departure_success_rate"),
+    }
+
 def evaluate_policy_on_days(
     env: MultiMicrogridEnv,
     days: list[str],
@@ -623,6 +691,17 @@ def evaluate(
                     stacklevel=2,
                 )
         row = _daily_row(day, idle_daily[index], coalition, algorithm_slug=spec.slug)
+        from evaluation.service_metrics import (
+            SERVICE_METRICS_SCHEMA_VERSION,
+            summarize_day_services,
+        )
+        service_day = summarize_day_services(
+            hourly_by_day[str(day["date"])],
+            env.config,
+            bool(day.get("constraint_statistics", {}).get("feasible_episode", True)),
+            SERVICE_METRICS_SCHEMA_VERSION,
+        )
+        row.update(_service_daily_columns(service_day))
         reference_profit = float(reference_daily[index]["team_profit"])
         reference_gain = float(day["team_profit"]) - reference_profit
         row.update({
