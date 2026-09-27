@@ -4,6 +4,7 @@ import argparse
 import csv
 import hashlib
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -81,6 +82,33 @@ def _source_paths(run: Path) -> list[Path]:
     return paths
 
 
+def _configuration_source(run: Path, summary: Mapping[str, Any]) -> str | None:
+    physical = summary.get("experiment_contract", {}).get("physical_settings")
+    if isinstance(physical, Mapping) and physical.get("microgrids"):
+        return "test_summary.json:experiment_contract.physical_settings"
+    snapshot = run / "config_snapshot.yaml"
+    if snapshot.is_file():
+        document = yaml.safe_load(snapshot.read_text(encoding="utf-8")) or {}
+        env = document.get("environment")
+        if isinstance(env, Mapping) and env.get("microgrids"):
+            return "config_snapshot.yaml:environment"
+    return None
+
+
+def _source_metadata(source: Path, paths: list[Path]) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for path in paths:
+        stat = path.stat()
+        result[str(path.relative_to(source))] = {
+            "sha256": _sha256(path),
+            "size_bytes": int(stat.st_size),
+            "modified_time_utc": datetime.fromtimestamp(
+                stat.st_mtime, tz=timezone.utc
+            ).isoformat(),
+        }
+    return result
+
+
 def _load_config(run: Path, summary: Mapping[str,Any]) -> dict[str,Any] | None:
     physical=summary.get("experiment_contract",{}).get("physical_settings")
     if isinstance(physical,Mapping) and physical.get("microgrids"):
@@ -106,10 +134,14 @@ def audit_saved_run(run: str|Path, output: str|Path) -> dict[str,Any]:
     if not required.issubset(set(source_paths)):
         missing=sorted(str(p.name) for p in required if p not in source_paths)
         raise FileNotFoundError(f"Missing saved run evidence: {missing}")
-    before={str(p.relative_to(source)):_sha256(p) for p in source_paths}
+    source_files_before = _source_metadata(source, source_paths)
+    before = {
+        name: item["sha256"] for name, item in source_files_before.items()
+    }
 
     summary=_read_json(source/"test_summary.json")
     config=_load_config(source,summary)
+    config_source = _configuration_source(source, summary)
     daily=_read_csv(source/"test_daily_metrics.csv")
     schema=str(
         summary.get("experiment_contract",{}).get(
@@ -151,7 +183,10 @@ def audit_saved_run(run: str|Path, output: str|Path) -> dict[str,Any]:
         audited.append(result)
 
     aggregate=aggregate_service_days(audited_nested)
-    after={str(p.relative_to(source)):_sha256(p) for p in source_paths}
+    source_files_after = _source_metadata(source, source_paths)
+    after = {
+        name: item["sha256"] for name, item in source_files_after.items()
+    }
     if before != after:
         raise RuntimeError("Source run changed while auditing; refusing output")
 
@@ -192,13 +227,18 @@ def audit_saved_run(run: str|Path, output: str|Path) -> dict[str,Any]:
         "source_hashes_unchanged":before==after,
         "source_metrics_schema_version":schema,
         "audit_metrics_schema_version":SERVICE_METRICS_SCHEMA_VERSION,
-        "configuration_source":(
-            "saved_run" if config is not None else None
-        ),
+        "configuration_source": config_source,
+        "source_dates": [str(row.get("date", "")).strip() for row in daily],
+        "source_files": source_files_before,
         "missing_evidence_days":[
-            row["date"] for row in audited
+            row["date"] for row in audited_nested
             if not bool(row.get("data_complete",False))
         ],
+        "missing_fields_by_day": {
+            row["date"]: list(row.get("missing_fields", []))
+            for row in audited_nested
+            if row.get("missing_fields")
+        },
     }
     (destination/"audit_manifest.json").write_text(
         json.dumps(manifest,ensure_ascii=False,indent=2,allow_nan=False),
