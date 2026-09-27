@@ -17,6 +17,8 @@
 
 风光首先服务本地和联盟剩余负荷，之后才用于已选择的 ESS 充电；最后剩余的本地风光才进入大电网外送/弃电。Critic 的第二个 ESS 通道使用实际 P2P 售电量，不是未成交要约。
 
+当前报表中的 Renewable Non-Curtailment（历史字段名仍可能含 renewable_utilization）定义为“可用新能源减弃电”，因此**包含外送大电网电量**；它不是“联盟内部吸收率”。判断本地/联盟消纳时应同时查看外网售电、P2P、储能充电和弃电来源账本。
+
 详细数学与语义见 docs/SYSTEM_MODEL.md。
 
 ## 两个算法
@@ -40,7 +42,7 @@ PowerShell：
 
 也可使用 --experiment matd3、--experiment ordinary_t、--policy mlp 或 --policy transformer。算法超参数分别放在自己的 YAML；物理参数位于 configs/cooperative.yaml。
 
-共享流程依次执行训练、验证选择 best_model.pt、正式测试、七个联盟的每日 24 小时 MILP、Equal/Shapley 结算、摘要和保存结果绘图。默认 checkpoint selection mode 保持各算法现有配置，不会因 v3 指标升级而静默切换成 constrained-profit。
+共享流程依次执行训练、验证选择 best_model.pt、正式测试、七个联盟的每日 24 小时 MILP、Equal/Shapley 结算、摘要和保存结果绘图。当前 MATD3 与普通 T 使用相同的 constrained-profit checkpoint selection：先要求 strict feasible、零未供电、HVAC 舒适、磨机下游服务和 EV 离场服务满足约束，再在合规候选中按验证集团队利润选择。关闭的日末恢复约束和磨机产量覆盖率不作为该门槛。
 
 普通训练写入 outputs/working_runs/<algorithm>/runs/<run_id>/。历史 outputs、reports 和 analysis 保留。
 
