@@ -204,12 +204,36 @@ class EVChargingDR:
             allocation[group] += amount
             extra = max(0.0, extra - amount)
         self.last_projection = False
-        return dict(kind='ev_charging', raw_action=float(np.clip(raw_action, -1, 1)),
-                    requested_power_kw=power, effective_power_kw=power,
-                    effective_normalized=power / self.max_charge_kw, flexible_load_kw=power,
-                    soc_before=self.soc, soc_after=min(self.target_soc, self.soc + self.eta * power / self.capacity_kwh),
-                    feasible_min_kw=low, feasible_max_kw=high, projection_delta_kw=0.0,
-                    projected=False, target_missed=self.target_missed, hour=hour, group_power_kw=allocation)
+        unit_intent = raw_to_unit_interval(raw_action)
+        forced = abs(high - low) <= 1e-10
+        return dict(
+            kind='ev_charging',
+            raw_action=float(np.clip(raw_action, -1, 1)),
+            mapping_unit_intent=float(unit_intent),
+            mapping_low_kw=float(low),
+            mapping_high_kw=float(high),
+            mapped_power_kw=float(power),
+            mapping_span_kw=float(high - low),
+            mapping_forced=bool(forced),
+            requested_power_kw=power,
+            effective_power_kw=power,
+            effective_normalized=power / self.max_charge_kw,
+            flexible_load_kw=power,
+            soc_before=self.soc,
+            soc_after=min(
+                self.target_soc,
+                self.soc + self.eta * power * self.delta_t / self.capacity_kwh,
+            ),
+            feasible_min_kw=low,
+            feasible_max_kw=high,
+            safety_correction_kw=0.0,
+            safety_projected=False,
+            projection_delta_kw=0.0,
+            projected=False,
+            target_missed=self.target_missed,
+            hour=hour,
+            group_power_kw=allocation,
+        )
 
     def _update_soc(self) -> None:
         self.soc = self.target_soc - sum(self.remaining.values()) / self.capacity_kwh
@@ -230,10 +254,23 @@ class EVChargingDR:
         self._update_soc()
         total = sum(e['shortfall_kwh'] for e in self.departure_events)
         self.target_missed = total > 1e-8
-        result = dict(ev_soc=self.soc, served_charge_kw=float(plan['effective_power_kw']) * served,
-                      delivered_fraction=served, ev_departure_shortfall_kwh=shortfall,
-                      ev_departure_shortfall_total_kwh=total, ev_departure_count=float(len(self.departure_events)),
-                      ev_completed_group_count=float(sum(e['shortfall_kwh'] <= 1e-8 for e in self.departure_events)))
+        planned_power = float(plan['effective_power_kw'])
+        served_power = planned_power * served
+        delivery_shortfall_kw = max(0.0, planned_power - served_power)
+        result = dict(
+            ev_soc=self.soc,
+            planned_charge_kw=planned_power,
+            served_charge_kw=served_power,
+            delivered_fraction=served,
+            delivery_shortfall_kw=delivery_shortfall_kw,
+            delivery_shortfall_kwh=delivery_shortfall_kw * self.delta_t,
+            ev_departure_shortfall_kwh=shortfall,
+            ev_departure_shortfall_total_kwh=total,
+            ev_departure_count=float(len(self.departure_events)),
+            ev_completed_group_count=float(
+                sum(e['shortfall_kwh'] <= 1e-8 for e in self.departure_events)
+            ),
+        )
         for group, power in plan['group_power_kw'].items():
             result[f'ev_{group}_requested_kw'] = float(power)
             result[f'ev_{group}_delivered_kw'] = float(power) * served

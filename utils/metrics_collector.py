@@ -711,6 +711,15 @@ class EpisodeMetricsCollector:
                         for item in events
                     )
                     row.update({
+                        f"{mg}_ev_mapping_unit_intent": float(dr_plan.get("mapping_unit_intent", 0.0)),
+                        f"{mg}_ev_mapping_low_kw": float(dr_plan.get("mapping_low_kw", dr_plan.get("feasible_min_kw", 0.0))),
+                        f"{mg}_ev_mapping_high_kw": float(dr_plan.get("mapping_high_kw", dr_plan.get("feasible_max_kw", 0.0))),
+                        f"{mg}_ev_mapped_power_kw": float(dr_plan.get("mapped_power_kw", dr_plan.get("effective_power_kw", 0.0))),
+                        f"{mg}_ev_mapping_forced": int(bool(dr_plan.get("mapping_forced", False))),
+                        f"{mg}_ev_safety_correction_kw": float(dr_plan.get("safety_correction_kw", 0.0)),
+                        f"{mg}_ev_safety_projected": int(bool(dr_plan.get("safety_projected", False))),
+                        f"{mg}_ev_delivery_shortfall_kw": float(dr_device.get("delivery_shortfall_kw", 0.0)),
+                        f"{mg}_ev_delivery_shortfall_kwh": float(dr_device.get("delivery_shortfall_kwh", 0.0)),
                         f"{mg}_ev_effective_power_kw": float(dr_plan.get("effective_power_kw", 0.0)),
                         f"{mg}_ev_soc": float(dr_state.get("ev_soc", dr_plan.get("soc_after", 0.0))),
                         f"{mg}_ev_soc_gap": float(dr_state.get("ev_soc_gap", 0.0)),
