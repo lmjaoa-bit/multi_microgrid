@@ -691,6 +691,28 @@ def evaluate(
                     stacklevel=2,
                 )
         row = _daily_row(day, idle_daily[index], coalition, algorithm_slug=spec.slug)
+        if coalition is not None and coalition.grand_result is not None:
+            from optimization.oracle_replay import compare_oracle_market_replay
+            replay = compare_oracle_market_replay(
+                coalition.grand_result,
+                hourly_by_day[str(day["date"])],
+            )
+            row.update({
+                "oracle_allocation_mode": replay["allocation_mode"],
+                "oracle_allocation_replay_status": replay["status"],
+                "oracle_exactly_replayable": replay["exactly_replayable"],
+                "oracle_allocation_replay_gap_max_abs_kw": replay[
+                    "allocation_replay_gap_max_abs_kw"
+                ],
+                "oracle_replay_profit_gap": replay["profit_gap"],
+                "oracle_replay_compared_values": replay["compared_values"],
+                "oracle_replay_missing_fields": json.dumps(
+                    replay["missing_fields"], ensure_ascii=False
+                ),
+                "oracle_replay_source_flow_errors": json.dumps(
+                    replay["source_flow_errors"], ensure_ascii=False
+                ),
+            })
         from evaluation.service_metrics import (
             SERVICE_METRICS_SCHEMA_VERSION,
             summarize_day_services,
@@ -759,6 +781,47 @@ def evaluate(
         "cooperative_milp_profit_mean": _mean(daily_rows, "cooperative_milp_profit"),
     }
     joint_summary = _build_joint_summary(daily_rows)
+    replay_rows = [
+        row for row in daily_rows
+        if row.get("oracle_allocation_replay_status") is not None
+    ]
+    oracle_replay_summary = {
+        "day_count": len(replay_rows),
+        "exact_replay_day_count": int(sum(
+            bool(row.get("oracle_exactly_replayable", False))
+            for row in replay_rows
+        )),
+        "exact_replay_day_rate": (
+            float(np.mean([
+                bool(row.get("oracle_exactly_replayable", False))
+                for row in replay_rows
+            ]))
+            if replay_rows else None
+        ),
+        "allocation_replay_gap_max_abs_kw_mean": (
+            float(np.mean([
+                float(row["oracle_allocation_replay_gap_max_abs_kw"])
+                for row in replay_rows
+            ]))
+            if replay_rows else None
+        ),
+        "profit_gap_mean": (
+            float(np.mean([
+                float(row["oracle_replay_profit_gap"])
+                for row in replay_rows
+                if row.get("oracle_replay_profit_gap") is not None
+            ]))
+            if any(
+                row.get("oracle_replay_profit_gap") is not None
+                for row in replay_rows
+            )
+            else None
+        ),
+        "interpretation": (
+            "source_priority_free_allocation may differ from the deterministic "
+            "online proportional clearing; a nonzero gap is reported, not repaired"
+        ),
+    }
     result = {
         "split": split, "test_days_count": len(days), "test_seed": int(test_seed),
         "experiment_contract": contract,
@@ -811,6 +874,7 @@ def evaluate(
         "idle": idle_summary,
         "dr_reference": reference_summary,
         "paired_daily": paired_days,
+        "oracle_replay": oracle_replay_summary,
         **joint_summary,
     }
     if output_dir is not None:
