@@ -142,3 +142,21 @@ def test_d3_peer_renewable_load_priority_allows_grid_charging_at_seller():
         rows.loc["mg1", "grid_to_charge_kw"], abs=1e-7
     )
     assert result.metadata["grid_resale_allowed"] is False
+
+
+def test_p2p_disabled_cooperative_request_degrades_to_independent_no_flows():
+    cfg = _cfg()
+    cfg["p2p"]["enabled"] = False
+    result = solve_dispatch(
+        cfg,
+        _data([20, 0, 0], [0, 20, 0]),
+        ["mg1", "mg2", "mg3"],
+        cooperative=True,
+        p2p_export_source="unrestricted",
+    )
+    assert result.pair_flows_kwh == {}
+    assert result.trajectories["p2p_import_kw"].sum() == pytest.approx(0.0)
+    assert result.trajectories["p2p_export_kw"].sum() == pytest.approx(0.0)
+    assert result.metadata["cooperative_requested"] is True
+    assert result.metadata["p2p_enabled"] is False
+    assert result.metadata["cooperative_effective"] is False

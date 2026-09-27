@@ -135,6 +135,9 @@ def solve_dispatch(
     terminal_cfg = config["terminal_soc"]
     rate = float(terminal_cfg["penalty_per_kwh"])
     p2p_cfg = config["p2p"]
+    p2p_enabled = bool(p2p_cfg.get("enabled", True))
+    cooperative_requested = bool(cooperative)
+    cooperative = bool(cooperative_requested and p2p_enabled)
     dispatch_mode = str(
         config.get("dispatch", {}).get("priority_mode", "legacy_local_first")
     )
@@ -754,4 +757,7 @@ def solve_dispatch(
                               "priority_scope": (
                                   "coalition" if cooperative else "single_microgrid"
                               ),
+                              "cooperative_requested": cooperative_requested,
+                              "p2p_enabled": p2p_enabled,
+                              "cooperative_effective": cooperative,
                           })
