@@ -1,0 +1,68 @@
+name: Handoff two-plugin smoke validation
+
+on:
+  push:
+    branches:
+      - 'codex/handoff-smoke-validation-*'
+    paths:
+      - '.github/workflows/handoff-smoke-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  two-plugin-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Run MATD3 smoke
+        run: >-
+          python scripts/run_experiment.py
+          --algorithm matd3
+          --config configs/cooperative.yaml
+          --algorithm-config configs/smoke/matd3_dispatch.yaml
+          --episodes 3
+          --test-episodes 2
+          --validation-interval 1
+          --validation-days 2
+          --device cpu
+          --no-dashboard
+          --output-root /tmp/handoff_smoke
+      - name: Run hierarchical Transformer smoke
+        run: >-
+          python scripts/run_experiment.py
+          --algorithm matd3_hierarchical_transformer
+          --config configs/cooperative.yaml
+          --algorithm-config configs/smoke/matd3_hierarchical_transformer.yaml
+          --episodes 3
+          --test-episodes 2
+          --validation-interval 1
+          --validation-days 2
+          --device cpu
+          --no-dashboard
+          --output-root /tmp/handoff_smoke
+      - name: Verify both runs updated and saved best checkpoints
+        run: |
+          python - <<'PY'
+          import json, math
+          from pathlib import Path
+          root = Path('/tmp/handoff_smoke')
+          for slug in ('matd3_dispatch','matd3_hierarchical_transformer'):
+              latest = json.loads((root/slug/'latest_run.json').read_text(encoding='utf-8'))
+              run = Path(latest['run_directory'])
+              history = json.loads((run/'training_history.json').read_text(encoding='utf-8'))
+              assert len(history) == 3
+              assert (run/'checkpoints'/'best_model.pt').is_file()
+              assert any(row.get('critic_loss') is not None and math.isfinite(float(row['critic_loss'])) for row in history)
+              assert any(row.get('actor_loss') is not None and math.isfinite(float(row['actor_loss'])) for row in history)
+              print(slug, run.name)
+          PY
