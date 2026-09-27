@@ -1,0 +1,147 @@
+name: Renewable-first two-algorithm smoke
+
+on:
+  push:
+    branches: ['代号：噜噜']
+    paths:
+      - '.github/workflows/renewable-first-two-algorithm-smoke.yml'
+      - 'configs/cooperative.yaml'
+      - 'configs/smoke/**'
+      - 'algorithms/matd3_dispatch/**'
+      - 'algorithms/matd3_hierarchical_transformer/**'
+      - 'components/**'
+      - 'core/**'
+      - 'envs/**'
+      - 'experiments/**'
+      - 'evaluation/**'
+      - 'optimization/**'
+      - 'utils/**'
+      - 'scripts/run_experiment.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  two-algorithm-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install CPU PyTorch
+        run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Regenerate Yancheng-area data
+        run: python scripts/build_spatial_market_data.py
+      - name: Verify v3 shared semantics
+        run: |
+          python - <<'PY'
+          import yaml
+          c = yaml.safe_load(open('configs/cooperative.yaml', encoding='utf-8'))
+          assert c['dispatch']['priority_mode'] == 'renewable_load_first'
+          assert c['terminal_soc']['mode'] == 'none'
+          hvac = next(m['dr'] for m in c['microgrids'] if m['dr']['type'] == 'commercial_hvac')
+          assert hvac['forecast_viability'] is True
+          for path in (
+              'configs/smoke/matd3_dispatch.yaml',
+              'configs/smoke/matd3_hierarchical_transformer.yaml',
+          ):
+              a = yaml.safe_load(open(path, encoding='utf-8'))
+              assert a['algorithm']['batch_size'] == 8
+              assert a['algorithm']['warmup_steps'] == 8
+              assert a['algorithm']['replay_capacity'] == 256
+              assert a['logging']['diagnostic_interval'] == 1
+              assert a['validation']['selection']['mode'] == 'constrained_profit'
+          PY
+      - name: Run MATD3 short pipeline
+        run: >-
+          python scripts/run_experiment.py
+          --algorithm matd3
+          --algorithm-config configs/smoke/matd3_dispatch.yaml
+          --episodes 3
+          --test-episodes 2
+          --validation-interval 1
+          --validation-days 2
+          --device cpu
+          --no-dashboard
+          --output-root /tmp/renewable_first_smoke
+      - name: Run ordinary Transformer short pipeline
+        run: >-
+          python scripts/run_experiment.py
+          --algorithm matd3_hierarchical_transformer
+          --algorithm-config configs/smoke/matd3_hierarchical_transformer.yaml
+          --episodes 3
+          --test-episodes 2
+          --validation-interval 1
+          --validation-days 2
+          --device cpu
+          --no-dashboard
+          --output-root /tmp/renewable_first_smoke
+      - name: Verify updates checkpoints contracts and MILP settlement
+        run: |
+          python - <<'PY'
+          import json
+          import math
+          from pathlib import Path
+          import yaml
+
+          from algorithms.registry import get_algorithm_spec
+          from envs.multi_microgrid_env import MultiMicrogridEnv
+
+          root = Path('/tmp/renewable_first_smoke')
+          run_dirs = {}
+          contracts = {}
+          for slug, algorithm_config in (
+              ('matd3_dispatch', 'configs/smoke/matd3_dispatch.yaml'),
+              ('matd3_hierarchical_transformer', 'configs/smoke/matd3_hierarchical_transformer.yaml'),
+          ):
+              latest = json.loads((root / slug / 'latest_run.json').read_text(encoding='utf-8'))
+              run_dir = Path(latest['run_directory'])
+              run_dirs[slug] = run_dir
+              history = json.loads((run_dir / 'training_history.json').read_text(encoding='utf-8'))
+              training = json.loads((run_dir / 'training_summary.json').read_text(encoding='utf-8'))
+              summary = json.loads((run_dir / 'test_summary.json').read_text(encoding='utf-8'))
+              metadata = json.loads((run_dir / 'run_metadata.json').read_text(encoding='utf-8'))
+              assert len(history) == 3
+              assert training['checkpoint_selection']['constraint_eligible'] is True
+              critic = [float(x['critic_loss']) for x in history if x.get('critic_loss') is not None]
+              actor = [float(x['actor_loss']) for x in history if x.get('actor_loss') is not None]
+              assert critic and all(math.isfinite(x) for x in critic)
+              assert actor and all(math.isfinite(x) for x in actor)
+              assert (run_dir / 'checkpoints' / 'best_model.pt').is_file()
+              assert (run_dir / 'checkpoints' / 'final_model.pt').is_file()
+              assert int(summary.get('milp_failure_count', 0)) == 0
+              assert int(summary.get('shapley_invalid_day_count', 0)) == 0
+              assert float(summary.get('shapley_budget_balance_max_error', 0.0) or 0.0) <= 1e-6
+              contract = metadata['experiment_contract']
+              contracts[slug] = contract
+              assert contract['dispatch_semantics'] == 'renewable_load_first_v1'
+              assert contract['action_semantics'] == 'single_dispatch_dr_v3'
+              assert contract['metrics_schema_version'] == 'service_metrics_v2'
+
+              env_cfg = yaml.safe_load(Path('configs/cooperative.yaml').read_text(encoding='utf-8'))
+              env_cfg['_project_root'] = str(Path('.').resolve())
+              spec = get_algorithm_spec(slug)
+              env = MultiMicrogridEnv(spec.build_environment_config(env_cfg), split='train')
+              settings = yaml.safe_load(Path(algorithm_config).read_text(encoding='utf-8'))
+              model = spec.create(env, settings, device='cpu', seed=999)
+              model.load(run_dir / 'checkpoints' / 'best_model.pt')
+
+          assert contracts['matd3_dispatch']['physical_config_hash'] == contracts['matd3_hierarchical_transformer']['physical_config_hash']
+          print(json.dumps({
+              'matd3_run': str(run_dirs['matd3_dispatch']),
+              'transformer_run': str(run_dirs['matd3_hierarchical_transformer']),
+              'physical_config_hash': contracts['matd3_dispatch']['physical_config_hash'],
+          }, indent=2))
+          PY
+      - name: Save smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: renewable-first-two-algorithm-smoke
+          path: /tmp/renewable_first_smoke/
+          if-no-files-found: ignore

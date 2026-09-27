@@ -12,9 +12,9 @@ algorithm:
   policy_delay: 2
   target_policy_noise: 0.2
   target_noise_clip: 0.5
-  batch_size: 16
-  replay_capacity: 200000
-  warmup_steps: 0
+  batch_size: 8
+  replay_capacity: 256
+  warmup_steps: 8
   exploration_noise: 0.15
 runtime:
   cpu_threads: 1
@@ -27,7 +27,17 @@ validation:
   max_days: 2
   deterministic_policy: true
   fixed_scenarios: true
+  selection:
+    mode: constrained_profit
+    objective: team_profit_mean
+    constraints:
+      strict_feasible_day_rate: {min: 1.0, atol: 1.0e-7}
+      unmet_energy_mean_kwh: {max: 0.0, atol: 1.0e-7}
+      hvac_comfort_rate: {min: 1.0, atol: 1.0e-7}
+      mill_downstream_service_completion_rate: {min: 1.0, atol: 1.0e-7}
+      ev_departure_success_rate: {min: 1.0, atol: 1.0e-7}
 logging:
+  diagnostic_interval: 1
   incremental_history: true
   history_snapshot_interval: 500
   dashboard: true
