@@ -23,11 +23,15 @@ def test_dr_environment_exposes_two_raw_actions_and_private_device_state():
     assert "data_quality_flags" in info
     assert "silo_ratio" in env.obs_builder.schema("mg1")
     assert "t_air" in env.obs_builder.schema("mg2")
-    assert "ev_soc" in env.obs_builder.schema("mg3")
+    mg3_schema = env.obs_builder.schema("mg3")
+    assert "ev_G1_revealed" in mg3_schema
+    assert "ev_G2_remaining_energy" in mg3_schema
+    assert "ev_G3_connected" in mg3_schema
+    assert "ev_connected_remaining" in mg3_schema
     state_schema = env.global_state_builder.schema()
     assert "mg1_dr_min" in state_schema and "mg1_dr_max" in state_schema
     assert "mg2_dr_min" in state_schema and "mg2_dr_max" in state_schema
-    assert "mg3_dr_min" in state_schema and "mg3_dr_max" in state_schema
+    assert "mg3_ev_feasible_min" in state_schema and "mg3_ev_feasible_max" in state_schema
     assert all(observations[mg].shape == (env.observation_dims[mg],) for mg in env.agent_ids)
 
 

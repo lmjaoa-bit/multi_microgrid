@@ -175,7 +175,8 @@ def _extract_rollout_constraint_metrics(
 
     # 2. MG2 HVAC metrics: joint terminal thermal success and comfort compliance
     hvac_cfg = env.cfg_by_id.get("mg2", {}).get("dr")
-    if hvac_cfg and str(hvac_cfg.get("type")) == "commercial_hvac":
+    if (hvac_cfg and str(hvac_cfg.get("type")) == "commercial_hvac"
+            and str(hvac_cfg.get("terminal_mode", "none")) != "none"):
         air_tol = float(hvac_cfg.get("terminal_air_tolerance_c", 1.0))
         mass_tol = float(hvac_cfg.get("terminal_mass_tolerance_c", 0.5))
         comfort_bounds = hvac_cfg.get("occupied_comfort_c", [21.0, 25.0])
@@ -215,7 +216,8 @@ def _extract_rollout_constraint_metrics(
 
     # 3. MG1 Industrial Mill metric: terminal silo success rate
     mill_cfg = env.cfg_by_id.get("mg1", {}).get("dr")
-    if mill_cfg and str(mill_cfg.get("type")) == "industrial_mill":
+    if (mill_cfg and str(mill_cfg.get("type")) == "industrial_mill"
+            and str(mill_cfg.get("terminal_mode", "none")) != "none"):
         init_silo = float(mill_cfg.get("silo_initial_t", 20.0))
         silo_tol = float(mill_cfg.get("terminal_tolerance_t", 1.0))
         mill_successes: list[bool] = []
@@ -257,19 +259,34 @@ def _extract_rollout_constraint_metrics(
     # 4. MG3 EV metric: departure SOC target success rate
     ev_cfg = env.cfg_by_id.get("mg3", {}).get("dr")
     if ev_cfg and str(ev_cfg.get("type")) == "ev_charging":
-        dep_hour = int(ev_cfg.get("departure_hour", 18))
-        target_soc = float(ev_cfg.get("target_soc", 0.85))
-        ev_successes: list[bool] = []
-        for day in daily_metrics:
-            d_date = str(day.get("date", ""))
-            d_rows = rows_by_date.get(d_date, [])
-            dep_rows = [r for r in d_rows if int(r.get("hour", -1)) == dep_hour - 1]
-            if dep_rows:
-                dep_soc = float(dep_rows[0].get("mg3_ev_soc", 0.0))
-                ev_successes.append(bool(dep_soc >= target_soc - 1e-7))
-            else:
-                ev_successes.append(False)
-        ev_departure_success_rate = float(np.mean(ev_successes)) if ev_successes else 1.0
+        if ev_cfg.get("cohorts"):
+            completed = 0.0
+            departures = 0.0
+            for day in daily_metrics:
+                d_rows = rows_by_date.get(str(day.get("date", "")), [])
+                if not d_rows:
+                    continue
+                completed += max(
+                    float(r.get("mg3_ev_completed_group_count", 0.0)) for r in d_rows
+                )
+                departures += max(
+                    float(r.get("mg3_ev_departure_count", 0.0)) for r in d_rows
+                )
+            ev_departure_success_rate = completed / departures if departures > 0.0 else 1.0
+        else:
+            dep_hour = int(ev_cfg.get("departure_hour", 18))
+            target_soc = float(ev_cfg.get("target_soc", 0.85))
+            ev_successes: list[bool] = []
+            for day in daily_metrics:
+                d_date = str(day.get("date", ""))
+                d_rows = rows_by_date.get(d_date, [])
+                dep_rows = [r for r in d_rows if int(r.get("hour", -1)) == dep_hour - 1]
+                if dep_rows:
+                    dep_soc = float(dep_rows[0].get("mg3_ev_soc", 0.0))
+                    ev_successes.append(bool(dep_soc >= target_soc - 1e-7))
+                else:
+                    ev_successes.append(False)
+            ev_departure_success_rate = float(np.mean(ev_successes)) if ev_successes else 1.0
     else:
         ev_departure_success_rate = 1.0
 

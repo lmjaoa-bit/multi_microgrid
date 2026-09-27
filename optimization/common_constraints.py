@@ -249,25 +249,82 @@ def solve_dispatch(
                     model.addConstr(cold >= initial-state-tolerance)
                     dr_terminal[mg].extend([hot,cold])
             elif kind == "ev_charging":
-                capacity = device.capacity_kwh
-                initial = capacity * device.initial_soc
-                maximum = capacity * device.max_soc
-                for t in range(data.horizon+1):
-                    dvar("ev_energy",mg,t,lb=initial if t==0 else 0.0,
-                         ub=initial if t==0 else maximum)
-                for t in range(data.horizon):
-                    hour = pd.Timestamp(data.timestamps[t]).hour
-                    available = device.available_start_hour <= hour < device.departure_hour
-                    charge = dvar("ev_charge",mg,t,lb=0.0,
-                                  ub=device.max_charge_kw if available else 0.0)
-                    dr_power[(mg,t)] = charge
-                    model.addConstr(dr[(mg,"ev_energy",t+1)] ==
-                                    dr[(mg,"ev_energy",t)] + device.eta*charge*dt)
-                shortfall = dvar("ev_terminal_shortfall",mg,data.horizon,
-                                 lb=0.0,ub=inf,obj=rate)
-                model.addConstr(shortfall >= capacity*device.target_soc -
-                                dr[(mg,"ev_energy",data.horizon)])
-                dr_terminal[mg].append(shortfall)
+                if device.cohort_mode:
+                    departure_rate = float(device_cfg.get("departure_penalty_per_kwh", rate))
+                    group_energy_names: list[tuple[str, dict[str, Any]]] = []
+                    for session in device.sessions:
+                        group = str(session["group_id"])
+                        energy_name = f"ev_{group}_energy"
+                        charge_name = f"ev_{group}_charge"
+                        group_energy_names.append((energy_name, session))
+                        initial = float(session["capacity_kwh"]) * float(session["initial_soc"])
+                        maximum = float(session["capacity_kwh"]) * float(session["target_soc"])
+                        for t in range(data.horizon + 1):
+                            dvar(
+                                energy_name, mg, t,
+                                lb=initial if t == 0 else 0.0,
+                                ub=initial if t == 0 else maximum,
+                            )
+                        for t in range(data.horizon):
+                            hour = pd.Timestamp(data.timestamps[t]).hour
+                            available = int(session["arrival_hour"]) <= hour < int(session["departure_hour"])
+                            charge = dvar(
+                                charge_name, mg, t, lb=0.0,
+                                ub=float(session["max_charge_kw"]) if available else 0.0,
+                            )
+                            model.addConstr(
+                                dr[(mg, energy_name, t + 1)]
+                                == dr[(mg, energy_name, t)] + device.eta * charge * dt
+                            )
+                        departure_index = min(int(session["departure_hour"]), data.horizon)
+                        shortfall = dvar(
+                            f"ev_{group}_departure_shortfall", mg, departure_index,
+                            lb=0.0, ub=inf, obj=departure_rate,
+                        )
+                        model.addConstr(
+                            shortfall >= maximum - dr[(mg, energy_name, departure_index)]
+                        )
+                        dr_terminal[mg].append(shortfall)
+
+                    for t in range(data.horizon + 1):
+                        aggregate_energy = dvar(
+                            "ev_energy", mg, t, lb=0.0, ub=device.capacity_kwh,
+                        )
+                        model.addConstr(
+                            aggregate_energy
+                            == sum(dr[(mg, energy_name, t)]
+                                   for energy_name, _ in group_energy_names)
+                        )
+                    for t in range(data.horizon):
+                        charge = dvar("ev_charge", mg, t, lb=0.0, ub=device.max_charge_kw)
+                        model.addConstr(
+                            charge
+                            == sum(
+                                dr[(mg, f"ev_{session['group_id']}_charge", t)]
+                                for _, session in group_energy_names
+                            )
+                        )
+                        dr_power[(mg, t)] = charge
+                else:
+                    capacity = device.capacity_kwh
+                    initial = capacity * device.initial_soc
+                    maximum = capacity * device.max_soc
+                    for t in range(data.horizon+1):
+                        dvar("ev_energy",mg,t,lb=initial if t==0 else 0.0,
+                             ub=initial if t==0 else maximum)
+                    for t in range(data.horizon):
+                        hour = pd.Timestamp(data.timestamps[t]).hour
+                        available = device.available_start_hour <= hour < device.departure_hour
+                        charge = dvar("ev_charge",mg,t,lb=0.0,
+                                      ub=device.max_charge_kw if available else 0.0)
+                        dr_power[(mg,t)] = charge
+                        model.addConstr(dr[(mg,"ev_energy",t+1)] ==
+                                        dr[(mg,"ev_energy",t)] + device.eta*charge*dt)
+                    shortfall = dvar("ev_terminal_shortfall",mg,data.horizon,
+                                     lb=0.0,ub=inf,obj=rate)
+                    model.addConstr(shortfall >= capacity*device.target_soc -
+                                    dr[(mg,"ev_energy",data.horizon)])
+                    dr_terminal[mg].append(shortfall)
 
     import_bounds = {}
     for mg in ids:
@@ -513,8 +570,16 @@ def solve_dispatch(
                     profit_by[mg] -= dr_penalty
                     cost_breakdown["hvac_terminal_penalty"] += dr_penalty
             else:
-                final = float(model.val(dr[(mg,"ev_energy",data.horizon)]))
-                dr_penalty = rate*max(0.0,device.capacity_kwh*device.target_soc-final)
+                if getattr(device, "cohort_mode", False):
+                    departure_rate = float(
+                        cfg_by_id[mg]["dr"].get("departure_penalty_per_kwh", rate)
+                    )
+                    dr_penalty = departure_rate * sum(
+                        float(model.val(variable)) for variable in dr_terminal[mg]
+                    )
+                else:
+                    final = float(model.val(dr[(mg,"ev_energy",data.horizon)]))
+                    dr_penalty = rate*max(0.0,device.capacity_kwh*device.target_soc-final)
                 profit_by[mg] -= dr_penalty
                 cost_breakdown["ev_terminal_penalty"] += dr_penalty
     total_profit = float(sum(profit_by.values()))

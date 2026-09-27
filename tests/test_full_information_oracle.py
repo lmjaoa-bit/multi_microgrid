@@ -54,8 +54,12 @@ def test_full_information_oracle_models_all_three_dr_types(cooperative: bool) ->
     ev = rows.loc[rows.microgrid == "mg3"].sort_values("timestamp")
     assert mill["silo_after_t"].between(3.51-1e-7, 15.80+1e-7).all()
     assert (hvac["hvac_heating_kw"] * hvac["hvac_cooling_kw"] < 1e-7).all()
-    assert (ev.iloc[7:]["flexible_load_kw"].abs() < 1e-7).all()
-    assert ev["ev_soc_after"].between(0.5-1e-7, 0.8+1e-7).all()
+    # Cohorts have heterogeneous departure windows; the day-time G3 cohort
+    # may charge after the night cohorts depart. No configured cohort remains
+    # available after hour 17.
+    assert (ev.iloc[18:]["flexible_load_kw"].abs() < 1e-7).all()
+    assert (ev["flexible_load_kw"] <= 93.6 + 1e-7).all()
+    assert ev["ev_soc_after"].between(0.0-1e-7, 0.8+1e-7).all()
 
 
 def test_full_information_requires_24h_frame() -> None:

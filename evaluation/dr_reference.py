@@ -40,16 +40,12 @@ class DeterministicDRReferencePolicy:
 
     def __call__(self, observations: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
         del observations
-        ev = self.env.cfg_by_id["mg3"]["dr"]
-        ev_device = self.env.dr_devices["mg3"]
-        charging = (
-            int(self.env.t) < int(ev["departure_hour"])
-            and float(ev_device.soc) < float(ev["target_soc"]) - 1e-10
-        )
+        # +1 requests the currently feasible EV maximum. When no cohort is
+        # connected the physical EV projector maps the same request to 0 kW.
         return {
             "mg1": np.asarray([0.0, self._mill_raw], dtype=np.float32),
             "mg2": np.asarray([0.0, 0.0], dtype=np.float32),
-            "mg3": np.asarray([0.0, 1.0 if charging else -1.0], dtype=np.float32),
+            "mg3": np.asarray([0.0, 1.0], dtype=np.float32),
         }
 
 

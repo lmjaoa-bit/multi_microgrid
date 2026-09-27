@@ -156,8 +156,23 @@ def _daily_service_metrics(
     unmet_energy = float(sum(unmet_by_mg.values()))
     unmet_day = unmet_system_hours > 0
     dr_day = dr_system_hours > 0
-    strict_feasible = bool(feasible_day and not unmet_day and not dr_day)
     mg_hour_denominator = steps * agent_count
+    last_row = hourly_rows[-1] if hourly_rows else {}
+    ev_departure_count = int(max(
+        [_as_float(row.get("mg3_ev_departure_count", 0.0)) for row in hourly_rows] or [0.0]
+    ))
+    ev_completed_group_count = int(max(
+        [_as_float(row.get("mg3_ev_completed_group_count", 0.0)) for row in hourly_rows] or [0.0]
+    ))
+    ev_departure_shortfall_kwh = max(
+        [_as_float(row.get("mg3_ev_departure_shortfall_kwh", 0.0)) for row in hourly_rows] or [0.0]
+    )
+    strict_feasible = bool(
+        feasible_day
+        and not unmet_day
+        and not dr_day
+        and ev_departure_shortfall_kwh <= tolerance
+    )
 
     result: dict[str, Any] = {
         "unmet_energy_kwh": unmet_energy,
@@ -176,6 +191,13 @@ def _daily_service_metrics(
         ),
         "dr_supply_infeasible_day": bool(dr_day),
         "strict_feasible_day": strict_feasible,
+        "ev_departure_count": ev_departure_count,
+        "ev_completed_group_count": ev_completed_group_count,
+        "ev_departure_shortfall_kwh": float(ev_departure_shortfall_kwh),
+        "ev_departure_success_rate": (
+            ev_completed_group_count / ev_departure_count
+            if ev_departure_count else 1.0
+        ),
     }
     for mg in agent_ids:
         result[f"unmet_energy_{mg}_kwh"] = float(unmet_by_mg[mg])
@@ -215,6 +237,19 @@ def _aggregate_service_metrics(
             sum(_as_bool(row.get("strict_feasible_day")) for row in daily_rows)
         ),
         "strict_feasible_day_rate": _rate(daily_rows, "strict_feasible_day"),
+        "ev_departure_shortfall_total_kwh": float(sum(
+            _as_float(row.get("ev_departure_shortfall_kwh", 0.0)) for row in daily_rows
+        )),
+        "ev_departure_count": int(sum(
+            _as_float(row.get("ev_departure_count", 0.0)) for row in daily_rows
+        )),
+        "ev_completed_group_count": int(sum(
+            _as_float(row.get("ev_completed_group_count", 0.0)) for row in daily_rows
+        )),
+        "ev_departure_success_rate": (
+            sum(_as_float(row.get("ev_completed_group_count", 0.0)) for row in daily_rows)
+            / max(1.0, sum(_as_float(row.get("ev_departure_count", 0.0)) for row in daily_rows))
+        ),
         "by_microgrid": {},
     }
     for mg in agent_ids:

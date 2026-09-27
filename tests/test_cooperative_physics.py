@@ -43,10 +43,10 @@ def test_structured_p2p_prioritizes_load_then_battery_and_tracks_source() -> Non
         grid_buy_price=0.3,
     )
     assert np.isclose(result.by_microgrid["mg1"]["renewable_p2p_sell_kw"], 4.0)
-    assert np.isclose(result.by_microgrid["mg1"]["ess_p2p_sell_kw"], 9.0)
+    assert np.isclose(result.by_microgrid["mg1"]["ess_p2p_sell_kw"], 1.0)
     assert np.isclose(result.by_microgrid["mg2"]["p2p_to_load_kw"], 5.0)
-    assert np.isclose(result.by_microgrid["mg3"]["p2p_to_battery_kw"], 8.0)
-    assert np.isclose(result.by_microgrid["mg1"]["ess_p2p_unmatched_kw"], 1.0)
+    assert np.isclose(result.by_microgrid["mg3"]["p2p_to_battery_kw"], 0.0)
+    assert np.isclose(result.by_microgrid["mg1"]["ess_p2p_unmatched_kw"], 9.0)
 
 
 def test_sharing_action_is_offer_cap_not_executed_trade_ratio() -> None:

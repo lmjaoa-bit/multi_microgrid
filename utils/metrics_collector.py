@@ -624,6 +624,16 @@ class EpisodeMetricsCollector:
                         f"{mg}_terminal_thermal_infeasible": int(bool(dr_plan.get("terminal_thermal_infeasible", False))),
                     })
                 elif kind == "ev_charging":
+                    events = info.get("ev_departure_events", {}).get(mg, [])
+                    departure_shortfall = sum(
+                        float(item.get("shortfall_kwh", item.get("ev_departure_shortfall_kwh", 0.0)))
+                        for item in events
+                    )
+                    completed_groups = sum(
+                        float(item.get("shortfall_kwh", item.get("ev_departure_shortfall_kwh", 0.0)))
+                        <= self.tolerance
+                        for item in events
+                    )
                     row.update({
                         f"{mg}_ev_effective_power_kw": float(dr_plan.get("effective_power_kw", 0.0)),
                         f"{mg}_ev_soc": float(dr_state.get("ev_soc", dr_plan.get("soc_after", 0.0))),
@@ -631,6 +641,9 @@ class EpisodeMetricsCollector:
                         f"{mg}_ev_hours_to_departure": float(dr_state.get("ev_hours_to_departure", 0.0)),
                         f"{mg}_deadline_pressure": float(dr_state.get("deadline_pressure", 0.0)),
                         f"{mg}_ev_target_missed": int(bool(dr_plan.get("target_missed", False))),
+                        f"{mg}_ev_departure_count": int(len(events)),
+                        f"{mg}_ev_completed_group_count": int(completed_groups),
+                        f"{mg}_ev_departure_shortfall_kwh": float(departure_shortfall),
                     })
             elif raw.size >= 2:
                 row[f"{mg}_executed_action_1"] = float(plan.get("sharing_offer_ratio", 0.0))

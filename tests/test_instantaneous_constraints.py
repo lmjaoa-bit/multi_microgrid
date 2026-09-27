@@ -42,13 +42,13 @@ def test_mill_last_hour_only_protects_next_silo_state(env: MultiMicrogridEnv) ->
     assert abs(plan["silo_after_t"] - mill.initial_silo_t) > mill.terminal_tolerance_t
 
 
-def test_ev_minimum_charge_is_zero_before_departure(env: MultiMicrogridEnv) -> None:
+def test_ev_minimum_charge_enforces_departure_feasibility(env: MultiMicrogridEnv) -> None:
     ev = env.dr_devices["mg3"]
 
     low, high = ev.feasible_bounds(6)
 
-    assert low == pytest.approx(0.0)
-    assert high > 0.0
+    assert low > 0.0
+    assert low <= high <= ev.max_charge_kw + 1e-9
 
 
 def test_hvac_bounds_never_call_terminal_optimizer(
@@ -72,7 +72,7 @@ def test_canonical_config_has_no_projection_mode() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
 
     assert "constraint_projection" not in config
-    assert config["terminal_soc"]["mode"] == "penalty"
+    assert config["terminal_soc"]["mode"] == "none"
 
 
 def test_terminal_penalty_reports_every_device(env: MultiMicrogridEnv) -> None:
@@ -95,11 +95,9 @@ def test_terminal_penalty_reports_every_device(env: MultiMicrogridEnv) -> None:
         "total_penalty",
     }
     assert all(expected_fields <= set(item) for item in breakdown.values())
-    assert breakdown["mg1"]["mill_equivalent_kwh"] > 0.0
-    assert breakdown["mg3"]["ev_equivalent_kwh"] > 0.0
-    assert info["terminal_constraint_penalty_total"] == pytest.approx(
-        sum(item["total_penalty"] for item in breakdown.values())
-    )
+    assert all(item["total_penalty"] == pytest.approx(0.0) for item in breakdown.values())
+    assert info["terminal_constraint_penalty_total"] == pytest.approx(0.0)
+    assert not any(info["terminal_soc_infeasible"].values())
     assert rewards["mg1"] == pytest.approx(
         info["team_profit"] / env.accounting.reward_scale
     )

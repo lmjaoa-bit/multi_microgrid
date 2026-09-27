@@ -46,8 +46,9 @@ def test_reference_policy_uses_task_preserving_device_rules() -> None:
     assert actions["mg2"].tolist() == [0.0, 0.0]
     assert actions["mg3"].tolist() == [0.0, 1.0]
 
-    env.dr_devices["mg3"].soc = float(env.cfg_by_id["mg3"]["dr"]["target_soc"])
-    assert policy(observations)["mg3"].tolist() == [0.0, -1.0]
+    # The cohort reference always requests the current feasible maximum.
+    # Availability/departure windows are enforced by the EV device projector.
+    assert policy(observations)["mg3"].tolist() == [0.0, 1.0]
 
 
 def test_reference_evaluation_saves_complete_hourly_and_daily_results(tmp_path: Path) -> None:

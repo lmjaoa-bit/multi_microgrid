@@ -8,6 +8,8 @@ import numpy as np
 import torch
 from torch import nn
 
+from components.ev_sessions import cohort_schema
+
 
 DR_FEATURE_SPECS: dict[str, tuple[str, ...]] = {
     "industrial_mill": (
@@ -138,11 +140,16 @@ class HierarchicalTransformerActor(nn.Module):
         if dr_type not in DR_FEATURE_SPECS:
             raise ValueError(f"Unsupported DR type for {self.active_agent}: {dr_type}")
 
-        raw_dr_names = DR_FEATURE_SPECS[dr_type]
+        if dr_type == "ev_charging" and mg_config and mg_config.get("dr", {}).get("cohorts"):
+            raw_dr_names = tuple(cohort_schema(mg_config["dr"]))
+            self.ev_cohort_mode = True
+        else:
+            raw_dr_names = DR_FEATURE_SPECS[dr_type]
+            self.ev_cohort_mode = False
         self.dr_indices = [get_idx(x) for x in raw_dr_names]
         self.register_buffer("dr_idx_tensor", torch.tensor(self.dr_indices, dtype=torch.long), persistent=False)
 
-        extra_dr_dim = 1 if dr_type == "ev_charging" else 0
+        extra_dr_dim = 1 if dr_type == "ev_charging" and not self.ev_cohort_mode else 0
         self.dr_encoder = nn.Sequential(
             nn.Linear(len(raw_dr_names) + extra_dr_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -305,7 +312,7 @@ class HierarchicalTransformerActor(nn.Module):
 
         # 2. DR Token: [B, 1, embed_dim]
         dr_feats = obs.index_select(-1, self.dr_idx_tensor)
-        if self.dr_type == "ev_charging":
+        if self.dr_type == "ev_charging" and not self.ev_cohort_mode:
             rem_energy = dr_feats[:, 2:3]
             hrs_dep = torch.clamp(dr_feats[:, 3:4], min=1.0)
             pace_power = (rem_energy / hrs_dep) / 100.0

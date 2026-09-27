@@ -56,9 +56,10 @@ def test_global_config_uses_local_weather_generation_tariffs_and_dr_state() -> N
         assert renewable["wind_speed_column"] in env.episode_context_df
 
     hour_16 = env.episode_context_df[env.episode_context_df["timestamp"].dt.hour == 16].iloc[0]
-    assert env.data.prices_at(hour_16, "mg1") == (0.60, 0.18)
-    assert np.allclose(env.data.prices_at(hour_16, "mg3"), (1.35, 0.16))
-    assert env.data.df["mg2_buy_price_per_kwh"].nunique() > 10
+    prices = [env.data.prices_at(hour_16, mg) for mg in env.agent_ids]
+    assert all(np.allclose(prices[0], item) for item in prices[1:])
+    assert np.isclose(prices[0][1], 0.50 * prices[0][0])
+    assert env.data.df["buy_price_per_kwh"].nunique() > 10
 
     forecast = env.forecasts.combined("mg3", 0, 1)
     expected_buy, expected_sell = env.data.prices_at(env.episode_context_df.iloc[1], "mg3")
@@ -69,19 +70,20 @@ def test_global_config_uses_local_weather_generation_tariffs_and_dr_state() -> N
     assert env.global_state_dim == len(schema)
     for mg in env.agent_ids:
         assert f"{mg}_feasible_charge_max" in schema
-        assert f"{mg}_dr_min" in schema
-        assert f"{mg}_dr_max" in schema
+    assert "mg1_dr_min" in schema and "mg1_dr_max" in schema
+    assert "mg2_dr_min" in schema and "mg2_dr_max" in schema
+    assert "mg3_ev_feasible_min" in schema and "mg3_ev_feasible_max" in schema
     assert "mg1_silo_ratio" in schema
     assert "mg2_t_air" in schema
     assert "mg2_t_mass" in schema
-    assert "mg3_ev_soc" in schema
+    assert "mg3_ev_G1_remaining_energy" in schema
 
 
 def test_global_config_is_selected_yancheng_dr_setting() -> None:
     config = yaml.safe_load(CONFIG.read_text(encoding="utf-8"))
     assert config["action_design"] == "single_dispatch_dr"
     assert config["p2p"]["loss_rate"] == 0.0
-    assert config["p2p"]["pair_capacity_kw"] == 75.0
+    assert config["p2p"]["pair_capacity_kw"] is None
     assert config["p2p"]["allow_grid_resale"] is False
     assert [item["type"] for item in config["microgrids"]] == [
         "industrial_pv_raw_mill",
@@ -94,7 +96,9 @@ def test_global_config_is_selected_yancheng_dr_setting() -> None:
         "ev_charging",
     ]
     assert [item["battery"]["initial_soc"] for item in config["microgrids"]] == [
-        0.50,
-        0.50,
-        0.50,
+        0.10,
+        0.10,
+        0.10,
     ]
+    assert all(item["grid"]["import_limit_kw"] is None for item in config["microgrids"])
+    assert all(item["grid"]["export_limit_kw"] == 100.0 for item in config["microgrids"])

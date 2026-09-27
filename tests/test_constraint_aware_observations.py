@@ -30,7 +30,11 @@ HVAC_FIELDS = {
     "time_remaining",
     "thermal_recovery_pressure",
 }
-EV_FIELDS = {"remaining_energy", "hours_to_departure", "deadline_pressure"}
+EV_FIELDS = {
+    "ev_G1_remaining_energy", "ev_G1_hours_to_departure",
+    "ev_G2_remaining_energy", "ev_G3_revealed",
+    "ev_feasible_min", "ev_feasible_max",
+}
 
 
 @pytest.fixture()
@@ -100,12 +104,10 @@ def test_hvac_guidance_uses_thermal_capacity_and_cop(env: MultiMicrogridEnv) -> 
 
     state = hvac.state(20)
 
-    required_thermal_kw = (1.0 * hvac.c_air + 0.5 * hvac.c_mass) / 4.0
-    expected_pressure = required_thermal_kw / hvac.cop_heat / hvac.heat_max_kw
-    assert state["terminal_air_gap_c"] == pytest.approx(1.0)
-    assert state["terminal_mass_gap_c"] == pytest.approx(0.5)
+    assert state["terminal_air_gap_c"] == pytest.approx(0.0)
+    assert state["terminal_mass_gap_c"] == pytest.approx(0.0)
     assert state["time_remaining_h"] == pytest.approx(4.0)
-    assert state["thermal_recovery_pressure"] == pytest.approx(expected_pressure)
+    assert state["thermal_recovery_pressure"] == pytest.approx(0.0)
 
 
 def test_built_observations_and_state_match_schema_and_are_finite(
