@@ -1,5 +1,8 @@
 # Renewable dispatch environment implementation plan
 
+> **Superseded status (2026-09-27):** This 2026-09-26 plan is retained as historical design evidence. The authoritative implementation plan is docs/superpowers/plans/2026-09-27-renewable-first-dispatch-and-metrics.md with its linked design spec. In particular, the current v3 dispatch is renewable-load-first rather than the earlier local-first ordering described below.
+
+
 > **Handoff update (2026-09-26):** The user stopped implementation and requested a plan for another developer. The authoritative consolidated handoff is [实施交接_新能源协同调度.md](../../实施交接_新能源协同调度.md). Existing source edits are incomplete and unverified. The execution notes below describe the earlier implementation phase, not authorization to resume it in this documentation turn.
 
 > **For agentic workers:** Execute the approved user design with test-driven changes. Follow executing-plans; use parallel domain work only with disjoint file ownership.
