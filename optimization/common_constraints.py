@@ -745,7 +745,8 @@ def solve_dispatch(
                                   "source_priority_free_allocation"
                                   if renewable_first else "legacy_oracle_allocation"
                               ),
-                              "perfect_foresight": bool(include_dr),
+                              "perfect_foresight": True,
+                              "full_information_oracle": bool(include_dr),
                               "p2p_export_source": p2p_export_source,
                               "grid_resale_allowed": False,
                               "ess_to_ess_allowed": False,

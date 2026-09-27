@@ -564,7 +564,11 @@ class EpisodeMetricsCollector:
                 f"{mg}_ess_p2p_offer_projection_reduction_kw": float(
                     plan.get("ess_p2p_offer_projection_reduction_kw", 0.0)
                 ),
+                f"{mg}_renewable_to_local_load_kw": float(plan.get("renewable_to_local_load_kw", 0.0)),
+                f"{mg}_renewable_to_battery_kw": float(plan.get("renewable_to_battery_kw", 0.0)),
                 f"{mg}_ess_to_local_load_kw": float(plan.get("ess_to_local_kw", 0.0)),
+                f"{mg}_grid_to_load_kw": float(plan.get("grid_to_load_kw", 0.0)),
+                f"{mg}_grid_to_battery_kw": float(plan.get("grid_to_battery_kw", 0.0)),
                 f"{mg}_requested_sharing_offer_ratio": float(
                     plan.get("requested_sharing_offer_ratio", 0.0)
                 ),
@@ -719,6 +723,16 @@ class EpisodeMetricsCollector:
                     })
             elif raw.size >= 2:
                 row[f"{mg}_executed_action_1"] = float(plan.get("sharing_offer_ratio", 0.0))
+
+        ledger = info.get("dispatch_ledger", {})
+        for index, mg in enumerate(self.agent_ids):
+            for source_name, column_name in (
+                ("res_peer_load_kw", "renewable_peer_load_export_kw"),
+                ("res_peer_charge_kw", "renewable_peer_charge_export_kw"),
+            ):
+                matrix = ledger.get(source_name)
+                if matrix is not None:
+                    row[f"{mg}_{column_name}"] = float(np.asarray(matrix)[index, :].sum())
 
         for seller in self.agent_ids:
             for buyer in self.agent_ids:

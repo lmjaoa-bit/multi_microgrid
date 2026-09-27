@@ -13,7 +13,7 @@ import pandas as pd
 
 from components.battery import BatteryModel
 from components.controllable_load import build_controllable_load
-from optimization.common_constraints import DispatchData
+from optimization.common_constraints import DispatchData, DispatchResult
 
 
 def validate_device_trajectories(
@@ -111,4 +111,127 @@ def validate_device_trajectories(
         "mismatch_count": len(mismatches),
         "first_mismatches": mismatches[:20],
         "p2p_and_grid_clearing_replayed": False,
+    }
+
+
+def compare_oracle_market_replay(
+    oracle_result: DispatchResult,
+    replay_hourly_rows,
+    *,
+    atol: float = 1e-4,
+) -> dict[str, Any]:
+    """Compare source/use market flows with a saved environment replay.
+
+    The full-information oracle deliberately retains free allocation inside the
+    coalition.  This function therefore reports a measurable allocation replay
+    gap rather than forcing the oracle flow pattern to match the deterministic
+    proportional environment clearing.
+    """
+    if isinstance(replay_hourly_rows, pd.DataFrame):
+        replay_rows = replay_hourly_rows.to_dict(orient="records")
+    else:
+        replay_rows = [dict(row) for row in replay_hourly_rows]
+    replay_by_time = {
+        str(row.get("timestamp")): row for row in replay_rows
+        if row.get("timestamp") is not None
+    }
+    if not replay_by_time:
+        raise ValueError("Replay comparison requires timestamped hourly rows")
+
+    oracle = oracle_result.trajectories
+    if oracle.empty:
+        raise ValueError("Oracle result contains no trajectories")
+
+    mappings = {
+        "renewable_to_local_load_kw": "renewable_to_local_load_kw",
+        "renewable_to_local_charge_kw": "renewable_to_battery_kw",
+        "ess_to_local_load_kw": "ess_to_local_load_kw",
+        "grid_to_load_kw": "grid_to_load_kw",
+        "grid_to_charge_kw": "grid_to_battery_kw",
+        "renewable_peer_load_export_kw": "renewable_peer_load_export_kw",
+        "renewable_peer_charge_export_kw": "renewable_peer_charge_export_kw",
+        "ess_peer_load_export_kw": "ess_p2p_sell_kw",
+        "grid_import_kw": "grid_import_kw",
+        "grid_export_kw": "grid_export_kw",
+    }
+    errors: dict[str, list[float]] = {name: [] for name in mappings}
+    missing_fields: set[str] = set()
+    compared = 0
+    for _, oracle_row in oracle.iterrows():
+        timestamp = str(oracle_row["timestamp"])
+        mg = str(oracle_row["microgrid"])
+        replay_row = replay_by_time.get(timestamp)
+        if replay_row is None:
+            missing_fields.add(f"timestamp:{timestamp}")
+            continue
+        for oracle_field, replay_suffix in mappings.items():
+            replay_field = f"{mg}_{replay_suffix}"
+            if oracle_field not in oracle_row or replay_field not in replay_row:
+                missing_fields.add(replay_field)
+                continue
+            expected = float(oracle_row[oracle_field])
+            actual = float(replay_row[replay_field])
+            if not (np.isfinite(expected) and np.isfinite(actual)):
+                missing_fields.add(replay_field)
+                continue
+            errors[oracle_field].append(actual - expected)
+            compared += 1
+
+    field_errors: dict[str, dict[str, float | int | None]] = {}
+    max_abs = 0.0
+    for field, values in errors.items():
+        array = np.asarray(values, dtype=np.float64)
+        if array.size:
+            field_max = float(np.max(np.abs(array)))
+            max_abs = max(max_abs, field_max)
+            field_errors[field] = {
+                "count": int(array.size),
+                "mean_error_kw": float(array.mean()),
+                "mean_abs_error_kw": float(np.mean(np.abs(array))),
+                "max_abs_error_kw": field_max,
+            }
+        else:
+            field_errors[field] = {
+                "count": 0,
+                "mean_error_kw": None,
+                "mean_abs_error_kw": None,
+                "max_abs_error_kw": None,
+            }
+
+    replay_profit = 0.0
+    profit_fields_found = 0
+    for row in replay_rows:
+        for key, value in row.items():
+            if str(key).endswith("_hourly_profit"):
+                replay_profit += float(value)
+                profit_fields_found += 1
+    profit_gap = (
+        float(replay_profit - oracle_result.total_profit)
+        if profit_fields_found else None
+    )
+    exactly = bool(
+        not missing_fields
+        and compared > 0
+        and max_abs <= float(atol)
+        and profit_gap is not None
+        and abs(profit_gap) <= float(atol)
+    )
+    return {
+        "allocation_mode": (
+            (oracle_result.metadata or {}).get("allocation")
+            or "unknown"
+        ),
+        "compared_values": int(compared),
+        "missing_fields": sorted(missing_fields),
+        "source_flow_errors": field_errors,
+        "allocation_replay_gap_max_abs_kw": float(max_abs),
+        "oracle_profit": float(oracle_result.total_profit),
+        "replay_profit": float(replay_profit) if profit_fields_found else None,
+        "profit_gap": profit_gap,
+        "exactly_replayable": exactly,
+        "status": (
+            "exact_replay"
+            if exactly
+            else "oracle_not_exactly_replayable"
+        ),
     }
