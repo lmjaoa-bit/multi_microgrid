@@ -2,7 +2,7 @@ name: DR environment validation
 
 on:
   push:
-    branches: [main, 'codex/**']
+    branches: [main, 'codex/**', '代号：噜噜']
     paths:
       - '.github/workflows/dr-environment-validation.yml'
       - 'components/**'
