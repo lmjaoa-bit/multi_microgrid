@@ -43,7 +43,7 @@ C_req = max(-u,0) * feasible_charge_max.
 
 ## 3. v3 风光优先清算
 
-当前主环境、Critic 投影、target action 和 Actor loss 共用 core/renewable_first_dispatch.py 的同一纯 Torch 清算内核。
+当前两个插件和共享配置统一使用 peer_energy_summary 作为 Actor 的跨微网协调观测；该摘要只使用当前可公开的能源余额/柔性及实际历史成交，不重新引入未执行要约。\n\n当前主环境、Critic 投影、target action 和 Actor loss 共用 core/renewable_first_dispatch.py 的同一纯 Torch 清算内核。
 
 ### 3.1 清算顺序
 

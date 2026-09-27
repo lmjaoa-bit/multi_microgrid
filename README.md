@@ -13,7 +13,7 @@
 - P2P 无损、pair_capacity_kw: null
 - 外部电网进口不限、每个微网出口上限 100 kW
 - ESS 初始 SOC 0.10，独立自然日，不要求日末 SOC/磨机库存/HVAC 温度恢复
-- 当前 observation mode 为 cross_microgrid
+- 当前两个插件和共享配置统一使用 observation mode = peer_energy_summary
 
 风光首先服务本地和联盟剩余负荷，之后才用于已选择的 ESS 充电；最后剩余的本地风光才进入大电网外送/弃电。Critic 的第二个 ESS 通道使用实际 P2P 售电量，不是未成交要约。
 
