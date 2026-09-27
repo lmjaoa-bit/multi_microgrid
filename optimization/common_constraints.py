@@ -483,6 +483,7 @@ def solve_dispatch(
                     )
 
     if renewable_first:
+        for t in range(data.horizon):
             # Renewable-first priority is imposed on physical source totals while
             # preserving the oracle's deliberate within-coalition free allocation.
             # For cooperative solves with the current unlimited pair-capacity
