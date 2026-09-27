@@ -66,3 +66,27 @@ def test_default_full_day_has_finite_state_and_no_midnight_restoration():
     assert done
     for core in env.cores.values():
         assert core.battery.soc > core.battery.initial_soc
+
+
+def test_renewable_first_environment_exposes_zero_source_balance_residuals():
+    cfg = yaml.safe_load((ROOT / "configs" / "cooperative.yaml").read_text(encoding="utf-8"))
+    cfg["_project_root"] = str(ROOT)
+    env = MultiMicrogridEnv(cfg, split="test")
+    observations, _ = env.reset(seed=314, deterministic=True, forecast_noise=False)
+    actions = {
+        mg: np.zeros(env.action_dim, dtype=np.float32)
+        for mg in env.agent_ids
+    }
+    _, _, _, info = env.step(actions)
+    assert set(info["source_balance_residuals"]) == set(env.agent_ids)
+    for mg, residuals in info["source_balance_residuals"].items():
+        assert set(residuals) == {
+            "renewable_source_residual_kw",
+            "load_sink_residual_kw",
+            "charge_sink_residual_kw",
+            "discharge_source_residual_kw",
+            "external_surplus_residual_kw",
+        }
+        assert all(abs(float(value)) <= 1e-7 for value in residuals.values())
+        for key, value in residuals.items():
+            assert info["plans"][mg][key] == pytest.approx(value)
