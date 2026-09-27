@@ -130,7 +130,23 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
     design["control_mode"] = mode
     design["raw_action_dim"] = len(design["raw_actions"]) or None
     return {
-        "schema_version": 1,
+        "schema_version": 2,
+        "service_metrics_schema_version": "service_metrics_v2",
+        "dispatch_priority_mode": str(
+            env_config.get("dispatch", {}).get(
+                "priority_mode", "legacy_local_first"
+            )
+        ),
+        "action_semantics": (
+            "single_dispatch_dr_v3"
+            if (
+                action_design_id == "single_dispatch_dr"
+                and str(env_config.get("dispatch", {}).get(
+                    "priority_mode", "legacy_local_first"
+                )) == "renewable_load_first"
+            )
+            else design.get("version")
+        ),
         "experiment_profile": selected_experiment,
         "algorithm_slug": spec.slug,
         "policy": policy,
@@ -145,8 +161,8 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
         "physical_settings": {
             key: deepcopy(env_config.get(key))
             for key in (
-                "env", "p2p", "terminal_soc",
-                "cost", "time", "data", "price",
+                "env", "dispatch", "p2p", "terminal_soc",
+                "cost", "time", "data", "price", "microgrids",
             )
         },
         "ess_p2p_enabled": env_config.get("ess_sharing", {}).get("ess_p2p_enabled", True),

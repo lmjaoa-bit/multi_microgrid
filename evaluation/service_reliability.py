@@ -118,6 +118,16 @@ def _delta_t_from_summary(summary: Mapping[str, Any]) -> float:
     return 1.0
 
 
+def _config_from_summary(summary: Mapping[str, Any]) -> dict[str, Any] | None:
+    try:
+        physical = summary["experiment_contract"]["physical_settings"]
+    except (KeyError, TypeError):
+        return None
+    if not isinstance(physical, Mapping) or not physical.get("microgrids"):
+        return None
+    return dict(physical)
+
+
 def _daily_service_metrics(
     hourly_rows: Sequence[Mapping[str, Any]],
     agent_ids: Sequence[str],
@@ -125,150 +135,99 @@ def _daily_service_metrics(
     delta_t: float,
     feasible_day: bool,
     tolerance: float,
+    config: Mapping[str, Any] | None = None,
+    schema_version: str = "legacy_unknown",
 ) -> dict[str, Any]:
-    steps = len(hourly_rows)
-    agent_count = len(agent_ids)
-    unmet_system_hours = 0
-    unmet_microgrid_hours = 0
-    dr_system_hours = 0
-    dr_microgrid_hours = 0
-    unmet_by_mg = {mg: 0.0 for mg in agent_ids}
-    unmet_hours_by_mg = {mg: 0 for mg in agent_ids}
-    dr_hours_by_mg = {mg: 0 for mg in agent_ids}
-
-    for row in hourly_rows:
-        unmet_flags: list[bool] = []
-        dr_flags: list[bool] = []
-        for mg in agent_ids:
-            unmet_kw = max(0.0, _as_float(row.get(f"{mg}_unmet_load_kw", 0.0)))
-            unmet_by_mg[mg] += unmet_kw * delta_t
-            unmet = unmet_kw > tolerance
-            dr_infeasible = _as_bool(row.get(f"{mg}_dr_supply_infeasible", False))
-            unmet_flags.append(unmet)
-            dr_flags.append(dr_infeasible)
-            unmet_hours_by_mg[mg] += int(unmet)
-            dr_hours_by_mg[mg] += int(dr_infeasible)
-        unmet_system_hours += int(any(unmet_flags))
-        unmet_microgrid_hours += sum(unmet_flags)
-        dr_system_hours += int(any(dr_flags))
-        dr_microgrid_hours += sum(dr_flags)
-
-    unmet_energy = float(sum(unmet_by_mg.values()))
-    unmet_day = unmet_system_hours > 0
-    dr_day = dr_system_hours > 0
-    mg_hour_denominator = steps * agent_count
-    last_row = hourly_rows[-1] if hourly_rows else {}
-    ev_departure_count = int(max(
-        [_as_float(row.get("mg3_ev_departure_count", 0.0)) for row in hourly_rows] or [0.0]
-    ))
-    ev_completed_group_count = int(max(
-        [_as_float(row.get("mg3_ev_completed_group_count", 0.0)) for row in hourly_rows] or [0.0]
-    ))
-    ev_departure_shortfall_kwh = max(
-        [_as_float(row.get("mg3_ev_departure_shortfall_kwh", 0.0)) for row in hourly_rows] or [0.0]
-    )
-    strict_feasible = bool(
-        feasible_day
-        and not unmet_day
-        and not dr_day
-        and ev_departure_shortfall_kwh <= tolerance
-    )
-
-    result: dict[str, Any] = {
-        "unmet_energy_kwh": unmet_energy,
-        "unmet_load_hour_count": int(unmet_system_hours),
-        "unmet_load_hour_rate": unmet_system_hours / steps if steps else 0.0,
-        "unmet_load_microgrid_hour_count": int(unmet_microgrid_hours),
-        "unmet_load_microgrid_hour_rate": (
-            unmet_microgrid_hours / mg_hour_denominator if mg_hour_denominator else 0.0
-        ),
-        "unmet_load_day": bool(unmet_day),
-        "dr_supply_infeasible_hour_count": int(dr_system_hours),
-        "dr_supply_infeasible_rate": dr_system_hours / steps if steps else 0.0,
-        "dr_supply_infeasible_microgrid_hour_count": int(dr_microgrid_hours),
-        "dr_supply_infeasible_microgrid_hour_rate": (
-            dr_microgrid_hours / mg_hour_denominator if mg_hour_denominator else 0.0
-        ),
-        "dr_supply_infeasible_day": bool(dr_day),
-        "strict_feasible_day": strict_feasible,
-        "ev_departure_count": ev_departure_count,
-        "ev_completed_group_count": ev_completed_group_count,
-        "ev_departure_shortfall_kwh": float(ev_departure_shortfall_kwh),
-        "ev_departure_success_rate": (
-            ev_completed_group_count / ev_departure_count
-            if ev_departure_count else 1.0
-        ),
-    }
-    for mg in agent_ids:
-        result[f"unmet_energy_{mg}_kwh"] = float(unmet_by_mg[mg])
-        result[f"unmet_load_hour_rate_{mg}"] = (
-            unmet_hours_by_mg[mg] / steps if steps else 0.0
+    del agent_ids, delta_t
+    from evaluation.service_metrics import summarize_day_services
+    if config is None:
+        # Historical runs without an embedded full physical contract are
+        # audit-only.  Missing evidence remains null/incomplete rather than
+        # silently reconstructed from today's YAML defaults.
+        return summarize_day_services(
+            hourly_rows,
+            {"time": {"delta_t": 1.0}, "microgrids": []},
+            bool(feasible_day),
+            str(schema_version),
+            tolerance=float(tolerance),
         )
-        result[f"dr_supply_infeasible_rate_{mg}"] = (
-            dr_hours_by_mg[mg] / steps if steps else 0.0
-        )
-    return result
+    return summarize_day_services(
+        hourly_rows,
+        config,
+        bool(feasible_day),
+        str(schema_version),
+        tolerance=float(tolerance),
+    )
 
 
 def _aggregate_service_metrics(
     daily_rows: Sequence[Mapping[str, Any]], agent_ids: Sequence[str]
 ) -> dict[str, Any]:
-    unmet_values = [_as_float(row.get("unmet_energy_kwh", 0.0)) for row in daily_rows]
-    result: dict[str, Any] = {
-        "days_count": len(daily_rows),
-        "unmet_energy_total_kwh": float(np.sum(unmet_values)) if unmet_values else 0.0,
-        "unmet_energy_mean_kwh": float(np.mean(unmet_values)) if unmet_values else 0.0,
-        "unmet_energy_distribution_kwh": _distribution(unmet_values),
-        "unmet_load_day_count": int(sum(_as_bool(row.get("unmet_load_day")) for row in daily_rows)),
-        "unmet_load_day_rate": _rate(daily_rows, "unmet_load_day"),
-        "unmet_load_hour_rate_mean": _mean(daily_rows, "unmet_load_hour_rate"),
-        "unmet_load_microgrid_hour_rate_mean": _mean(
-            daily_rows, "unmet_load_microgrid_hour_rate"
-        ),
-        "dr_supply_infeasible_day_count": int(
-            sum(_as_bool(row.get("dr_supply_infeasible_day")) for row in daily_rows)
-        ),
-        "dr_supply_infeasible_day_rate": _rate(daily_rows, "dr_supply_infeasible_day"),
-        "dr_supply_infeasible_rate_mean": _mean(daily_rows, "dr_supply_infeasible_rate"),
-        "dr_supply_infeasible_microgrid_hour_rate_mean": _mean(
-            daily_rows, "dr_supply_infeasible_microgrid_hour_rate"
-        ),
-        "strict_feasible_day_count": int(
-            sum(_as_bool(row.get("strict_feasible_day")) for row in daily_rows)
-        ),
-        "strict_feasible_day_rate": _rate(daily_rows, "strict_feasible_day"),
-        "ev_departure_shortfall_total_kwh": float(sum(
-            _as_float(row.get("ev_departure_shortfall_kwh", 0.0)) for row in daily_rows
-        )),
-        "ev_departure_count": int(sum(
-            _as_float(row.get("ev_departure_count", 0.0)) for row in daily_rows
-        )),
-        "ev_completed_group_count": int(sum(
-            _as_float(row.get("ev_completed_group_count", 0.0)) for row in daily_rows
-        )),
-        "ev_departure_success_rate": (
-            sum(_as_float(row.get("ev_completed_group_count", 0.0)) for row in daily_rows)
-            / max(1.0, sum(_as_float(row.get("ev_departure_count", 0.0)) for row in daily_rows))
-        ),
-        "by_microgrid": {},
-    }
-    for mg in agent_ids:
-        unmet = [_as_float(row.get(f"unmet_energy_{mg}_kwh", 0.0)) for row in daily_rows]
+    del agent_ids
+    from evaluation.service_metrics import aggregate_service_days
+    result = aggregate_service_days(daily_rows)
+    result["unmet_energy_distribution_kwh"] = _distribution([
+        _as_float(row.get("unmet_energy_kwh"))
+        for row in daily_rows
+        if row.get("unmet_energy_kwh") is not None
+    ])
+    result["by_microgrid"] = {}
+    ids = sorted({
+        key[len("unmet_energy_"):-len("_kwh")]
+        for row in daily_rows
+        for key in row
+        if str(key).startswith("unmet_energy_")
+        and str(key).endswith("_kwh")
+        and key != "unmet_energy_kwh"
+    })
+    for mg in ids:
+        values = [
+            _as_float(row.get(f"unmet_energy_{mg}_kwh"))
+            for row in daily_rows
+            if row.get(f"unmet_energy_{mg}_kwh") is not None
+        ]
         result["by_microgrid"][mg] = {
-            "unmet_energy_total_kwh": float(np.sum(unmet)) if unmet else 0.0,
-            "unmet_energy_mean_kwh": float(np.mean(unmet)) if unmet else 0.0,
-            "unmet_load_hour_rate_mean": _mean(daily_rows, f"unmet_load_hour_rate_{mg}"),
-            "dr_supply_infeasible_rate_mean": _mean(
-                daily_rows, f"dr_supply_infeasible_rate_{mg}"
-            ),
-            "unmet_load_day_rate": float(np.mean([value > 0.0 for value in unmet])) if unmet else 0.0,
-            "dr_supply_infeasible_day_rate": float(np.mean([
-                _as_float(row.get(f"dr_supply_infeasible_rate_{mg}", 0.0)) > 0.0
-                for row in daily_rows
-            ])) if daily_rows else 0.0,
+            "unmet_energy_total_kwh": float(np.sum(values)) if values else 0.0,
+            "unmet_energy_mean_kwh": float(np.mean(values)) if values else None,
         }
+    # Compatibility aliases for the existing report/plot consumer.
+    if "unmet_load_hour_rate_mean" not in result:
+        result["unmet_load_hour_rate_mean"] = (
+            float(np.mean([
+                _as_float(row.get("unmet_load_hour_rate"))
+                for row in daily_rows
+                if row.get("unmet_load_hour_rate") is not None
+            ]))
+            if daily_rows else None
+        )
+    if "unmet_load_microgrid_hour_rate_mean" not in result:
+        result["unmet_load_microgrid_hour_rate_mean"] = (
+            float(np.mean([
+                _as_float(row.get("unmet_load_microgrid_hour_rate"))
+                for row in daily_rows
+                if row.get("unmet_load_microgrid_hour_rate") is not None
+            ]))
+            if daily_rows else None
+        )
+    if "dr_supply_infeasible_rate_mean" not in result:
+        result["dr_supply_infeasible_rate_mean"] = (
+            float(np.mean([
+                _as_float(row.get("dr_supply_infeasible_rate"))
+                for row in daily_rows
+                if row.get("dr_supply_infeasible_rate") is not None
+            ]))
+            if daily_rows else None
+        )
+    if "dr_supply_infeasible_microgrid_hour_rate_mean" not in result:
+        result["dr_supply_infeasible_microgrid_hour_rate_mean"] = (
+            float(np.mean([
+                _as_float(row.get("dr_supply_infeasible_microgrid_hour_rate"))
+                for row in daily_rows
+                if row.get("dr_supply_infeasible_microgrid_hour_rate") is not None
+            ]))
+            if daily_rows else None
+        )
     return result
-
 
 def _summary_aliases(reliability: Mapping[str, Any]) -> dict[str, Any]:
     return {
@@ -372,9 +331,9 @@ def augment_run_outputs(
 ) -> dict[str, Any]:
     """Add supply-reliability metrics without changing environment or policy behavior.
 
-    Existing ``feasible_day`` semantics are preserved. ``strict_feasible_day`` is
-    diagnostic-only and additionally requires zero unmet load and zero DR supply
-    infeasibility on that test day.
+    Existing ``feasible_day`` semantics are preserved.  Current runs are
+    recomputed by the shared service_metrics_v2 implementation; historical runs
+    without sufficient embedded evidence remain explicitly incomplete.
     """
     root = Path(run_dir).resolve()
     daily_path = root / "test_daily_metrics.csv"
@@ -386,6 +345,12 @@ def augment_run_outputs(
 
     summary_document = _read_json(root / "test_summary.json", {}) or {}
     delta_t = _delta_t_from_summary(summary_document)
+    physical_config = _config_from_summary(summary_document)
+    schema_version = str(
+        summary_document.get("experiment_contract", {}).get(
+            "service_metrics_schema_version", "legacy_unknown"
+        )
+    )
     base_fields, daily_rows = _read_csv(daily_path)
     if not daily_rows:
         raise ValueError("test_daily_metrics.csv contains no test days")
@@ -417,6 +382,8 @@ def augment_run_outputs(
                 delta_t=delta_t,
                 feasible_day=_as_bool(row.get("feasible_day", False)),
                 tolerance=float(tolerance),
+                config=physical_config,
+                schema_version=schema_version,
             )
         )
         augmented_rows.append(row)
@@ -425,7 +392,8 @@ def augment_run_outputs(
     reliability["definition"] = {
         "feasible_day": "existing physical constraint feasibility; semantics unchanged",
         "strict_feasible_day": (
-            "feasible_day AND no unmet-load hour AND no DR supply-infeasible hour"
+            "physical feasibility plus zero unmet/DR failures and applicable "
+            "HVAC, mill, and EV service constraints under service_metrics_v2"
         ),
         "unmet_load_hour_rate": "fraction of test-day hours where any microgrid has unmet load",
         "unmet_load_microgrid_hour_rate": (

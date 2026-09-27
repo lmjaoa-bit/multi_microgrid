@@ -6,6 +6,6 @@ single_dispatch:
 
 single_dispatch_dr:
   id: single_dispatch_dr
-  version: single_dispatch_dr_v1
+  version: single_dispatch_dr_v3
   raw_actions: [signed_dispatch_intent, dr_intent]
-  description: Local-first ESS dispatch plus one heterogeneous controllable-load intent per microgrid.
+  description: Renewable-load-first dispatch with executed ESS flow semantics plus one heterogeneous controllable-load intent per microgrid.
