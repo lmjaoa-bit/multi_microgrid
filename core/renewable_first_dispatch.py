@@ -148,4 +148,3 @@ def clear_renewable_first(
         "actual_charge_kw": actual_charge,
         "actual_discharge_kw": actual_discharge,
     }
-}
