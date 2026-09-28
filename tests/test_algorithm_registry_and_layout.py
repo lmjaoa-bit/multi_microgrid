@@ -28,7 +28,11 @@ def test_matd3_plugin_is_discoverable_and_satisfies_pipeline_contract() -> None:
 
 def test_retained_plugins_keep_isolated_configs():
     names = available_algorithm_names()
-    assert set(names) == {"matd3_dispatch", "matd3_hierarchical_transformer"}
+    assert set(names) == {
+        "matd3_dispatch",
+        "matd3_forecast_context",
+        "matd3_hierarchical_transformer",
+    }
 
     # Every retained plugin owns a matching algorithm config.
     for slug in names:
@@ -54,9 +58,10 @@ def test_matd3_and_ordinary_t_receive_same_peer_energy_summary():
             assert f"{peer}_soc" not in schema
 
 
-def test_only_matd3_and_ordinary_t_are_registered_for_new_runs():
+def test_explicit_forecast_context_plugin_is_registered_for_new_runs():
     assert set(available_algorithm_names()) == {
         "matd3_dispatch",
+        "matd3_forecast_context",
         "matd3_hierarchical_transformer",
     }
 
