@@ -11,7 +11,10 @@ import torch
 from torch import nn
 
 from algorithms.matd3 import MATD3
-from algorithms.matd3_hierarchical_transformer.actor import HierarchicalTransformerActor
+from algorithms.matd3_hierarchical_transformer.actor import (
+    POWER_NORMALIZER_KEYS,
+    HierarchicalTransformerActor,
+)
 from core.joint_action_projection import JointActionProjector
 
 
@@ -25,6 +28,8 @@ class Matd3HierarchicalTransformer(MATD3):
       - Heterogeneous device encoders for Mill, HVAC, and EV with pacing bias.
       - Centralized Twin Critic (CTDE) with physical joint-action projection (3 effective actions/agent).
     """
+
+    ACTOR_FEATURE_SEMANTICS = "physical_power_balance_v1"
 
     @classmethod
     def from_env(
@@ -49,6 +54,17 @@ class Matd3HierarchicalTransformer(MATD3):
             raise ValueError("Hierarchical Transformer requires raw actions [ESS intent, DR intent]")
 
         settings = config.get("algorithm", config)
+        net = settings.get("network", {})
+        feature_semantics = str(
+            net.get("feature_semantics", self.ACTOR_FEATURE_SEMANTICS)
+        )
+        if feature_semantics != self.ACTOR_FEATURE_SEMANTICS:
+            raise ValueError(
+                "Unsupported actor feature semantics: "
+                f"expected {self.ACTOR_FEATURE_SEMANTICS!r}, got {feature_semantics!r}"
+            )
+        self.actor_feature_semantics = feature_semantics
+
         allowed = {
             "actor_lr", "critic_lr", "gamma", "tau", "policy_delay",
             "target_policy_noise", "target_noise_clip", "replay_capacity",
@@ -90,7 +106,26 @@ class Matd3HierarchicalTransformer(MATD3):
             json.dumps(signature, sort_keys=True, default=str).encode()
         ).hexdigest()
 
-        net = settings.get("network", {})
+        raw_normalizers = getattr(env.obs_builder, "norm", None)
+        if not isinstance(raw_normalizers, Mapping):
+            raise ValueError("Observation builder is missing actor power normalizers")
+        self.actor_feature_normalizers: dict[str, dict[str, float]] = {}
+        for mg in self.agent_ids:
+            source = raw_normalizers.get(mg)
+            if not isinstance(source, Mapping):
+                raise ValueError(f"{mg}: actor power normalizers are missing")
+            normalized: dict[str, float] = {}
+            for key in POWER_NORMALIZER_KEYS:
+                if key not in source:
+                    raise ValueError(f"{mg}: actor power normalizer missing key {key}")
+                value = float(source[key])
+                if not np.isfinite(value) or value <= 0.0:
+                    raise ValueError(
+                        f"{mg}: actor power normalizer {key} must be positive and finite"
+                    )
+                normalized[key] = value
+            self.actor_feature_normalizers[mg] = normalized
+
         embed_dim = int(net.get("embed_dim", 32))
         num_heads = int(net.get("num_heads", 4))
         num_layers = int(net.get("num_layers", 2))
@@ -104,6 +139,7 @@ class Matd3HierarchicalTransformer(MATD3):
                 self.agent_ids,
                 mg,
                 mg_config=env.cfg_by_id[mg] if hasattr(env, "cfg_by_id") else None,
+                power_normalizers=self.actor_feature_normalizers[mg],
                 embed_dim=embed_dim,
                 num_heads=num_heads,
                 num_layers=num_layers,
@@ -285,9 +321,63 @@ class Matd3HierarchicalTransformer(MATD3):
 
         return metrics
 
+    def _validate_actor_feature_metadata(self, checkpoint: Mapping[str, Any]) -> None:
+        semantics = checkpoint.get("actor_feature_semantics")
+        if semantics != self.ACTOR_FEATURE_SEMANTICS:
+            raise ValueError(
+                "Actor feature semantics mismatch: "
+                f"expected {self.ACTOR_FEATURE_SEMANTICS!r}, got {semantics!r}"
+            )
+
+        saved = checkpoint.get("actor_feature_normalizers")
+        if not isinstance(saved, Mapping):
+            raise ValueError("Checkpoint actor feature normalizers are missing or invalid")
+
+        saved_agents = set(saved.keys())
+        expected_agents = set(self.agent_ids)
+        if saved_agents != expected_agents:
+            raise ValueError(
+                "Checkpoint actor feature normalizer agent set mismatch: "
+                f"expected {sorted(expected_agents)}, got {sorted(saved_agents)}"
+            )
+
+        expected_keys = set(POWER_NORMALIZER_KEYS)
+        for mg in self.agent_ids:
+            mg_saved = saved[mg]
+            if not isinstance(mg_saved, Mapping):
+                raise ValueError(f"{mg}: checkpoint actor feature normalizers are invalid")
+            if set(mg_saved.keys()) != expected_keys:
+                raise ValueError(
+                    f"{mg}: checkpoint actor feature normalizer keys mismatch"
+                )
+            for key in POWER_NORMALIZER_KEYS:
+                try:
+                    saved_value = np.float64(mg_saved[key])
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(
+                        f"{mg}: checkpoint actor feature normalizer {key} is invalid"
+                    ) from exc
+                current_value = np.float64(self.actor_feature_normalizers[mg][key])
+                if (
+                    not np.isfinite(saved_value)
+                    or saved_value <= 0.0
+                    or not np.isclose(
+                        saved_value,
+                        current_value,
+                        rtol=1e-12,
+                        atol=1e-12,
+                    )
+                ):
+                    raise ValueError(
+                        f"{mg}: checkpoint actor feature normalizer {key} mismatch: "
+                        f"expected {current_value!r}, got {saved_value!r}"
+                    )
+
     def save(self, path: str | Path) -> None:
         torch.save({
             "algorithm_slug": "matd3_hierarchical_transformer",
+            "actor_feature_semantics": self.actor_feature_semantics,
+            "actor_feature_normalizers": copy.deepcopy(self.actor_feature_normalizers),
             "action_semantics": self.projector.semantics,
             "projection_signature": self.projection_signature,
             "observation_schemas": self.observation_schemas,
@@ -301,6 +391,7 @@ class Matd3HierarchicalTransformer(MATD3):
 
     def load(self, path: str | Path) -> None:
         checkpoint = torch.load(Path(path), map_location=self.device, weights_only=False)
+        self._validate_actor_feature_metadata(checkpoint)
         slug = checkpoint.get("algorithm_slug")
         if slug != "matd3_hierarchical_transformer":
             raise ValueError(f"Incompatible algorithm checkpoint: expected matd3_hierarchical_transformer, got {slug}")

@@ -47,6 +47,8 @@ PEER_SUMMARY_SUFFIXES = (
     "charge_flex", "discharge_flex", "previous_p2p_net",
 )
 
+POWER_NORMALIZER_KEYS = ("load", "pv", "wind", "power")
+
 
 class HierarchicalTransformerActor(nn.Module):
     """Hierarchical Categorized-Token Spatio-Temporal Transformer Actor.
@@ -56,7 +58,7 @@ class HierarchicalTransformerActor(nn.Module):
       1. ESS Token (1 Token, 32d): Battery state, terminal pressure, static capacity/efficiency.
       2. Heterogeneous DR Token (1 Token, 32d): Dedicated device-specific encoder
          (Mill / HVAC / EV) with pacing bias for EV charging to prevent valley rebound peaks.
-      3. Current Supply-Demand Token (1 Token, 32d): Explicit net balance B = PV + WT - Load.
+      3. Current Supply-Demand Token (1 Token, 32d): Physical base balance B = (PV + WT - Load) / S_power.
       4. P2P Trade & Grid Margin Token (1 Token, 32d): Historical clearing, price, and system peak margin.
       5. Peer Energy Summary Tokens (2 Tokens, 2x32d): Public energy balance and flexibility of peer MGs.
       6. Temporal Forecast Tokens (8 Tokens, 8x32d): 8-hour horizon predictions of net load, price, and weather.
@@ -74,6 +76,7 @@ class HierarchicalTransformerActor(nn.Module):
         active_agent: str,
         mg_config: Mapping[str, Any] | None = None,
         *,
+        power_normalizers: Mapping[str, float],
         embed_dim: int = 32,
         num_heads: int = 4,
         num_layers: int = 2,
@@ -89,6 +92,25 @@ class HierarchicalTransformerActor(nn.Module):
         self.embed_dim = int(embed_dim)
         if self.embed_dim % num_heads != 0:
             raise ValueError(f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})")
+
+        normalizer_values: list[float] = []
+        for key in POWER_NORMALIZER_KEYS:
+            if key not in power_normalizers:
+                raise ValueError(
+                    f"{self.active_agent}: power_normalizers missing required key: {key}"
+                )
+            value = float(power_normalizers[key])
+            if not math.isfinite(value) or value <= 0.0:
+                raise ValueError(
+                    f"{self.active_agent}: power normalizer {key} must be positive and finite, "
+                    f"got {value!r}"
+                )
+            normalizer_values.append(value)
+        self.register_buffer(
+            "power_normalizer_tensor",
+            torch.tensor(normalizer_values, dtype=torch.float32),
+            persistent=False,
+        )
 
         names = {name: idx for idx, name in enumerate(self.schema)}
         def get_idx(name: str) -> int:
@@ -301,6 +323,25 @@ class HierarchicalTransformerActor(nn.Module):
             "dr_head": [self.dr_head, self.dr_linear_skip],
         }
 
+    def _physical_net_load(
+        self,
+        load: torch.Tensor,
+        pv: torch.Tensor,
+        wind: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return physical base net load on the shared power scale.
+
+        Input channels remain normalized by their own observation scales. This helper
+        restores each physical power before combining them, then applies the existing
+        shared power normalizer. Positive values mean a base-load deficit.
+        """
+        scales = self.power_normalizer_tensor
+        return (
+            load * scales[0]
+            - pv * scales[1]
+            - wind * scales[2]
+        ) / scales[3]
+
     def _build_tokens(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
         batch_size = obs.shape[0]
 
@@ -325,7 +366,8 @@ class HierarchicalTransformerActor(nn.Module):
         load = supply_raw[:, 0:1]
         pv = supply_raw[:, 1:2]
         wind = supply_raw[:, 2:3]
-        base_balance = pv + wind - load
+        # Physical base supply-demand balance; positive means renewable surplus.
+        base_balance = -self._physical_net_load(load, pv, wind)
         balance_sign = torch.sign(base_balance)
         supply_input = torch.cat([load, pv, wind, base_balance, balance_sign], dim=-1)
         supply_tok = self.supply_encoder(supply_input).unsqueeze(1)
@@ -350,7 +392,8 @@ class HierarchicalTransformerActor(nn.Module):
         f_pv = f_raw[:, :, 1:2]
         f_wind = f_raw[:, :, 2:3]
         f_price = f_raw[:, :, 3:4]
-        f_net_load = f_load - (f_pv + f_wind)
+        # Physical base net load; positive means an electricity deficit.
+        f_net_load = self._physical_net_load(f_load, f_pv, f_wind)
         f_temp = f_raw[:, :, 4:5] * self.temp_mask
         f_valid = f_raw[:, :, 5:6]
 

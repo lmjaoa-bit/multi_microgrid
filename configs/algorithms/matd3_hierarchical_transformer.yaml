@@ -3,7 +3,7 @@
 #   - 14 Physically Categorized Semantic Tokens (ESS, DR, Supply, Trade, Peer1, Peer2, 8xForecast)
 #   - 8-Hour Lookahead Forecast Horizon with Diurnal Clock Embeddings
 #   - Heterogeneous DR Encoders (Mill, HVAC, EV with Pacing Rate)
-#   - Explicit Supply-Demand Balance Token B = PV + WT - Load
+#   - Physical Supply-Demand Balance Token using restored kW and the shared power scale
 #   - P2P Trade & System Grid Margin Token for Peak Shaving Coordination
 #   - Three Independent Decentralized Actors (MG1, MG2, MG3)
 #   - Decoupled Dual Readout Heads with Bilinear Physical Skip / Gate
@@ -23,6 +23,7 @@ algorithm:
   warmup_steps: 1000
   exploration_noise: 0.15
   network:
+    feature_semantics: physical_power_balance_v1
     embed_dim: 32
     num_heads: 4
     num_layers: 2

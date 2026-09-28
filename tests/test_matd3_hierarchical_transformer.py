@@ -132,6 +132,13 @@ def test_checkpoint_save_and_load(env_and_config):
         algo.save(ckpt_path)
         assert ckpt_path.exists()
 
+        checkpoint = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        assert (
+            checkpoint["actor_feature_semantics"]
+            == Matd3HierarchicalTransformer.ACTOR_FEATURE_SEMANTICS
+        )
+        assert set(checkpoint["actor_feature_normalizers"]) == set(env.agent_ids)
+
         algo_new = Matd3HierarchicalTransformer.from_env(env, algo_cfg, device="cpu", seed=42)
         algo_new.load(ckpt_path)
 
