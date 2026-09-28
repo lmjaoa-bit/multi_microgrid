@@ -43,6 +43,7 @@ learning_curve:
   deterministic_policy: true
   fixed_scenarios: true
   evaluate_initial_policy: true
+  seed: 424242
 validation:
   enabled: true
   interval: 100
