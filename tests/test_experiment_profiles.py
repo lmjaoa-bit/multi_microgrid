@@ -43,7 +43,9 @@ def test_default_and_public_selectors_keep_matd3_default(catalog_root):
     assert default_profile(catalog_root) == "matd3"
     assert resolve_training_args(command(), catalog_root).algorithm == "matd3_dispatch"
     assert set(available_algorithm_names()) == {
-        "matd3_dispatch", "matd3_hierarchical_transformer"
+        "matd3_dispatch",
+        "matd3_forecast_context",
+        "matd3_hierarchical_transformer",
     }
     assert get_algorithm_spec("matd3").slug == "matd3_dispatch"
     assert set(catalog("action_designs")) == {"single_dispatch", "single_dispatch_dr"}
