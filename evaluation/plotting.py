@@ -278,6 +278,76 @@ def _training_convergence_figure(
     return fig
 
 
+def _evaluation_learning_curve_figure(
+    history: Sequence[Mapping[str, Any]],
+) -> Any:
+    """TD3-style single-seed evaluation curve: no training-reward smoothing or seed band."""
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=(9.3, 5.4))
+    if not history:
+        _no_data(
+            ax,
+            "Evaluation Learning Curve",
+            "learning_curve_history.json is unavailable",
+        )
+        return fig
+
+    steps = np.asarray(
+        [item.get("total_steps", np.nan) for item in history],
+        dtype=float,
+    )
+    returns = np.asarray(
+        [item.get("episode_return_mean", np.nan) for item in history],
+        dtype=float,
+    )
+    valid = np.isfinite(steps) & np.isfinite(returns)
+    if not valid.any():
+        _no_data(
+            ax,
+            "Evaluation Learning Curve",
+            "No finite evaluation-return points are available",
+        )
+        return fig
+
+    steps = steps[valid]
+    returns = returns[valid]
+    ax.plot(
+        steps,
+        returns,
+        color=BLUE,
+        linewidth=2.2,
+        marker="o",
+        markersize=2.8,
+        label="Mean Evaluation Return",
+    )
+    best_index = int(np.argmax(returns))
+    ax.scatter(
+        [steps[best_index]],
+        [returns[best_index]],
+        color=ORANGE,
+        s=28,
+        zorder=5,
+        label="Best Evaluation",
+    )
+
+    eval_count = history[0].get("eval_episode_count")
+    suffix = (
+        f" ({int(eval_count)} fixed validation episodes per point)"
+        if eval_count is not None else ""
+    )
+    ax.set_title(f"Evaluation Learning Curve — Single Seed{suffix}")
+    ax.set_xlabel("Environment Steps")
+    ax.set_ylabel("Average Episode Return")
+    ax.grid(axis="y")
+    ax.set_axisbelow(True)
+    if len(steps) > 1:
+        ax.set_xlim(left=0.0, right=float(np.max(steps)))
+    ax.legend(loc="best")
+    fig.tight_layout()
+    return fig
+
+
 def generate_figures(
     run_dir: str | Path,
     *,
@@ -300,6 +370,7 @@ def generate_figures(
     training_summary: Mapping[str, Any] = _read_json(root / "training_summary.json", {})
     training = _read_json(root / "training_history.json", []) or []
     validation = _read_json(root / "validation_history.json", []) or []
+    learning_curve = _read_json(root / "learning_curve_history.json", []) or []
     algorithm_label = str(
         summary.get("algorithm_display_name")
         or metadata.get("algorithm_display_name")
@@ -367,6 +438,13 @@ def generate_figures(
     fig = _training_convergence_figure(training, validation, warmup_steps=warmup_steps)
     fig.tight_layout()
     written += _save(fig, figure_dir, "01_training_convergence", formats)
+
+    # 01b: TD3-style single-seed evaluation return against environment steps.
+    # This intentionally does not use the training-return MA100 or a within-day
+    # standard-deviation band; multi-seed uncertainty can be added later.
+    if learning_curve:
+        fig = _evaluation_learning_curve_figure(learning_curve)
+        written += _save(fig, figure_dir, "01b_evaluation_learning_curve", formats)
 
     labels = ["Idle", "Independent MILP", f"{algorithm_label} Joint", "Cooperative MILP"]
     fields = ["idle_team_profit", "independent_total_profit", joint_field, "cooperative_milp_profit"]
