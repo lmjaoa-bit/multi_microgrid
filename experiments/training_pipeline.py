@@ -91,6 +91,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--validation-interval", type=int)
     parser.add_argument("--validation-days", type=int)
     parser.add_argument("--no-validation", action="store_true")
+    parser.add_argument("--learning-curve-interval-steps", type=int)
+    parser.add_argument("--learning-curve-eval-episodes", type=int)
+    parser.add_argument("--no-learning-curve", action="store_true")
     parser.add_argument("--no-milp", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-dashboard", action="store_true")
     parser.add_argument(
@@ -251,6 +254,50 @@ def _validation_record(
     return rec
 
 
+def _select_fixed_evaluation_days(days: Sequence[str], count: int) -> list[str]:
+    """Choose a deterministic, season-spanning subset for repeated policy evaluation."""
+    ordered = list(days)
+    if count <= 0:
+        raise ValueError("learning_curve.eval_episodes must be positive")
+    if not ordered:
+        raise ValueError("Learning-curve evaluation requires at least one validation day")
+    if count >= len(ordered):
+        return ordered
+    indices = np.linspace(0, len(ordered) - 1, num=count, dtype=int)
+    return [ordered[int(index)] for index in indices]
+
+
+def _learning_curve_record(
+    summary: Mapping[str, Any],
+    *,
+    episode: int,
+    total_steps: int,
+    scheduled_step: int,
+    evaluation_index: int,
+    deterministic_policy: bool,
+    fixed_scenarios: bool,
+    forecast_noise: bool,
+) -> dict[str, Any]:
+    """Persist one TD3-style single-seed evaluation point."""
+    reward_stats = summary["team_reward_statistics"]
+    profit_stats = summary["team_profit_statistics"]
+    return {
+        "evaluation_index": int(evaluation_index),
+        "episode": int(episode),
+        "total_steps": int(total_steps),
+        "scheduled_step": int(scheduled_step),
+        "eval_episode_count": int(summary["days_count"]),
+        "episode_return_mean": reward_stats["mean"],
+        "episode_return_std": reward_stats["std"],
+        "episode_return_median": reward_stats["median"],
+        "team_profit_mean": profit_stats["mean"],
+        "team_profit_std": profit_stats["std"],
+        "deterministic_policy": bool(deterministic_policy),
+        "fixed_scenarios": bool(fixed_scenarios),
+        "forecast_noise": bool(forecast_noise),
+    }
+
+
 def train(args: argparse.Namespace) -> dict[str, object]:
     args = resolve_training_args(args)
     spec = get_algorithm_spec(args.algorithm)
@@ -273,6 +320,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
           f"Environment: {contract['environment_profile']} [{contract['physical_config_hash'][:12]}]")
     training_cfg = algorithm_cfg.get("training", {})
     validation_cfg = algorithm_cfg.get("validation", {})
+    learning_curve_cfg = algorithm_cfg.get("learning_curve", {})
     logging_cfg = algorithm_cfg.get("logging", {})
     runtime_settings = configure_torch_runtime(algorithm_cfg, args.device)
     incremental_history = bool(logging_cfg.get("incremental_history", False))
@@ -295,10 +343,38 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         int(args.validation_days) if args.validation_days is not None
         else validation_cfg.get("max_days")
     )
+    learning_curve_enabled = (
+        bool(learning_curve_cfg.get("enabled", False))
+        and not args.no_learning_curve
+    )
+    learning_curve_interval_steps = int(
+        args.learning_curve_interval_steps
+        if args.learning_curve_interval_steps is not None
+        else learning_curve_cfg.get("interval_steps", 600)
+    )
+    learning_curve_eval_episodes = int(
+        args.learning_curve_eval_episodes
+        if args.learning_curve_eval_episodes is not None
+        else learning_curve_cfg.get("eval_episodes", 10)
+    )
+    learning_curve_deterministic = bool(
+        learning_curve_cfg.get("deterministic_policy", True)
+    )
+    learning_curve_fixed_scenarios = bool(
+        learning_curve_cfg.get("fixed_scenarios", True)
+    )
+    learning_curve_initial = bool(
+        learning_curve_cfg.get("evaluate_initial_policy", True)
+    )
+    learning_curve_seed = int(learning_curve_cfg.get("seed", 424242))
     if training_episodes <= 0 or test_episodes <= 0:
         raise ValueError("Training and test episode counts must be positive")
     if validation_enabled and validation_interval <= 0:
         raise ValueError("validation.interval must be positive")
+    if learning_curve_enabled and learning_curve_interval_steps <= 0:
+        raise ValueError("learning_curve.interval_steps must be positive")
+    if learning_curve_enabled and learning_curve_eval_episodes <= 0:
+        raise ValueError("learning_curve.eval_episodes must be positive")
 
     output_override = getattr(args, "output", None)
     resume_requested = getattr(args, "resume_run", None) is not None
@@ -363,6 +439,17 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "config_hash": config_hash, "device": str(args.device),
         "python_version": platform.python_version(), "train_episodes": training_episodes,
         "test_episodes": test_episodes, "git_commit": _git_commit(),
+        "learning_curve_evaluation": {
+            "enabled": learning_curve_enabled,
+            "interval_steps": learning_curve_interval_steps,
+            "eval_episodes": learning_curve_eval_episodes,
+            "deterministic_policy": learning_curve_deterministic,
+            "fixed_scenarios": learning_curve_fixed_scenarios,
+            "evaluation_seed": learning_curve_seed,
+            "evaluate_initial_policy": learning_curve_initial,
+            "x_axis": "environment_steps",
+            "y_axis": "average_episode_return",
+        },
         "runtime": runtime_settings,
     }
     if resume_requested:
@@ -427,6 +514,18 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     if validation_days_limit is not None:
         validation_days = validation_days[:max(1, int(validation_days_limit))]
 
+    learning_curve_env = (
+        MultiMicrogridEnv(env_config, split="val") if learning_curve_enabled else None
+    )
+    learning_curve_days: list[str] = []
+    if learning_curve_env is not None:
+        all_learning_curve_days = [
+            str(day.date()) for day in learning_curve_env.data.valid_days
+        ]
+        learning_curve_days = _select_fixed_evaluation_days(
+            all_learning_curve_days, learning_curve_eval_episodes
+        )
+
     progress: dict[str, Any] = {}
     if resume_requested:
         progress = recoverable.load_training_state(recovery_dir)  # type: ignore[union-attr]
@@ -466,6 +565,22 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     validation_history = validation_history[:validation_cursor]
     if resume_requested:
         write_json(validation_path, validation_history)
+
+    learning_curve_path = run_dir / "learning_curve_history.json"
+    learning_curve_history: list[dict[str, Any]] = (
+        list(json.loads(learning_curve_path.read_text(encoding="utf-8")))
+        if resume_requested and learning_curve_path.is_file()
+        else []
+    )
+    learning_curve_cursor = int(
+        progress.get("learning_curve_history_length", len(learning_curve_history))
+    )
+    if len(learning_curve_history) < learning_curve_cursor:
+        raise ValueError("Learning-curve history is shorter than its recovery cursor")
+    learning_curve_history = learning_curve_history[:learning_curve_cursor]
+    if resume_requested and learning_curve_enabled:
+        write_json(learning_curve_path, learning_curve_history)
+
     total_steps = int(progress.get("total_steps", 0))
     if "pipeline_rng_state" in progress:
         rng.bit_generator.state = progress["pipeline_rng_state"]
@@ -484,6 +599,66 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     best_episode = int(best_episode_raw) if best_episode_raw is not None else None
     prior_training_seconds = float(progress.get("training_seconds", 0.0))
     train_started = time.perf_counter()
+
+    learning_curve_forecast_noise = bool(
+        env_config.get("observation", {}).get("evaluation_forecast_noise", False)
+    )
+    if learning_curve_history:
+        last_scheduled_step = max(
+            int(item.get("scheduled_step", item.get("total_steps", 0)))
+            for item in learning_curve_history
+        )
+        next_learning_curve_step = (
+            (last_scheduled_step // learning_curve_interval_steps) + 1
+        ) * learning_curve_interval_steps
+    else:
+        next_learning_curve_step = (
+            (total_steps // learning_curve_interval_steps) + 1
+        ) * learning_curve_interval_steps
+
+    def run_learning_curve_evaluation(
+        *,
+        episode: int,
+        actual_steps: int,
+        scheduled_step: int,
+    ) -> None:
+        if learning_curve_env is None:
+            return
+        noise_std = 0.0 if learning_curve_deterministic else exploration
+        policy = lambda obs: algorithm.select_actions(obs, noise_std=noise_std)
+        curve_summary, _ = evaluate_policy_on_days(
+            learning_curve_env,
+            learning_curve_days,
+            policy,
+            seed=learning_curve_seed,
+            deterministic_environment=learning_curve_fixed_scenarios,
+            forecast_noise=learning_curve_forecast_noise,
+        )
+        learning_curve_history.append(
+            _learning_curve_record(
+                curve_summary,
+                episode=episode,
+                total_steps=actual_steps,
+                scheduled_step=scheduled_step,
+                evaluation_index=len(learning_curve_history),
+                deterministic_policy=learning_curve_deterministic,
+                fixed_scenarios=learning_curve_fixed_scenarios,
+                forecast_noise=learning_curve_forecast_noise,
+            )
+        )
+        write_json(learning_curve_path, learning_curve_history)
+
+    if (
+        learning_curve_enabled
+        and learning_curve_initial
+        and not resume_requested
+        and not learning_curve_history
+    ):
+        run_learning_curve_evaluation(
+            episode=0,
+            actual_steps=0,
+            scheduled_step=0,
+        )
 
     dashboard = AlgorithmTrainingDashboard(
         total_episodes=training_episodes, warmup_steps=warmup,
@@ -570,7 +745,14 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                 or episode_index + 1 == training_episodes
             )
             if should_validate and validation_env is not None:
-                policy = lambda obs: algorithm.select_actions(obs, noise_std=0.0)
+                validation_noise = (
+                    0.0
+                    if bool(validation_cfg.get("deterministic_policy", True))
+                    else exploration
+                )
+                policy = lambda obs: algorithm.select_actions(
+                    obs, noise_std=validation_noise
+                )
                 val_summary, _ = evaluate_policy_on_days(
                     validation_env, validation_days, policy, seed=args.seed + 100_000,
                     deterministic_environment=bool(validation_cfg.get("fixed_scenarios", True)),
@@ -595,6 +777,29 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                 write_json(run_dir / "validation_history.json", validation_history)
                 ep_record["best_validation_profit"] = best_validation_score
 
+            should_evaluate_learning_curve = learning_curve_enabled and (
+                total_steps >= next_learning_curve_step
+                or episode_index + 1 == training_episodes
+            )
+            if should_evaluate_learning_curve:
+                last_curve_steps = (
+                    int(learning_curve_history[-1]["total_steps"])
+                    if learning_curve_history else -1
+                )
+                if last_curve_steps != total_steps:
+                    scheduled_step = (
+                        next_learning_curve_step
+                        if total_steps >= next_learning_curve_step
+                        else total_steps
+                    )
+                    run_learning_curve_evaluation(
+                        episode=episode_index + 1,
+                        actual_steps=total_steps,
+                        scheduled_step=scheduled_step,
+                    )
+                while next_learning_curve_step <= total_steps:
+                    next_learning_curve_step += learning_curve_interval_steps
+
             if history_journal is not None:
                 history_journal.append(ep_record)
                 save_history = (episode_index + 1) % snapshot_interval == 0
@@ -615,6 +820,7 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                     "completed_episode": episode_index + 1,
                     "total_steps": total_steps,
                     "validation_history_length": len(validation_history),
+                    "learning_curve_history_length": len(learning_curve_history),
                     "best_candidate": asdict(best_candidate) if best_candidate is not None else None,
                     "best_validation_score": (
                         best_validation_score if math.isfinite(best_validation_score) else None
@@ -748,6 +954,17 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "final_500_profit_std": float(np.std(final_500)),
         "best_validation_profit_mean": best_validation_score,
         "checkpoint_selection": checkpoint_selection,
+        "learning_curve_enabled": learning_curve_enabled,
+        "learning_curve_evaluations": len(learning_curve_history),
+        "learning_curve_interval_steps": (
+            learning_curve_interval_steps if learning_curve_enabled else None
+        ),
+        "learning_curve_eval_episodes": (
+            len(learning_curve_days) if learning_curve_enabled else 0
+        ),
+        "learning_curve_history": (
+            "learning_curve_history.json" if learning_curve_enabled else None
+        ),
         "training_seconds": training_seconds,
         "seconds_per_episode_mean": training_seconds / training_episodes,
     }
