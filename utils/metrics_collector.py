@@ -1080,12 +1080,16 @@ class EpisodeMetricsCollector:
 
 def aggregate_episode_metrics(episodes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     profits = [float(item["team_profit"]) for item in episodes]
+    rewards = [float(item.get("team_reward", 0.0)) for item in episodes]
     ids = list(episodes[0]["profit_by_microgrid"]) if episodes else []
     result = {
         "days_count": len(episodes),
         "team_profit_statistics": distribution_statistics(profits),
         "team_profit_mean": float(np.mean(profits)) if profits else 0.0,
         "team_profit_total": float(np.sum(profits)) if profits else 0.0,
+        "team_reward_statistics": distribution_statistics(rewards),
+        "team_reward_mean": float(np.mean(rewards)) if rewards else 0.0,
+        "team_reward_total": float(np.sum(rewards)) if rewards else 0.0,
         "profit_by_microgrid_mean": {
             mg: float(np.mean([day["profit_by_microgrid"][mg] for day in episodes]))
             for mg in ids
