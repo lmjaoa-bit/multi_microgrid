@@ -345,16 +345,22 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     )
     learning_curve_enabled = (
         bool(learning_curve_cfg.get("enabled", False))
-        and not args.no_learning_curve
+        and not bool(getattr(args, "no_learning_curve", False))
+    )
+    learning_curve_interval_override = getattr(
+        args, "learning_curve_interval_steps", None
+    )
+    learning_curve_eval_override = getattr(
+        args, "learning_curve_eval_episodes", None
     )
     learning_curve_interval_steps = int(
-        args.learning_curve_interval_steps
-        if args.learning_curve_interval_steps is not None
+        learning_curve_interval_override
+        if learning_curve_interval_override is not None
         else learning_curve_cfg.get("interval_steps", 600)
     )
     learning_curve_eval_episodes = int(
-        args.learning_curve_eval_episodes
-        if args.learning_curve_eval_episodes is not None
+        learning_curve_eval_override
+        if learning_curve_eval_override is not None
         else learning_curve_cfg.get("eval_episodes", 10)
     )
     learning_curve_deterministic = bool(
