@@ -439,6 +439,21 @@ def generate_figures(
     training = _read_json(root / "training_history.json", []) or []
     validation = _read_json(root / "validation_history.json", []) or []
     learning_curve = _read_json(root / "learning_curve_history.json", []) or []
+    config_snapshot: Mapping[str, Any] = {}
+    config_snapshot_path = root / "config_snapshot.yaml"
+    if config_snapshot_path.exists():
+        loaded_snapshot = yaml.safe_load(
+            config_snapshot_path.read_text(encoding="utf-8")
+        ) or {}
+        if isinstance(loaded_snapshot, Mapping):
+            config_snapshot = loaded_snapshot
+    reward_semantics_version = str(
+        summary.get("reward_semantics_version")
+        or metadata.get("reward_semantics_version")
+        or config_snapshot.get("environment", {}).get("reward", {}).get(
+            "semantics_version", "legacy"
+        )
+    )
     algorithm_label = str(
         summary.get("algorithm_display_name")
         or metadata.get("algorithm_display_name")
@@ -503,20 +518,7 @@ def generate_figures(
     written += _save(fig, figure_dir, "00_experiment_summary", formats)
 
     # 01: complete training convergence from Episode 1 with raw, MA100, validation, and warm-up boundary.
-    config_snapshot: Mapping[str, Any] = {}
-    config_snapshot_path = root / "config_snapshot.yaml"
-    if config_snapshot_path.exists():
-        loaded_snapshot = yaml.safe_load(config_snapshot_path.read_text(encoding="utf-8")) or {}
-        if isinstance(loaded_snapshot, Mapping):
-            config_snapshot = loaded_snapshot
     warmup_steps = config_snapshot.get("algorithm", {}).get("algorithm", {}).get("warmup_steps")
-    reward_semantics_version = str(
-        summary.get("reward_semantics_version")
-        or metadata.get("reward_semantics_version")
-        or config_snapshot.get("environment", {}).get("reward", {}).get(
-            "semantics_version", "legacy"
-        )
-    )
     fig = _training_convergence_figure(
         training,
         validation,
