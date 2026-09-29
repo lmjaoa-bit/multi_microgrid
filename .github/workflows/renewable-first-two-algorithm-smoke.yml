@@ -39,48 +39,67 @@ jobs:
         run: python -m pip install -r requirements.txt
       - name: Regenerate Yancheng-area data
         run: python scripts/build_spatial_market_data.py
-      - name: Verify v3 shared semantics
+      - name: Verify Reward V2 shared semantics
         run: |
           python - <<'PY'
           import yaml
           c = yaml.safe_load(open('configs/cooperative.yaml', encoding='utf-8'))
           assert c['dispatch']['priority_mode'] == 'renewable_load_first'
           assert c['terminal_soc']['mode'] == 'none'
+          assert c['reward']['semantics_version'] == 'generalized_system_cost_v2'
+          assert c['reward']['calibration_status'] == 'locked'
+          assert len(c['reward']['calibration_report_sha256']) == 64
+          assert all(float(m['grid']['export_limit_kw']) == 0.0 for m in c['microgrids'])
           hvac = next(m['dr'] for m in c['microgrids'] if m['dr']['type'] == 'commercial_hvac')
-          assert hvac['forecast_viability'] is True
+          ev = next(m['dr'] for m in c['microgrids'] if m['dr']['type'] == 'ev_charging')
+          assert hvac['forecast_viability'] is False
+          assert hvac['control_semantics'] == 'soft_comfort'
+          assert ev['control_semantics'] == 'no_deadline_minimum'
           for path in (
               'configs/smoke/matd3_dispatch.yaml',
               'configs/smoke/matd3_hierarchical_transformer.yaml',
           ):
               a = yaml.safe_load(open(path, encoding='utf-8'))
+              assert a['algorithm']['gamma'] == 1.0
               assert a['algorithm']['batch_size'] == 8
               assert a['algorithm']['warmup_steps'] == 8
               assert a['algorithm']['replay_capacity'] == 256
               assert a['logging']['diagnostic_interval'] == 1
-              assert a['validation']['selection']['mode'] == 'constrained_profit'
+              assert a['validation']['selection']['mode'] == 'physical_constrained_objective'
+              assert a['validation']['selection']['objective'] == 'team_reward_mean'
+          t = yaml.safe_load(open(
+              'configs/smoke/matd3_hierarchical_transformer.yaml', encoding='utf-8'
+          ))
+          assert t['algorithm']['network']['forecast_horizon'] == 8
+          assert t['algorithm']['network']['include_peer_forecast'] is True
+          assert t['algorithm']['network']['peer_forecast_features'] == ['energy_balance']
           PY
       - name: Run MATD3 short pipeline
         run: >-
           python scripts/run_experiment.py
           --algorithm matd3
+          --config configs/cooperative.yaml
           --algorithm-config configs/smoke/matd3_dispatch.yaml
           --episodes 3
           --test-episodes 2
           --validation-interval 1
           --validation-days 2
           --device cpu
+          --no-learning-curve
           --no-dashboard
           --output-root /tmp/renewable_first_smoke
       - name: Run ordinary Transformer short pipeline
         run: >-
           python scripts/run_experiment.py
           --algorithm matd3_hierarchical_transformer
+          --config configs/cooperative.yaml
           --algorithm-config configs/smoke/matd3_hierarchical_transformer.yaml
           --episodes 3
           --test-episodes 2
           --validation-interval 1
           --validation-days 2
           --device cpu
+          --no-learning-curve
           --no-dashboard
           --output-root /tmp/renewable_first_smoke
       - name: Verify updates checkpoints contracts and MILP settlement
@@ -123,10 +142,15 @@ jobs:
               assert int(summary.get('milp_failure_count', 0)) == 0
               assert int(summary.get('shapley_invalid_day_count', 0)) == 0
               assert float(summary.get('shapley_budget_balance_max_error', 0.0) or 0.0) <= 1e-6
+              assert summary['reward_semantics_version'] == 'generalized_system_cost_v2'
+              assert summary['generalized_reference_enabled'] is True
+              assert int(summary['generalized_reference_solve_count']) == 2
+              assert int(summary['generalized_reference_success_count']) == 2
               contract = metadata['experiment_contract']
               contracts[slug] = contract
-              assert contract['dispatch_semantics'] == 'renewable_load_first_v1'
-              assert contract['action_semantics'] == 'single_dispatch_dr_v3'
+              assert contract['dispatch_semantics'] == 'renewable_load_first_v2_no_grid_export'
+              assert contract['reward_semantics_version'] == 'generalized_system_cost_v2'
+              assert contract['action_semantics'] == 'single_dispatch_dr_v4_instantaneous_physical'
               assert contract['metrics_schema_version'] == 'service_metrics_v2'
 
               env_cfg = yaml.safe_load(Path('configs/cooperative.yaml').read_text(encoding='utf-8'))
