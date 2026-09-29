@@ -306,11 +306,20 @@ class CommercialHVACDR:
         self._invalidate_bounds_cache()
         if served < 1.0 - 1e-10:
             self.terminal_thermal_infeasible = True
+        comfort_low, comfort_high = self._state_comfort_bounds(t + 1)
+        comfort_violation_c = (
+            max(0.0, float(comfort_low) - float(self.t_air))
+            + max(0.0, float(self.t_air) - float(comfort_high))
+        )
         return {
             "t_air_c": self.t_air,
             "t_mass_c": self.t_mass,
             "served_hvac_kw": abs(signed_power),
             "delivered_fraction": served,
+            "comfort_lower_c": float(comfort_low),
+            "comfort_upper_c": float(comfort_high),
+            "comfort_violation_c": float(comfort_violation_c),
+            "comfort_degree_hours": float(comfort_violation_c * self.delta_t),
         }
 
     def state(self, t: int) -> dict[str, float]:
