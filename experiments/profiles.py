@@ -165,6 +165,13 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
         "reward_semantics_version": (
             reward_v2["semantics_version"] if reward_v2 is not None else "legacy"
         ),
+        "reward_calibration_status": (
+            reward_v2["calibration_status"] if reward_v2 is not None else None
+        ),
+        "reward_calibration_report_sha256": (
+            reward_v2.get("calibration_report_sha256")
+            if reward_v2 is not None else None
+        ),
         "dr_projection_semantics": (
             reward_v2["dr_projection_semantics"] if reward_v2 is not None else None
         ),
