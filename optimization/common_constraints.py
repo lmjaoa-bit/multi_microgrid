@@ -10,6 +10,11 @@ import yaml
 
 from core.data_manager import DataManager
 from core.profiles import HeterogeneousProfileModel
+from core.reward_v2 import (
+    calculate_reward_v2,
+    resolve_carbon_factors,
+    resolve_reward_v2_config,
+)
 from core.tariffs import buy_price_column, sell_price_column
 
 
@@ -118,6 +123,7 @@ def solve_dispatch(
     apply_terminal_condition: bool = True,
     p2p_export_source: str = "unrestricted",
     include_dr: bool = False,
+    objective_kind: str = "accounting_profit",
 ) -> DispatchResult:
     try:
         import highspy
@@ -125,13 +131,35 @@ def solve_dispatch(
         raise ImportError("Install highspy to use the dispatch oracle") from exc
 
     ids = list(agent_ids)
+    if objective_kind not in {"accounting_profit", "generalized_cost"}:
+        raise ValueError(f"Unsupported dispatch objective_kind: {objective_kind!r}")
+    generalized = objective_kind == "generalized_cost"
+    reward_v2 = resolve_reward_v2_config(config) if generalized else None
+    if generalized:
+        all_ids = [str(mg["id"]) for mg in config["microgrids"]]
+        if ids != all_ids:
+            raise ValueError(
+                "generalized_cost reference is defined only for the full coalition"
+            )
+        if not include_dr:
+            raise ValueError("generalized_cost reference requires include_dr=True")
     if p2p_export_source not in {"unrestricted", "renewable_only"}:
         raise ValueError(f"Unsupported P2P export source: {p2p_export_source}")
     cfg_by_id = {str(mg["id"]): mg for mg in config["microgrids"]}
     dt = float(config["time"].get("delta_t", 1.0))
     cost_cfg = config["cost"]
     unmet_price = float(cost_cfg["unmet_load_cost_per_kwh"])
-    curtail_price = float(cost_cfg["renewable_curtailment_cost_per_kwh"])
+    accounting_curtail_price = float(
+        cost_cfg["renewable_curtailment_cost_per_kwh"]
+    )
+    curtail_price = (
+        float(reward_v2["curtailment_price_per_kwh"])
+        if reward_v2 is not None else accounting_curtail_price
+    )
+    carbon_factors = (
+        resolve_carbon_factors(config, data.frame)
+        if generalized and data.frame is not None else None
+    )
     terminal_cfg = config["terminal_soc"]
     rate = float(terminal_cfg["penalty_per_kwh"])
     p2p_cfg = config["p2p"]
@@ -156,7 +184,7 @@ def solve_dispatch(
         "grid_mode", "curtailment", "unmet", "flow", "renewable_export_mode",
         "terminal_positive", "terminal_negative", "res_load", "res_charge", "ess_load",
         "grid_load", "grid_charge", "res_peer_load", "res_peer_charge", "ess_peer_load",
-        "ess_export_mode")}
+        "ess_export_mode", "team_load_peak")}
 
     def price_at(values: np.ndarray | Mapping[str, np.ndarray], mg: str, t: int) -> float:
         series = values[mg] if isinstance(values, Mapping) else values
@@ -241,8 +269,20 @@ def solve_dispatch(
                         mass + dt/device.c_mass * ((air-mass)/device.r_am +
                         (1.0-device.solar_air_fraction)*q_solar))
                     low, high = device._state_comfort_bounds(t+1)
-                    model.addConstr(dr[(mg,"air",t+1)] >= low)
-                    model.addConstr(dr[(mg,"air",t+1)] <= high)
+                    if generalized:
+                        low_slack = dvar(
+                            "comfort_low_slack", mg, t, lb=0.0, ub=inf,
+                            obj=float(reward_v2["comfort_price_per_degree_hour"]) * dt,
+                        )
+                        high_slack = dvar(
+                            "comfort_high_slack", mg, t, lb=0.0, ub=inf,
+                            obj=float(reward_v2["comfort_price_per_degree_hour"]) * dt,
+                        )
+                        model.addConstr(dr[(mg,"air",t+1)] + low_slack >= low)
+                        model.addConstr(dr[(mg,"air",t+1)] - high_slack <= high)
+                    else:
+                        model.addConstr(dr[(mg,"air",t+1)] >= low)
+                        model.addConstr(dr[(mg,"air",t+1)] <= high)
                 # The environment converts positive final temperature deviation
                 # with cooling COP, negative deviation with heating COP.
                 for key, initial, tolerance, heat_capacity in (
@@ -259,7 +299,11 @@ def solve_dispatch(
                     dr_terminal[mg].extend([hot,cold])
             elif kind == "ev_charging":
                 if device.cohort_mode:
-                    departure_rate = float(device_cfg.get("departure_penalty_per_kwh", rate))
+                    departure_rate = (
+                        float(reward_v2["ev_shortfall_price_per_kwh"])
+                        if generalized
+                        else float(device_cfg.get("departure_penalty_per_kwh", rate))
+                    )
                     group_energy_names: list[tuple[str, dict[str, Any]]] = []
                     for session in device.sessions:
                         group = str(session["group_id"])
@@ -366,12 +410,26 @@ def solve_dispatch(
             discharge = add("discharge", (mg, t), lb=0.0, ub=float(battery["max_discharge_kw"]),
                             obj=float(battery["degradation_cost_per_kwh"]) * dt, type=continuous)
             battery_mode = add("battery_mode", (mg, t), lb=0.0, ub=1.0, type=integer)
-            grid_import = add("grid_import", (mg, t), lb=0.0,
-                              ub=import_bounds[mg],
-                              obj=price_at(data.buy_price, mg, t) * dt, type=continuous)
-            grid_export = add("grid_export", (mg, t), lb=0.0,
-                              ub=float(cfg_by_id[mg]["grid"]["export_limit_kw"]),
-                              obj=-price_at(data.sell_price, mg, t) * dt, type=continuous)
+            grid_import_objective = price_at(data.buy_price, mg, t) * dt
+            if generalized:
+                if carbon_factors is None:
+                    raise ValueError("generalized_cost requires carbon factors")
+                grid_import_objective += (
+                    float(reward_v2["carbon_price_per_kg"])
+                    * float(carbon_factors[t])
+                    * dt
+                )
+            grid_import = add(
+                "grid_import", (mg, t), lb=0.0,
+                ub=import_bounds[mg],
+                obj=grid_import_objective, type=continuous,
+            )
+            grid_export = add(
+                "grid_export", (mg, t), lb=0.0,
+                ub=0.0 if generalized else float(cfg_by_id[mg]["grid"]["export_limit_kw"]),
+                obj=0.0 if generalized else -price_at(data.sell_price, mg, t) * dt,
+                type=continuous,
+            )
             grid_mode = add("grid_mode", (mg, t), lb=0.0, ub=1.0, type=integer)
             if cooperative and p2p_export_source == "renewable_only":
                 add("renewable_export_mode", (mg, t), lb=0.0, ub=1.0, type=integer)
@@ -568,6 +626,23 @@ def solve_dispatch(
                     res_to_charge >= charge_total - priority_m * (1.0 - charge_mode)
                 )
 
+    if generalized:
+        peak = add(
+            "team_load_peak", ("team",), lb=0.0, ub=inf,
+            obj=float(reward_v2["peak_price_per_kw"]), type=continuous,
+        )
+        for t in range(data.horizon):
+            model.addConstr(
+                peak >= sum(
+                    (
+                        float(data.load_kw[mg][t])
+                        + (dr_power[(mg, t)] if include_dr else 0.0)
+                        for mg in ids
+                    ),
+                    0.0,
+                )
+            )
+
     tolerance = float(terminal_cfg["tolerance"])
     rate = float(terminal_cfg["penalty_per_kwh"])
     if apply_terminal_condition and terminal_cfg["mode"] != "none":
@@ -593,10 +668,25 @@ def solve_dispatch(
 
     model.minimize()
     status = str(model.getModelStatus()).replace("HighsModelStatus.", "")
-    if include_dr and status != "kOptimal":
+    solution_valid = bool(model.getSolution().value_valid)
+    if include_dr and not generalized and status != "kOptimal":
         raise RuntimeError(f"Full-information oracle not proven optimal: {status}")
-    if not model.getSolution().value_valid:
-        raise RuntimeError(f"Dispatch oracle failed: {status}")
+    if not solution_valid:
+        raise RuntimeError(f"Dispatch oracle has no feasible incumbent: {status}")
+    solver_info = model.getInfo()
+    solver_objective_value = float(model.getObjectiveValue())
+    solver_bound_raw = getattr(solver_info, "mip_dual_bound", None)
+    solver_gap_raw = getattr(solver_info, "mip_gap", None)
+    solver_bound = (
+        float(solver_bound_raw)
+        if solver_bound_raw is not None and np.isfinite(float(solver_bound_raw))
+        else None
+    )
+    solver_gap = (
+        float(solver_gap_raw)
+        if solver_gap_raw is not None and np.isfinite(float(solver_gap_raw))
+        else None
+    )
 
     def value(name: str, key: tuple[Any, ...]) -> float:
         result = float(model.val(variables[name][key]))
@@ -634,14 +724,19 @@ def solve_dispatch(
                 - grid_import * price_at(data.buy_price, mg, t)
             ) * dt
             operating_profit -= (charge + discharge) * dt * float(battery["degradation_cost_per_kwh"])
-            operating_profit -= curtailment * dt * curtail_price + unmet * dt * unmet_price
+            operating_profit -= (
+                curtailment * dt * accounting_curtail_price
+                + unmet * dt * unmet_price
+            )
             profit_by[mg] += float(operating_profit)
             cost_breakdown["grid_import_cost"] += grid_import*price_at(data.buy_price,mg,t)*dt
             cost_breakdown["grid_export_revenue"] += grid_export*price_at(data.sell_price,mg,t)*dt
             cost_breakdown["battery_degradation_cost"] += (
                 charge+discharge)*dt*float(battery["degradation_cost_per_kwh"])
             cost_breakdown["unmet_load_cost"] += unmet*dt*unmet_price
-            cost_breakdown["renewable_curtailment_cost"] += curtailment*dt*curtail_price
+            cost_breakdown["renewable_curtailment_cost"] += (
+                curtailment * dt * accounting_curtail_price
+            )
             flexible = 0.0
             dr_row: dict[str, float] = {}
             if include_dr:
@@ -654,13 +749,47 @@ def solve_dispatch(
                     heat = float(model.val(dr[(mg,"heat",t)]))
                     cool = float(model.val(dr[(mg,"cool",t)]))
                     flexible = heat + cool
-                    dr_row = {"hvac_heating_kw":heat,"hvac_cooling_kw":cool,
-                              "hvac_air_after_c":float(model.val(dr[(mg,"air",t+1)])),
-                              "hvac_mass_after_c":float(model.val(dr[(mg,"mass",t+1)]))}
+                    dr_row = {
+                        "hvac_heating_kw": heat,
+                        "hvac_cooling_kw": cool,
+                        "hvac_air_after_c": float(model.val(dr[(mg,"air",t+1)])),
+                        "hvac_mass_after_c": float(model.val(dr[(mg,"mass",t+1)])),
+                    }
+                    if generalized:
+                        low_slack = float(model.val(dr[(mg, "comfort_low_slack", t)]))
+                        high_slack = float(model.val(dr[(mg, "comfort_high_slack", t)]))
+                        dr_row.update({
+                            "comfort_low_slack_c": low_slack,
+                            "comfort_high_slack_c": high_slack,
+                            "comfort_violation_c": low_slack + high_slack,
+                            "comfort_degree_hours": (low_slack + high_slack) * dt,
+                        })
                 else:
                     flexible = float(model.val(dr[(mg,"ev_charge",t)]))
-                    dr_row = {"ev_soc_after":float(model.val(dr[(mg,"ev_energy",t+1)]))/
-                              device.capacity_kwh}
+                    dr_row = {
+                        "ev_soc_after": float(model.val(dr[(mg,"ev_energy",t+1)]))
+                        / device.capacity_kwh
+                    }
+                    if getattr(device, "cohort_mode", False):
+                        for session in device.sessions:
+                            group = str(session["group_id"])
+                            charge_name = f"ev_{group}_charge"
+                            energy_name = f"ev_{group}_energy"
+                            dr_row[f"ev_{group}_charge_kw"] = float(
+                                model.val(dr[(mg, charge_name, t)])
+                            )
+                            dr_row[f"ev_{group}_energy_kwh"] = float(
+                                model.val(dr[(mg, energy_name, t + 1)])
+                            )
+                            departure_index = min(
+                                int(session["departure_hour"]), data.horizon
+                            )
+                            dr_row[f"ev_{group}_departure_shortfall_kwh"] = (
+                                float(model.val(dr[
+                                    (mg, f"ev_{group}_departure_shortfall", departure_index)
+                                ]))
+                                if t + 1 == departure_index else 0.0
+                            )
 
             rows.append({"timestamp": data.timestamps[t], "microgrid": mg,
                          "base_load_kw": float(data.load_kw[mg][t]),
@@ -733,12 +862,86 @@ def solve_dispatch(
                 profit_by[mg] -= dr_penalty
                 cost_breakdown["ev_terminal_penalty"] += dr_penalty
     total_profit = float(sum(profit_by.values()))
+    result_frame = pd.DataFrame(rows)
+
+    generalized_breakdown = None
+    replayed_generalized_cost = None
+    if generalized:
+        if data.frame is None or carbon_factors is None:
+            raise ValueError("generalized_cost replay requires the complete episode frame")
+        raw = {
+            "grid_import_cost": 0.0,
+            "battery_degradation_cost": 0.0,
+            "curtailment_kwh": 0.0,
+            "carbon_kg": 0.0,
+            "delta_peak_kw": 0.0,
+            "mill_unserved_t": 0.0,
+            "comfort_degree_hours": 0.0,
+            "ev_departure_shortfall_kwh": 0.0,
+            "unmet_kwh": 0.0,
+        }
+        for t in range(data.horizon):
+            load_total = 0.0
+            for mg in ids:
+                row = result_frame[
+                    (result_frame["timestamp"] == data.timestamps[t])
+                    & (result_frame["microgrid"] == mg)
+                ].iloc[0]
+                grid_import = float(row["grid_import_kw"])
+                raw["grid_import_cost"] += (
+                    grid_import * price_at(data.buy_price, mg, t) * dt
+                )
+                battery = cfg_by_id[mg]["battery"]
+                raw["battery_degradation_cost"] += (
+                    (float(row["battery_charge_kw"]) + float(row["battery_discharge_kw"]))
+                    * dt
+                    * float(battery["degradation_cost_per_kwh"])
+                )
+                raw["curtailment_kwh"] += float(row["curtailment_kw"]) * dt
+                raw["carbon_kg"] += (
+                    grid_import * float(carbon_factors[t]) * dt
+                )
+                raw["unmet_kwh"] += float(row["unmet_load_kw"]) * dt
+                raw["comfort_degree_hours"] += float(
+                    row.get("comfort_degree_hours", 0.0)
+                )
+                raw["ev_departure_shortfall_kwh"] += sum(
+                    float(value)
+                    for key, value in row.items()
+                    if str(key).startswith("ev_")
+                    and str(key).endswith("_departure_shortfall_kwh")
+                )
+                load_total += float(row["load_kw"])
+            raw["delta_peak_kw"] = max(raw["delta_peak_kw"], load_total)
+        generalized_breakdown = calculate_reward_v2(
+            raw=raw, rates=reward_v2
+        )
+        replayed_generalized_cost = float(
+            generalized_breakdown["generalized_system_cost"]
+        )
+        tolerance_obj = 1e-6 * max(1.0, abs(replayed_generalized_cost))
+        if abs(replayed_generalized_cost - solver_objective_value) > tolerance_obj:
+            raise RuntimeError(
+                "Generalized solver objective does not match independently "
+                f"recomputed trajectory cost: solver={solver_objective_value}, "
+                f"replay={replayed_generalized_cost}"
+            )
+
+    result_cost = (
+        replayed_generalized_cost if generalized else -total_profit
+    )
+    result_breakdown = (
+        {key: float(value) for key, value in generalized_breakdown.items()
+         if key.startswith("cost_")}
+        if generalized and generalized_breakdown is not None
+        else cost_breakdown if include_dr else None
+    )
     return DispatchResult(("cooperative_full_information_relaxed" if cooperative else
                            "independent_full_information") if include_dr else
                           ("cooperative" if cooperative else "independent"),
-                          status, -total_profit,
-                          total_profit, profit_by, pd.DataFrame(rows), pair_totals,
-                          cost_breakdown if include_dr else None,
+                          status, float(result_cost),
+                          total_profit, profit_by, result_frame, pair_totals,
+                          result_breakdown,
                           {
                               "source_priority": (
                                   "renewable_load_first"
@@ -760,4 +963,11 @@ def solve_dispatch(
                               "cooperative_requested": cooperative_requested,
                               "p2p_enabled": p2p_enabled,
                               "cooperative_effective": cooperative,
+                              "objective_kind": objective_kind,
+                              "solver_objective_value": solver_objective_value,
+                              "solver_objective_bound": solver_bound,
+                              "solver_mip_gap": solver_gap,
+                              "proven_optimal": status == "kOptimal",
+                              "feasible_incumbent": solution_valid,
+                              "replayed_trajectory_cost": replayed_generalized_cost,
                           })
