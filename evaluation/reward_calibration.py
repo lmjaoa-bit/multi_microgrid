@@ -115,16 +115,48 @@ def build_service_priority_policy(env: MultiMicrogridEnv) -> PolicyFn:
                 else:
                     dr_raw = -1.0
             elif kind == "commercial_hvac":
-                low_c, high_c = device._comfort_bounds(t)
-                target = 0.5 * (float(low_c) + float(high_c))
-                error = target - float(device.t_air)
-                if error >= 0.0:
-                    desired = min(float(device.heat_max_kw), 0.5 * abs(error) * float(device.heat_max_kw))
-                    dr_raw = desired / max(float(device.heat_max_kw), 1e-12)
+                # One-step minimum-power thermostat.  This is intentionally not
+                # the environment's comfort projection and never invokes the
+                # future viability LP.  It asks only for enough current power
+                # to place the *next* air temperature on the applicable comfort
+                # boundary; if free evolution remains inside the band, it asks
+                # for zero HVAC power.
+                low_c, high_c = device._state_comfort_bounds(t + 1)
+                next_zero, _ = device._next_state(
+                    float(device.t_air), float(device.t_mass), 0.0, t
+                )
+                if float(low_c) <= float(next_zero) <= float(high_c):
+                    dr_raw = 0.0
                 else:
-                    desired = min(float(device.cool_max_kw), 0.5 * abs(error) * float(device.cool_max_kw))
-                    dr_raw = -desired / max(float(device.cool_max_kw), 1e-12)
-                dr_raw = float(np.clip(dr_raw, -1.0, 1.0))
+                    target = (
+                        float(low_c)
+                        if float(next_zero) < float(low_c)
+                        else float(high_c)
+                    )
+                    probe_q = 1.0
+                    next_probe, _ = device._next_state(
+                        float(device.t_air),
+                        float(device.t_mass),
+                        probe_q,
+                        t,
+                    )
+                    slope = float(next_probe) - float(next_zero)
+                    if abs(slope) <= 1e-12:
+                        desired_signed_kw = 0.0
+                    else:
+                        desired_q = (target - float(next_zero)) / slope
+                        desired_signed_kw = float(
+                            device._q_to_signed_electric(desired_q)
+                        )
+                    if desired_signed_kw >= 0.0:
+                        dr_raw = desired_signed_kw / max(
+                            float(device.heat_max_kw), 1e-12
+                        )
+                    else:
+                        dr_raw = desired_signed_kw / max(
+                            float(device.cool_max_kw), 1e-12
+                        )
+                    dr_raw = float(np.clip(dr_raw, -1.0, 1.0))
             elif kind == "ev_charging":
                 dr_raw = _ev_urgency_raw(device, t)
             actions[mg] = np.asarray([0.0, dr_raw], dtype=np.float32)
