@@ -17,6 +17,7 @@ from evaluation.coalition_evaluator import (
     evaluate_day_coalitions,
 )
 from evaluation.settlement import settle_test_day
+from optimization.cooperative_dispatch import solve_generalized_dispatch_reference
 from utils.metrics_collector import (
     EpisodeMetricsCollector,
     aggregate_episode_metrics,
@@ -380,6 +381,8 @@ def _daily_row(
         "algorithm_slug": algorithm_slug,
         "algorithm_team_profit": matd3_profit,
         "algorithm_joint_profit": matd3_profit,
+        "algorithm_team_reward": day.get("team_reward"),
+        "algorithm_generalized_system_cost": day.get("generalized_system_cost"),
         "idle_team_profit": idle_profit,
         "gain_vs_idle_abs": matd3_profit - idle_profit,
         "gain_vs_idle_pct": (
@@ -682,10 +685,15 @@ def evaluate(
 
     daily_rows: list[dict[str, Any]] = []
     paired_days: list[dict[str, Any]] = []
+    generalized_reference_trajectories: dict[str, list[dict[str, Any]]] = {}
     for index, day in enumerate(matd3_daily):
         coalition: CoalitionEvaluation | None = None
+        generalized_reference = None
+        generalized_reference_error = None
         if run_milp:
-            coalition = evaluate_day_coalitions(cfg_path, split=split, day=str(day["date"]))
+            coalition = evaluate_day_coalitions(
+                env_config, split=split, day=str(day["date"])
+            )
             if not coalition.valid:
                 warnings.warn(
                     f"Coalition MILP failure on {day['date']}; Shapley allocation marked invalid: "
@@ -693,7 +701,65 @@ def evaluate(
                     RuntimeWarning,
                     stacklevel=2,
                 )
+            if getattr(env, "reward_v2_enabled", False):
+                try:
+                    generalized_reference = solve_generalized_dispatch_reference(
+                        env_config,
+                        split=split,
+                        day=str(day["date"]),
+                        solver_output=False,
+                    )
+                    generalized_reference_trajectories[str(day["date"])] = (
+                        generalized_reference.trajectories.to_dict(orient="records")
+                    )
+                except Exception as exc:
+                    generalized_reference_error = (
+                        f"{type(exc).__name__}:{exc}"
+                    )
+                    warnings.warn(
+                        f"Generalized Reward V2 reference failed on {day['date']}: "
+                        f"{generalized_reference_error}",
+                        RuntimeWarning,
+                        stacklevel=2,
+                    )
         row = _daily_row(day, idle_daily[index], coalition, algorithm_slug=spec.slug)
+        if getattr(env, "reward_v2_enabled", False):
+            row.update({
+                "generalized_reference_available": generalized_reference is not None,
+                "generalized_reference_error": generalized_reference_error,
+                "generalized_reference_cost": (
+                    generalized_reference.total_cost
+                    if generalized_reference is not None else None
+                ),
+                "generalized_reference_accounting_profit": (
+                    generalized_reference.total_profit
+                    if generalized_reference is not None else None
+                ),
+                "generalized_reference_status": (
+                    generalized_reference.status
+                    if generalized_reference is not None else None
+                ),
+                "generalized_reference_objective_bound": (
+                    (generalized_reference.metadata or {}).get(
+                        "solver_objective_bound"
+                    )
+                    if generalized_reference is not None else None
+                ),
+                "generalized_reference_mip_gap": (
+                    (generalized_reference.metadata or {}).get("solver_mip_gap")
+                    if generalized_reference is not None else None
+                ),
+                "generalized_reference_proven_optimal": (
+                    (generalized_reference.metadata or {}).get("proven_optimal")
+                    if generalized_reference is not None else None
+                ),
+                "generalized_reference_replayed_trajectory_cost": (
+                    (generalized_reference.metadata or {}).get(
+                        "replayed_trajectory_cost"
+                    )
+                    if generalized_reference is not None else None
+                ),
+            })
         if coalition is not None and coalition.grand_result is not None:
             from optimization.oracle_replay import compare_oracle_market_replay
             replay = compare_oracle_market_replay(
@@ -754,6 +820,7 @@ def evaluate(
                 "cooperative_milp_profit": row.get("cooperative_milp_profit"),
                 "matd3_cooperation_surplus": row.get("matd3_cooperation_surplus"),
                 "shapley_allocation_valid": row.get("shapley_allocation_valid"),
+                "generalized_reference_cost": row.get("generalized_reference_cost"),
             })
         paired_days.append(paired)
 
@@ -785,6 +852,9 @@ def evaluate(
         "matd3_vs_idle_win_rate": comparisons["vs_idle"]["win_rate"],
         "independent_milp_profit_mean": _mean(daily_rows, "independent_total_profit"),
         "cooperative_milp_profit_mean": _mean(daily_rows, "cooperative_milp_profit"),
+        "generalized_reference_cost_mean": _mean(
+            daily_rows, "generalized_reference_cost"
+        ),
     }
     joint_summary = _build_joint_summary(daily_rows)
     replay_rows = [
@@ -868,7 +938,18 @@ def evaluate(
         "checkpoint_selection_metric": metadata.get("selection_metric", "validation_team_profit_mean"),
         "coalition_milp_enabled": bool(run_milp),
         "coalition_evaluation_granularity": "one complete 24-hour test day",
+        "generalized_reference_enabled": bool(
+            run_milp and getattr(env, "reward_v2_enabled", False)
+        ),
+        "generalized_reference_solve_count": int(sum(
+            row.get("generalized_reference_available") is not None
+            for row in daily_rows
+        )) if getattr(env, "reward_v2_enabled", False) else 0,
         "team_profit_statistics": matd3_summary["team_profit_statistics"],
+        "team_reward_statistics": matd3_summary["team_reward_statistics"],
+        "generalized_system_cost_mean": matd3_summary.get(
+            "generalized_system_cost_mean"
+        ),
         "profit_by_microgrid_mean": matd3_summary["profit_by_microgrid_mean"],
         "renewable_utilization_rate": matd3_summary["renewable_utilization_rate"],
         "p2p_total_energy_kwh_mean": matd3_summary["p2p_total_energy_kwh"],
@@ -893,6 +974,11 @@ def evaluate(
         trajectory_dir.mkdir(parents=True, exist_ok=True)
         for day, rows in hourly_by_day.items():
             write_csv(trajectory_dir / f"{day}.csv", rows)
+        if generalized_reference_trajectories:
+            generalized_dir = destination / "generalized_reference_trajectories"
+            generalized_dir.mkdir(parents=True, exist_ok=True)
+            for day, rows in generalized_reference_trajectories.items():
+                write_csv(generalized_dir / f"{day}.csv", rows)
     return result
 
 
