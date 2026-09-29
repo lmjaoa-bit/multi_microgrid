@@ -208,7 +208,7 @@ def test_current_service_selection_rejects_missing_required_service_metric():
     assert math.isinf(candidate.total_violation)
 
 
-def test_current_algorithms_share_identical_service_checkpoint_selection():
+def test_current_algorithms_share_identical_physical_checkpoint_selection():
     root = Path(__file__).resolve().parents[1]
     selections = []
     for name in (
@@ -221,13 +221,16 @@ def test_current_algorithms_share_identical_service_checkpoint_selection():
         selections.append(cfg["validation"]["selection"])
     assert selections[0] == selections[1]
     selection = selections[0]
-    assert selection["mode"] == "constrained_profit"
+    assert selection["mode"] == "physical_constrained_objective"
+    assert selection["objective"] == "team_reward_mean"
     assert set(selection["constraints"]) == {
-        "strict_feasible_day_rate",
+        "physical_feasible_day_rate",
+        "power_balance_residual_max_kw",
+        "source_balance_residual_max_kw",
+        "p2p_balance_residual_max_kw",
+        "device_bound_violation_max",
+        "grid_export_max_kw",
         "unmet_energy_mean_kwh",
-        "hvac_comfort_rate",
-        "mill_downstream_service_completion_rate",
-        "ev_departure_success_rate",
     }
 
 
