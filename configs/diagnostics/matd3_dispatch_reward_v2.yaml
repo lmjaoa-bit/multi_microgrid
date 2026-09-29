@@ -1,0 +1,48 @@
+# Canonical flat Actor for the MATD3 dispatch smoke test.
+algorithm:
+  name: matd3_dispatch
+  hidden_dims:
+  - 128
+  - 128
+  actor_lr: 0.0002
+  actor_max_grad_norm: 1.0
+  critic_lr: 0.0003
+  gamma: 1.0
+  tau: 0.005
+  policy_delay: 2
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  batch_size: 8
+  replay_capacity: 256
+  warmup_steps: 8
+  exploration_noise: 0.15
+runtime:
+  cpu_threads: 1
+training:
+  episodes: 3
+  test_episodes: 2
+validation:
+  enabled: false
+  interval: 1
+  max_days: 2
+  deterministic_policy: true
+  fixed_scenarios: true
+  selection:
+    mode: constrained_profit
+    objective: team_profit_mean
+    constraints:
+      strict_feasible_day_rate: {min: 1.0, atol: 1.0e-7}
+      unmet_energy_mean_kwh: {max: 0.0, atol: 1.0e-7}
+      hvac_comfort_rate: {min: 1.0, atol: 1.0e-7}
+      mill_downstream_service_completion_rate: {min: 1.0, atol: 1.0e-7}
+      ev_departure_success_rate: {min: 1.0, atol: 1.0e-7}
+logging:
+  diagnostic_interval: 1
+  incremental_history: true
+  history_snapshot_interval: 500
+  dashboard: true
+  dashboard_refresh_hz: 4
+  rolling_windows:
+  - 50
+  - 100
+  - 500
