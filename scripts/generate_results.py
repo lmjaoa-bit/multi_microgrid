@@ -3,30 +3,29 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from evaluation.plotting import generate_figures
+from evaluation.service_reliability import augment_run_outputs
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def generate_results(run_dir: str | Path) -> Path:
-    """Generate all post-training figures and summaries for one experiment.
-
-    The function is intentionally separated from training so every algorithm
-    (MATD3, Transformer, MILP) can share the same reporting pipeline.
-    """
-    run_dir = Path(run_dir)
+    """Regenerate saved-result reports without executing environment or models."""
+    run_dir = Path(run_dir).resolve()
     result_dir = run_dir / "results"
     result_dir.mkdir(exist_ok=True)
 
-    # Plot modules are imported lazily so training does not pay plotting cost.
-    try:
-        from tools.plotting.plot_all import plot_all
-        plot_all(run_dir, result_dir)
-    except ImportError:
-        # Keep training/evaluation usable before optional plotting modules land.
-        (result_dir / "PLOTTING_PENDING.txt").write_text(
-            "Plotting modules are not installed yet.\n", encoding="utf-8"
-        )
-
+    # Both consumers operate only on already persisted JSON/CSV artifacts.
+    # Missing required evidence is an error; PLOTTING_PENDING is not a valid
+    # substitute for the canonical 15-figure contract.
+    augment_run_outputs(run_dir, generate_plot=False)
+    paths = generate_figures(run_dir)
+    manifest = result_dir / "generated_figures.txt"
+    manifest.write_text(
+        "\n".join(str(path.relative_to(run_dir)) for path in paths) + "\n",
+        encoding="utf-8",
+    )
     return result_dir
 
 
