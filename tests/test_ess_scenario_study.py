@@ -101,4 +101,12 @@ def test_global_config_is_selected_yancheng_dr_setting() -> None:
         0.10,
     ]
     assert all(item["grid"]["import_limit_kw"] is None for item in config["microgrids"])
-    assert all(item["grid"]["export_limit_kw"] == 100.0 for item in config["microgrids"])
+    assert all(item["grid"]["export_limit_kw"] == 0.0 for item in config["microgrids"])
+    assert config["reward"]["semantics_version"] == "generalized_system_cost_v2"
+    assert config["reward"]["calibration_status"] == "locked"
+    assert len(config["reward"]["calibration_report_sha256"]) == 64
+    hvac = next(item["dr"] for item in config["microgrids"] if item["dr"]["type"] == "commercial_hvac")
+    ev = next(item["dr"] for item in config["microgrids"] if item["dr"]["type"] == "ev_charging")
+    assert hvac["control_semantics"] == "soft_comfort"
+    assert hvac["forecast_viability"] is False
+    assert ev["control_semantics"] == "no_deadline_minimum"
