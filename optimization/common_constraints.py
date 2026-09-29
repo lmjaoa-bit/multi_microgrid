@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -92,6 +94,22 @@ def build_dispatch_data(config: str | Path | Mapping[str, Any], split: str = "te
     return cfg, data
 
 
+def _dispatch_fingerprint(payload: Mapping[str, Any]) -> str:
+    text = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), default=str
+    )
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _array_values(value: np.ndarray | Mapping[str, np.ndarray], ids: Sequence[str]) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(mg): np.asarray(value[mg], dtype=np.float64).tolist()
+            for mg in ids
+        }
+    return np.asarray(value, dtype=np.float64).tolist()
+
+
 def _add_shared_pair_capacity_constraints(
     model: Any,
     flow_variables: Mapping[tuple[Any, ...], Any],
@@ -151,6 +169,20 @@ def solve_dispatch(
     if p2p_export_source not in {"unrestricted", "renewable_only"}:
         raise ValueError(f"Unsupported P2P export source: {p2p_export_source}")
     cfg_by_id = {str(mg["id"]): mg for mg in config["microgrids"]}
+    scenario_fingerprint = _dispatch_fingerprint({
+        "timestamps": list(data.timestamps),
+        "agent_ids": ids,
+        "load_kw": {
+            mg: np.asarray(data.load_kw[mg], dtype=np.float64).tolist()
+            for mg in ids
+        },
+        "renewable_kw": {
+            mg: np.asarray(data.renewable_kw[mg], dtype=np.float64).tolist()
+            for mg in ids
+        },
+        "buy_price": _array_values(data.buy_price, ids),
+        "sell_price": _array_values(data.sell_price, ids),
+    })
     dt = float(config["time"].get("delta_t", 1.0))
     cost_cfg = config["cost"]
     unmet_price = float(cost_cfg["unmet_load_cost_per_kwh"])
@@ -389,6 +421,38 @@ def solve_dispatch(
                     model.addConstr(shortfall >= capacity*device.target_soc -
                                     dr[(mg,"ev_energy",data.horizon)])
                     dr_terminal[mg].append(shortfall)
+
+    initial_state_payload: dict[str, Any] = {}
+    for mg in ids:
+        battery_cfg = cfg_by_id[mg]["battery"]
+        initial_soc = (
+            float(initial_soc_by_microgrid[mg])
+            if initial_soc_by_microgrid is not None and mg in initial_soc_by_microgrid
+            else float(battery_cfg["initial_soc"])
+        )
+        entry: dict[str, Any] = {"battery_initial_soc": initial_soc}
+        device = dr_devices.get(mg)
+        if device is not None:
+            if hasattr(device, "initial_silo_t"):
+                entry["mill_initial_silo_t"] = float(device.initial_silo_t)
+            elif hasattr(device, "initial_t_air"):
+                entry["hvac_initial_t_air_c"] = float(device.initial_t_air)
+                entry["hvac_initial_t_mass_c"] = float(device.initial_t_mass)
+            elif getattr(device, "cohort_mode", False):
+                entry["ev_sessions"] = [
+                    {
+                        "group_id": str(session["group_id"]),
+                        "arrival_hour": int(session["arrival_hour"]),
+                        "departure_hour": int(session["departure_hour"]),
+                        "demand_kwh": float(session["demand_kwh"]),
+                        "initial_soc": float(session["initial_soc"]),
+                    }
+                    for session in device.sessions
+                ]
+            else:
+                entry["ev_initial_soc"] = float(device.initial_soc)
+        initial_state_payload[mg] = entry
+    initial_state_fingerprint = _dispatch_fingerprint(initial_state_payload)
 
     import_bounds = {}
     for mg in ids:
@@ -981,4 +1045,6 @@ def solve_dispatch(
                               "proven_optimal": status == "kOptimal",
                               "feasible_incumbent": solution_valid,
                               "replayed_trajectory_cost": replayed_generalized_cost,
+                              "scenario_fingerprint": scenario_fingerprint,
+                              "initial_state_fingerprint": initial_state_fingerprint,
                           })
