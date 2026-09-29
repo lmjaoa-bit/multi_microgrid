@@ -18,7 +18,7 @@ def test_contract_embeds_service_metric_and_dispatch_semantics():
     assert contract["schema_version"]==2
     assert contract["service_metrics_schema_version"]=="service_metrics_v2"
     assert contract["dispatch_priority_mode"]=="renewable_load_first"
-    assert contract["action_semantics"]=="single_dispatch_dr_v3"
+    assert contract["action_semantics"]=="single_dispatch_dr_v4_instantaneous_physical"
     assert contract["physical_settings"]["dispatch"]["priority_mode"]=="renewable_load_first"
     assert len(contract["physical_settings"]["microgrids"])==3
 
@@ -35,9 +35,12 @@ def test_contract_carries_explicit_v3_semantic_metadata():
         selected_experiment="matd3",
         root=root,
     )
-    assert contract["dispatch_semantics"] == "renewable_load_first_v1"
-    assert contract["action_semantics"] == "single_dispatch_dr_v3"
+    assert contract["dispatch_semantics"] == "renewable_load_first_v2_no_grid_export"
+    assert contract["action_semantics"] == "single_dispatch_dr_v4_instantaneous_physical"
     assert contract["metrics_schema_version"] == "service_metrics_v2"
-    assert contract["hvac_safety_mode"] == "forecast_viability"
+    assert contract["hvac_safety_mode"] == "soft_comfort"
+    assert contract["reward_semantics_version"] == "generalized_system_cost_v2"
+    assert contract["reward_calibration_status"] == "locked"
+    assert len(contract["reward_calibration_report_sha256"]) == 64
     assert contract["oracle_allocation_mode"] == "source_priority_free_allocation"
     assert contract["full_information_oracle"] is True
