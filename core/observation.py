@@ -7,6 +7,7 @@ import pandas as pd
 
 from components.ev_sessions import cohort_schema, cohort_values
 from core.forecast import SharedForecastProvider
+from core.reward_v2 import resolve_reward_v2_config
 from core.profiles import HeterogeneousProfileModel
 from core.tariffs import prices_from_row
 
@@ -37,6 +38,12 @@ class ObservationBuilder:
             for mg in config["microgrids"]
         }
         self.episode_length = int(config.get("time", {}).get("episode_length", 24))
+        self.reward_v2 = resolve_reward_v2_config(config)
+        self.reward_v2_enabled = self.reward_v2 is not None
+        self.team_power_scale_kw = max(
+            1.0, sum(float(self.norm[mg]["power"]) for mg in self.agent_ids)
+        )
+        self.carbon_factor_scale = max(1e-9, float(profiles.carbon_max))
 
     def _dr_schema(self, mg_id: str) -> list[str]:
         kind = str(self.cfg_by_id[mg_id].get("dr", {}).get("type", ""))
@@ -77,6 +84,8 @@ class ObservationBuilder:
             if self.include_forecast_validity:
                 names.append(f"forecast_valid_t+{k}")
         names.extend(["previous_p2p_net", "previous_grid_net", "previous_system_p2p"])
+        if self.reward_v2_enabled:
+            names.extend(["team_load_peak_so_far", "grid_carbon_factor"])
         if self.control_mode == "single_dispatch":
             names.extend([
                 "available_charge_ratio", "available_discharge_ratio", "terminal_soc_gap",
@@ -185,7 +194,8 @@ class ObservationBuilder:
               exogenous: Mapping[str, float] | None = None,
               soc_by_microgrid: Mapping[str, float] | None = None,
               battery_flex_by_microgrid: Mapping[str, Mapping[str, float]] | None = None,
-              dr_state_by_microgrid: Mapping[str, Mapping[str, float]] | None = None) -> np.ndarray:
+              dr_state_by_microgrid: Mapping[str, Mapping[str, float]] | None = None,
+              public_state: Mapping[str, float] | None = None) -> np.ndarray:
         n = self.norm[mg_id]
         ex = dict(exogenous) if exogenous is not None else self.profiles.exogenous(mg_id, row)
         hour = int(pd.Timestamp(row["timestamp"]).hour)
@@ -219,6 +229,13 @@ class ObservationBuilder:
             previous["grid_net_kwh"] / n["trade"],
             history["total_p2p_kwh"] / system_norm,
         ])
+        if self.reward_v2_enabled:
+            if public_state is None:
+                raise RuntimeError("Reward V2 observation requires public_state")
+            values.extend([
+                float(public_state["team_load_peak_so_far"]) / self.team_power_scale_kw,
+                float(public_state["grid_carbon_factor"]) / self.carbon_factor_scale,
+            ])
         if self.control_mode == "single_dispatch":
             flex = (battery_flex_by_microgrid or {}).get(mg_id, {})
             values.extend([
