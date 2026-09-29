@@ -4,7 +4,9 @@
 目标分支：`代号：噜噜`  
 设计基线提交：`b1fda726a94c524dd50fcd3206112e2ab72208d9`（`备份before：修改奖励函数`）
 
-本文只冻结设计、兼容边界与验收条件。后续实施必须以该提交为起点核对实际代码，不按旧行号机械修改。
+本文为设计评审修订稿，只定义设计、兼容边界与验收条件，不表示实现或实验效果已经验证。2026-09-29 评审实际核对代码提交为 `9bdb9739ec686340d2a1a4ac100ba2f79e3c4a03`；上述设计基线保留为历史来源。后续实施应记录实际起点并核对两者差异，不回退覆盖后续工作，不按旧行号机械修改。
+
+**评审结论：方向可行，但原稿不足以直接实施。** 必须补齐峰值状态、折扣目标、训练/执行投影一致性、碳信息、结算口径及日末边界。本轮修订保留原有核心选择；第 18–20 节给出问题依据、详细实施顺序和新增验收条件。权重数值仍需按第 8 节标定，不凭设计稿保证效果提升。
 
 ---
 
@@ -218,15 +220,17 @@ delta_peak_t = max(0, P_load_team,t - peak_before_t)
 C_peak,t = peak_price_per_kw * delta_peak_t
 ```
 
-一天累计后等价于对当日最大实际负荷收费。
+一天**未折扣**累计后等价于对当日最大实际负荷收费；折扣回报不具有这个等价性，按第 18.2 节统一处理。
 
 原因：
 
 - 该项直接约束 DR 的削峰行为；
 - ESS 不应通过“遮住电网进口峰值”替代真正的负荷移峰；
-- Grid import peak 仍作为重要评价指标，但先不进入 Reward V2，避免与购电成本及 ESS 行为重复计权。
+- Grid import peak 仍作为重要评价指标，本轮先不进入 Reward V2，以保持“终端用电负荷削峰”的研究目标。购电电量成本与购电峰值成本并非数学上的重复项；以后若研究变压器需量或电网容量，应另行引入进口峰值目标。
 
 日初 `peak_before=0`，不能跨自然日继承。
+
+`Actual_load` 明确定义为不可控基础负荷 + MG1 实际磨机电功率 / MG2 实际 HVAC 电功率绝对值 / MG3 实际充电站电功率；不含 ESS 充电、P2P 交易量，不扣除新能源或 ESS 放电。必须将动作前 `peak_before` 加入所有 Actor 的公共观测和 Critic 全局状态，动作后更新并进入 next observation；详见第 18.1 节。
 
 ### 6.6 MG1 下游服务损失
 
@@ -288,6 +292,8 @@ comfort_price_per_degree_hour
 - 不对“离舒适中点远但仍合规”的温度处罚。
 
 `components/hvac_viability.py` 不得继续位于正式训练调用链。可暂时保留文件作为历史/测试迁移辅助，但普通训练不得再调用 HiGHS viability LP。
+
+仅设置 `forecast_viability: false` 不满足要求：当前 `feasible_bounds()` 在该开关关闭后仍执行 `_one_step_bounds_q()`。必须通过显式控制语义进入设备额定功率分支，且 `plan()`、`state()`、联合动作投影和 MILP 全部使用同一分支。
 
 ### 6.8 MG3 EV 离站短缺
 
@@ -416,7 +422,7 @@ unmet_load_cost_per_kwh
 1 kWh EV 离站短缺值多少。
 ```
 
-服务损失系数应显著高于普通小幅经济波动，但不能设置成无限大或大到等价于重新恢复硬投影。
+服务损失系数应体现接受的服务交换关系，并检查是否足以覆盖省电、碳、削峰带来的综合收益。有限大系数仍是软约束，不等于硬投影；过大主要带来数值尺度和学习难度问题，过小则可能学到主动放弃服务。两者均需标定，不能仅凭“高于电价”确定。
 
 `reward_scale` 在系数锁定后再固定，使典型每步 reward 保持适合现有 MATD3 数值范围；它不改变各目标相对权重。
 
@@ -552,7 +558,7 @@ forecast_horizon: 8
 = 14 tokens
 ```
 
-只将 `forecast_encoder` 输入维度从 6 改为 8。
+对 forecast 分支，将 `forecast_encoder` 输入维度从 6 改为 8；但整个 Reward V2 迁移不能只改这一层：还需把峰值和当前碳强度接入现有 trade token，并更新 schema、版本校验及相关 encoder 输入维度。总 token 数仍为 14。
 
 ### 12.3 同伴字段语义严格沿用 B 组
 
@@ -612,10 +618,11 @@ algorithms/matd3_forecast_context/
 普通 T 正式 YAML 增加显式字段：
 
 ```yaml
-network:
-  forecast_horizon: 8
-  include_peer_forecast: true
-  peer_forecast_features: [energy_balance]
+algorithm:
+  network:
+    forecast_horizon: 8
+    include_peer_forecast: true
+    peer_forecast_features: [energy_balance]
 ```
 
 检查点必须保存并校验：
@@ -661,6 +668,8 @@ actor_forecast_context_version = peer_balance_h8_v2
 - `core/joint_action_projection.py`
 - `core/observation.py`
 - `core/global_state.py`
+- `core/forecast.py`、`core/profiles.py`、`core/data_manager.py`
+- `algorithms/matd3_dispatch/algorithm.py`（仅 V2 元数据和兼容性检查，不改 canonical MATD3）
 - `utils/metrics_collector.py`
 - `evaluation/service_metrics.py`
 - `evaluation/evaluate_matd3.py`
@@ -764,6 +773,9 @@ actor_forecast_context_version =
 5. 正式 test、MILP、Equal/Shapley、summary、plots 全链路完成；
 6. 确认旧 forecast-context 实验结果未被覆盖；
 7. 在实施报告中记录起始/结束 commit、配置快照、测试结果与任何偏离。
+8. 两个 smoke 各使用 1–3 个完整自然日，验证正式测试实际加载 `checkpoints/best_model.pt`；每个运行默认输出 15 PNG + 15 PDF。
+9. 结果位于 `outputs/working_runs/<resolved_slug>/runs/<run_id>/`，其中 CLI `--algorithm matd3` 解析为 `matd3_dispatch` 并使用其 YAML；不得混用永久参考 `configs/algorithms/matd3.yaml`。
+10. 确认 canonical `algorithms/matd3/` 无变更，历史消融结果和 releases 均未改写。若测试 promotion，另验源运行仍存在、manifest、README、registry 完整；未明确接受 dirty 风险不得使用 `--allow-dirty`。
 
 ---
 
@@ -779,3 +791,191 @@ actor_forecast_context_version =
 - 不新增独立 Critic Transformer 改造；
 - 不用 test set 调 Reward V2 权重；
 - 不覆盖、删除或改写既有训练结果。
+
+---
+
+## 18. 评审发现与必须补齐的设计
+
+### 18.1 峰值成本依赖历史，必须进入状态
+
+当前 `core/observation.py` 和 `core/global_state.py` 没有当日实际负荷历史最大值。普通 T 中名为 `sys_margin` 的量来自上一时刻 P2P 交易量，不是当天负荷峰值，不能复用其语义。
+
+例如，当前负荷同为 150 kW，历史峰值分别为 100 与 200 kW，新增峰值分别为 50 与 0 kW。不给 Critic 这项状态，就会把不同即时成本的情况混在一起；Actor 也无法知道当前是否仍有不增加峰值的调度空间。
+
+具体规则：
+
+1. 环境维护 `daily_load_peak_kw`，reset 置零；在 step 开始保存 `peak_before_kw`，按实际执行负荷计算增量，再更新峰值。
+2. 各 Actor 观测与全局状态均加入 `team_load_peak_so_far`。按共享的固定 `team_power_scale_kw` 归一化，尺度由训练数据/设备配置确定，写入 snapshot，不使用本次 episode 的最大值。
+3. 普通 T 将该特征加入现有 trade token；平坦 MATD3 通过新 observation schema 接收，无需修改 canonical Actor。
+4. 逐步轨迹保存 `team_actual_load_kw`、`peak_before_kw`、`delta_peak_kw`、`peak_after_kw`。不得让动作 t 的输入包含动作执行后才知道的峰值。
+5. schema、normalizer、观测语义版本同时写入两种当前插件的 checkpoint；新旧 schema 不混装，也不混用旧 replay。
+
+这只能消除新奖励引入的隐藏历史变量，不应据此宣称现有部分观测预测系统已经完全满足 Markov 假设。
+
+### 18.2 日成本目标与 gamma=0.99 的冲突
+
+两个当前算法 YAML 均使用 `gamma: 0.99`。训练优化折扣回报，而 metrics 汇总的是未折扣日回报：
+
+```text
+训练：sum_t gamma^t * R_t
+每日评价：sum_t R_t
+```
+
+相同的 100 kW 新增峰值若发生在第 0 步与第 23 步，折扣峰值成本分别为 `100*p` 与约 `79.36*p`。离站短缺的远期处罚也会折扣。因此原稿的“每日最大负荷收费等价”仅在未折扣总和层面成立。
+
+**本修订推荐在 V2 的两个当前算法配置中统一使用 `gamma: 1.0`**，因为研究对象是完整 24 小时有限时域日总成本。canonical `configs/algorithms/matd3.yaml` 和更新逻辑不动。小时/剩余时间须可观测，真实第 24 小时终止时禁用 bootstrap；工具中断或训练取消不能伪装成物理终止。
+
+这是一项需要短训练验证的设计选择，不是稳定性保证。记录 Q 值、TD error、梯度和非有限值；若训练不稳定，重新评审这一选择。若最终保留 0.99，则明确声明“折扣训练目标 + 未折扣评价”，保存两种 return，MILP 只能对比未折扣成本，不能再写训练目标完全一致。本轮不使用 `gamma^-t` 放大奖励等补偿技巧。
+
+### 18.3 碳成本的数据来源与可观测性
+
+当前 profiles/data manager 提及 `grid_carbon_factor_kg_per_kwh`，但 Actor/全局状态中未暴露该字段。不能只在奖励里突然增加一个时变且不可见的进口价格因素。
+
+- V2 强制校验该列存在、有限、非负；没有列时只允许显式配置固定碳因子并记录来源，禁止静默以 0 或 1 代替。
+- 当前碳因子视为调度前可获得的公共量，加入两种算法观测及全局状态。若实际数据不支持提前可知，只能标为仿真信息假设，不能声称部署条件成立。
+- 普通 T 接入现有 trade token，不增加 forecast token 维数；保持未来 token 8 维，不偷偷加入未来实际碳因子。
+- 本轮不提供未来碳预测。若碳因子随时间变化，预测不完全属于该方案的信息限制；后续另立预测消融。
+- 使用训练集固定归一化尺度，记录 `carbon_information_semantics`。环境、MILP、轨迹复算使用同一原始因子与单位。
+- 若因子恒定，碳项等价于给进口电价加固定附加价，可以保留其解释性，但不能据此声称学会了时变碳调度。
+
+### 18.4 环境执行和 Critic 的投影必须一致
+
+当前 `Matd3Dispatch` 明确让 Critic 接收三个有效控制量 `[ESS-local, ESS-trade, DR-effective]`，rollout、target action 和 policy gradient 都依赖 `JointActionProjector`。只改设备 `plan()` 会产生“环境执行一种动作、Critic 训练另一种动作”的错误。
+
+迁移范围必须包括：设备瞬时上下界 → observation/state → 联合投影 → replay/update/target → 执行后 effective action。保留联合投影中的物理映射，只移除 HVAC 舒适与 EV deadline 的行为强制，不删除整个 projector。
+
+EV 组内下界、站端总下界、初始 group allocation 均为零。总上界取站端功率限制与当前各连接组物理上界之和的较小值，组上界包含 `remaining_battery_kwh / (eta * delta_t)`。沿用 urgency 顺序分配，但总分配不得超过 Actor 请求量；`raw=-1` 映射到零充电，`raw=0` 通常是区间中点，不能把二者混同。
+
+对 HVAC 正负功率、EV 零/满功率及 ESS 各分支建立固定场景，比较 NumPy 环境执行和 Torch 投影的有效控制量，含边界和随机合法输入；再验证非饱和位置 Actor 梯度有限且可传播。不能仅检查“LP 不再调用”。
+
+### 18.5 日末服务事件、单位与状态重置
+
+**HVAC：** 继续采用结果边界温度计费。`violation(T[t+1], band[t+1]) * delta_t` 是离散边界采样的度时近似，不是区间内真实温度轨迹积分；reward、metrics、MILP 都应标记 `boundary_sampled_degree_hours` 并同口径。当前 24:00 边界定义为 unoccupied；固定在本轮沿用，测试上班前/下班后边界与周末。若未来改变营业时间跨午夜，需要一并修改此合同。
+
+**EV：** shortfall 是电池侧 kWh，进口电量是站端 kWh，两者通过效率区分。每组在执行最后一个可充电区间后结算一次；例如 departure=24 在第 23 步 commit 之后计入最后一个 reward，再返回 done。不得累计短缺每小时重复扣费，不得在 terminal penalty 再扣一次，也不得在 reset 时漏掉离站事件。当前生成器限制 `0 <= arrival < departure <= 24`；本轮保持 24 步、1 小时的完整自然日，1–3 天 smoke 是完整日的数量，不是把一天截成 1–3 步。
+
+**MG1/ESS/HVAC：** 继续不做日末库存/SOC/温度恢复，但必须承认模型是独立单日问题。MG1 初始库存 10.53 t、下限 3.51 t，单日可净消耗 7.02 t 初始库存而保持消费服务；按当前额定参数，约相当于 168.7 kWh 磨机电耗。这是允许的初始资源消耗，不是等量生产的纯移峰。
+
+每日报告初末 silo、ESS energy、空气/墙体温度，以及磨机生产/消费总量；RL、规则策略、MILP 使用相同初值与无终值要求。不得将该结果直接外推为连续多日运行的可持续收益。如果研究目标改为长期连续调度，应另开跨日状态衔接或终值研究，不在本轮偷偷恢复硬终端约束或加终端 bonus。
+
+### 18.6 广义成本与 Equal/Shapley 结算分离
+
+当前 `evaluate_day_coalitions()` 将 `result.total_profit` 写入七个 `v_*`；`settle_test_day()` 再以这些值和实际 `physical_profit_by_microgrid` 计算转移支付。把 `total_profit` 改成负广义成本会混用口径，甚至使转移支付的解释失效。峰值、碳和舒适偏好也不一定是真实支付。
+
+比较三种可行路线：
+
+| 路线 | 含义 | 本轮选择 |
+|---|---|---|
+| 保留会计结算，另算广义成本参考 | 七联盟会计值用于结算；独立全联盟求解用于 V2 性能参考 | **采用**，含义清楚，额外一日一次全联盟求解 |
+| 所有联盟改为广义效用博弈 | 重新定义各节点广义效用、共同峰值分摊和转移支付 | 暂不采用，扩大研究范围 |
+| 将广义最优轨迹的会计收益直接当联盟最优收益 | 节省独立求解但不再是会计最优联盟价值 | 不采用，避免隐含改变博弈定义 |
+
+具体接口要求：
+
+1. `solve_dispatch(..., objective_kind=...)` 显式支持 `accounting_profit` 与 `generalized_cost_v2`，共享约束与后处理，不复制求解器。
+2. 七个非空联盟继续求会计目标，使用与 RL 对齐的 V2 物理边界和软服务语义、同一天、同初值、禁止外送；额外动作自由度按第 18.7 节披露，不默认声称可行域完全相同。保留原 `v_*` 作为会计值；固定 `v(empty)=0`。其服务策略可能不同，必须一同输出服务指标，不冒称 V2 reward 上界。
+3. 另解一个全联盟广义成本参考，保存 `generalized_reference_*`。七联盟与此参考分开记录目标、轨迹、状态和耗时，不能复用一个 `grand_result` 混淆二者。
+4. 为避免改变历史结算含义，V2 的兼容会计利润固定为：售电收入（零）减购电、退化、弃电、安全未供电、EV 离站罚款；terminal mode=none 时不计终端罚款。EV 罚款系数与广义成本采用同一来源。它含已有罚款，**不是纯现金利润**；另报 `operating_margin_before_penalties = export_revenue - import_cost - degradation_cost`，明确其中退化是估算成本，不将舒适/碳/峰值偏好自动算成现金。
+5. `team_profit = sum(physical_profit_by_microgrid)`；P2P 转移在团队层面相消。广义成本直接由九个 raw component 相加构建，不通过 `-team_profit + penalties` 拼凑，防止 EV/弃电重复扣除。
+6. Equal/Shapley 仍只分配实际会计收益相对会计 disagreement 的 surplus。负 surplus 必须如实报告，不能保证每个成员个体理性；不通过裁剪负收益来伪造改善。保存 `settlement_value_semantics=accounting_profit_v2`。
+7. 验证团队收益不变、转移和为零、七联盟值和实际收益口径一致。广义效用分配若将来需要，再单独设计，不能无声替换现有列。
+
+因此第 11 节的目标一致性要求适用于**新增的广义全联盟参考**；七联盟结算参考明确采用另一套会计目标，不称作 Reward V2 上界。
+
+### 18.7 MILP 不能只“增加几个 objective 系数”
+
+当前 `optimization/common_constraints.py` 不仅组装约束，也后处理利润，并用 `-total_profit` 填 objective。引入新成本时要同步模型和 `DispatchResult`，否则求解目标与报告目标会脱节。
+
+- 新增独立 `objective_kind`、`generalized_system_cost`、`accounting_profit` 和逐项 breakdown，保存 solver objective 与根据轨迹重算的 objective，误差须在容差内。
+- HVAC 使用正/负舒适 slack 和互斥加热/制冷模式，保证 `abs(signed_power)` 与环境相同；EV 同时保留连接/功率/剩余需求约束与 departure slack。检查软化后没有把原舒适温度变量上下界留成硬限制。
+- 只有负荷峰值变量，不把 ESS charge 或 grid import 混入；联盟子集若使用峰值目标，只计该联盟成员。
+- 复核新能源负荷优先、ESS 不能相互充电、禁止电网转售、ESS 充放互斥及各设备动作自由度。MILP 的自由 EV 分组分配可比环境固定 urgency 分配更宽，必须说明。
+- `optimization/oracle_replay.py` 若把 MILP 控制重新映射到环境原始动作，需报告“求解轨迹”和“可执行回放轨迹”差异。回放后的成本不能继续冒称原 MILP 最优值。
+- 只有证明可行域覆盖、目标一致并获得最优证书，才称最小广义成本的下界（负成本/return 的上界）。时间限制下的 incumbent 不是最小成本下界；分别保存 best bound、gap、termination status。
+- 任一联盟失败/无可用解，该日 Shapley 标为 unavailable，不能用 0 补齐；有可行但未证最优解时标为近似值，不隐瞒 gap。
+
+### 18.8 权重诱导行为和研究有效性
+
+原稿把各分量列齐，但还缺“策略如何利用奖励”的诊断。
+
+- 峰值下降可能来自少给 EV 充电或让房间不舒适，不一定是成功移峰。结果必须并列给出服务短缺、温度违约、用电量、产量与库存变化。
+- 弃电惩罚可能鼓励不必要的 HVAC 用电、磨机囤料或储能耗散。新能源消纳上升不能单独视为收益：同时报告有效服务、ESS 吞吐/损耗、额外用电和末端库存。若异常耗能在当前偏好下确实最优，应调整权重或单独修订目标，不暗加动作奖励掩盖。
+- EV 惩罚以电池侧 kWh 标定，比较 `购电价/eta + 碳价*因子/eta` 以及可能增加的峰值成本。例：若某补能必须在峰值时完成，峰值边际代价也必须考虑；仅让 EV penalty 大于最高电价并不够。
+- MG1 在瞬时硬库存约束和无限购电下服务损失通常为零，它是诊断/异常项，不应期待它提供常规学习信号。
+- 权重与 reward_scale 统一放在共享环境配置，算法 YAML 仅保留算法超参数。旧 `renewable_curtailment_cost_per_kwh`、EV `departure_penalty_per_kwh` 与新名建立单一解析入口；同时出现且冲突时报错，不允许环境与 MILP 读取不同系数。
+
+标定产物为 `reward_calibration.json`（训练/校验日期、策略、原始分量分布、候选权重、边际理由、推荐值、reward_scale、配置指纹）。至少比较零控制、固定服务优先规则与短训练策略；HVAC 零控制是 signed power=0，EV 零控制是 raw=-1，ESS 按实际动作映射单独构造，不使用统一全零 action 冒充 idle。冻结系数后再做正式训练，不用 test 做反复选权重。
+
+第 2 节的旧 55 天结果已经参与 H8+peer 的结构选择，因此该批数据对这一选择并非全新盲测。保留既定数据划分可以做可比评估，但应在报告披露；更强泛化结论需要新的未触碰时间段。本次评审未重新运行四组实验，原数值按已有设计证据保留，正式报告应链接可追溯的运行/配对结果。
+
+### 18.9 Checkpoint 选择必须失败即停
+
+当前 selector 对缺失 objective 使用 `0.0`，新回报通常为负，这可能让缺字段的 checkpoint 胜出。pipeline 还专门判断字符串 `constrained_profit`；只添加新模式名会绕过已有“无合格模型不得测试”的保护。
+
+推荐新增明确的 `physical_constrained_objective` 模式，最大化 `team_reward_mean`，仅使用真实物理约束。selector 与 pipeline 统一通过模式能力判断，不到处写特定字符串。
+
+- 必需 objective/constraint 缺失、NaN、Inf 一律报错或不可入选，不默认零；未知模式名启动即报错。
+- 物理约束包含功率/来源/P2P 残差、SOC/设备上下界、零 grid export、当前无限购电下的零 unmet。具体字段须先在 metrics 中实现并核验，不能只在 YAML 发明不存在的名字。
+- 对环境断言失败和非有限值立即停止；不把它们当可通过 reward 补偿的软目标。
+- 正式运行要求 validation enabled；没有物理合格 best_model 时停止，保留失败诊断，不复制 final_model 冒充 best。
+- 两个当前插件统一规则；历史模式仍可读取，旧结果不重算。服务指标继续全量报告，但不参与硬 eligibility。
+
+### 18.10 预测信息和兼容性边界
+
+- peer balance 是同一预测快照的 `PV_hat + wind_hat - base_load_hat`，不是包含未来 DR 动作的实际剩余电量，不得读取未来 action、SOC 或实际灵活负荷。
+- 保持共享 observation future_horizon=24 的现有合同，普通 T 仅消费 t+1…t+8；H8 指 Actor forecast 窗口，不代表全环境或集中 Critic 都只看到 8 小时。平坦 MATD3 输入范围应在对比报告列明。
+- 测试策略无探索噪声；如保留 `evaluation_forecast_noise=true`，使用固定、与算法无关的日场景种子和预测快照。确定性正式测试不等于完美预知，不能顺手关闭预测误差。
+- mask 同时用于 attention key/value 和任何聚合/readout。编码前无效 forecast 字段置零，验证所有未来 token 都无效的最后一步仍有限，不让 NaN 经编码污染结果。
+- B 组对齐测试只比较 forecast 特征顺序/数值、归一化和 mask；V2 增加公共峰值/碳状态后不要求整个 Actor 与历史 B 组动作一致。
+- 增加 `observation_semantics_version`、`reward_discount_semantics`、`comfort_metric_semantics`、`settlement_value_semantics` 以及环境配置/观测 schema 指纹。模型加载须校验奖励、投影和观测语义，即使张量形状相同也不默认为兼容。
+- 旧缺版本配置只允许显式历史回放路径；新正式训练缺关键 V2 元数据应报错，避免训练到一半恢复了旧 replay 或 optimizer 状态。
+
+---
+
+## 19. 详细修改顺序与交付物
+
+以下是可供实施的文件级修改方案，不表示这些代码已经修改。各阶段都沿用一个共享流水线，不新增实验专用 trainer/evaluator。
+
+| 阶段 | 修改位置 | 具体交付与通过条件 |
+|---|---|---|
+| 1. 冻结合同 | `configs/cooperative.yaml`、配置解析、两个当前算法 YAML | 明确 V2 语义、禁止外送、完整日限制、系数单一来源、gamma=1 推荐配置；对非法/冲突配置失败即停；历史默认不被默默改写 |
+| 2. 放开服务动作 | `components/commercial_hvac.py`、`components/ev_charging.py`、`core/joint_action_projection.py` | HVAC 额定功率分支、EV 零下界；环境/Torch 投影一致；EV departure=24 只扣一次；物理边界保持 |
+| 3. 建立成本账本 | `core/cost_accounting.py`、`envs/multi_microgrid_env.py`、`core/grid_settlement.py` | 九个原始分量与金额独立计算；峰值 reset/update；会计 profit 和 generalized cost 分层；团队奖励仅写一次且所有 Agent 相同 |
+| 4. 补状态与预测 | `core/observation.py`、`core/global_state.py`、数据校验、普通 T actor/algorithm、当前 MATD3 包 | 峰值/当前碳强度公共状态；普通 T 8 维 forecast、14 token；trade token 扩展；checkpoint 严格 schema/语义校验；canonical 不动 |
+| 5. 接通评价 | `utils/metrics_collector.py`、`evaluation/service_metrics.py`、`evaluation/evaluate_algorithm.py` 及内部 `evaluate_matd3.py`、selector/pipeline | 日广义成本与回报一致；物理合格 selector；缺字段失败；best checkpoint 正式测试；训练曲线与利润标签分开 |
+| 6. 接通参考与结算 | `optimization/common_constraints.py`、合作/独立入口、oracle replay、coalition evaluator、settlement | 七联盟会计求解 + 一次广义全联盟求解；两套 grand result 分离；目标复算一致；预算平衡；求解状态不伪装 |
+| 7. 标定和短验证 | 共享 pipeline、校验场景、配置快照、标定报告 | 生成原始分量诊断，固定权重和尺度；两个当前算法跑短训练与 1–3 完整日端到端 smoke；不据此声称收敛 |
+| 8. 文档/图表/正式实验 | `evaluation/plotting.py`、输出 summary、现有研究报告入口 | 从保存的 JSON/CSV 作图；经济与广义指标分开；15 PNG+15 PDF；记录算法输入/服务取舍/日末资源限制后再长训 |
+
+兼容边界：历史实验插件与结果保持原样；当前 `matd3_dispatch` 和普通 T 是本次迁移对象，新网络代码放在普通 T 自己包内。这次是明确的跨算法共享环境研究，不是在 canonical MATD3 内塞实验条件。若实施中产生新的算法变体，另按仓库 scaffold 工具建独立 slug，不能以这份设计为由改 canonical。
+
+性能效果验证建议使用至少 3 个训练种子、相同训练预算和日场景，报告每个种子结果与日配对差异；3 个种子仅是起步证据。若要证明 peer 的纯贡献，固定 V2、gamma、公共状态、权重后比较普通 T 的 peer off/on；MATD3 vs 普通 T 的整体比较不能替代这一消融。
+
+---
+
+## 20. 新增验收矩阵与停止条件
+
+除第 16 节外，实施完成必须覆盖下列测试：
+
+| 测试 | 预期结果 |
+|---|---|
+| 相同当前状态、不同历史峰值 | 峰值观测与 Critic 状态不同，增量成本分别符合定义；next state 更新正确 |
+| 峰值序列手工复算与跨日 reset | 未折扣日增量和等于最大负荷；第二天从零开始；不对 kW 再乘 delta_t |
+| gamma 与最后一步 | V2 两算法配置相同；真实日末 done=1 无 bootstrap；最后一个 EV 事件包含在 reward |
+| HVAC fallback | soft 模式既不调用 viability LP，也不调用 one-step comfort bounds；额定范围内 action 不因温度被重写 |
+| EV 多组功率 | 每组和站端总下界均为零，连接/效率/剩余需求上界正确，总分配不超过总请求 |
+| 双执行路径 | 环境与 Torch projector 的有效动作一致；非饱和梯度有效，饱和边界可解释 |
+| 单步/全日独立复算 | 九项和等于 generalized cost；日 return=-日成本/scale；团队 reward 不因三 Agent 重复相加变三倍 |
+| 会计与广义分离 | 一份 EV shortfall 在各自账本各计一次；会计账本作为展示不再被加入 reward；团队 P2P 收支相消 |
+| 碳数据/观测 | 缺失或非法输入清晰报错；当前因子可见；没有未经声明的未来实际碳信息 |
+| 未来 token | 有效 peer 改变中间 token；无效 token 任意修改不影响动作；全 forecast 无效仍有限；保持 H8 |
+| checkpoint 异常 | 旧 schema/旧语义/旧 replay 不兼容时拒绝；objective 缺失或非有限不可入选；无 best 不测 final |
+| MILP 与回放 | objective 与轨迹复算一致；记录 bound/gap；可执行回放若不同单独标记；会计 grand 与广义 grand 不混用 |
+| 结算失败与负 surplus | 缺联盟不能补零；负 surplus 如实保留；预算平衡和团队会计收益守恒 |
+| 结果完整性 | 两个 resolved plugin+自身 YAML、best checkpoint、test、七联盟、广义参考、Equal/Shapley、summary、15 PNG+15 PDF 全部可追溯 |
+
+正式长训启动前必须同时满足：全量 `pytest -q` 通过、两算法端到端 smoke 通过、系数完成标定锁定、无重复计费/遗漏服务事件/状态泄漏、物理残差合格。smoke 仅验证流程和数值可运行，不验证学到的策略质量。
+
+若出现 reward 改善但服务显著恶化、额外耗能消纳、库存消耗解释不清，先出诊断与权衡报告，再决定是否接受该偏好，不以 reward 曲线更高直接宣告方案成功。
+
+本次文档评审只进行了源码核对与设计修订；未修改实现、未运行训练、未宣称上述实现验收通过。
