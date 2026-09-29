@@ -26,11 +26,22 @@ class CheckpointCandidate:
 
 
 class CheckpointSelector:
-    """Selects validation checkpoints using either profit_only or constrained_profit."""
+    """Select validation checkpoints under an explicit ranking contract."""
+
+    _SUPPORTED_MODES = {
+        "profit_only",
+        "constrained_profit",
+        "physical_constrained_objective",
+    }
 
     def __init__(self, selection_config: Mapping[str, Any] | None = None) -> None:
         cfg = dict(selection_config or {})
         self.mode = str(cfg.get("mode", "profit_only")).lower()
+        if self.mode not in self._SUPPORTED_MODES:
+            raise ValueError(
+                f"Unknown checkpoint selection mode {self.mode!r}; "
+                f"expected one of {sorted(self._SUPPORTED_MODES)}"
+            )
         self.objective_key = str(cfg.get("objective", "team_profit_mean"))
         raw_constraints = cfg.get("constraints", {})
         self.constraints: list[ConstraintSpec] = []
@@ -45,32 +56,49 @@ class CheckpointSelector:
                     )
         self.epsilon = 1e-9
 
+    @property
+    def requires_eligible_checkpoint(self) -> bool:
+        return self.mode in {"constrained_profit", "physical_constrained_objective"}
+
+    @staticmethod
+    def _finite_objective(summary: Mapping[str, Any], key: str) -> tuple[float, bool]:
+        if key not in summary:
+            return -float("inf"), False
+        try:
+            value = float(summary[key])
+        except (TypeError, ValueError):
+            return -float("inf"), False
+        return (value, True) if math.isfinite(value) else (-float("inf"), False)
+
     def evaluate(self, summary: Mapping[str, Any], episode: int) -> CheckpointCandidate:
         """Evaluate a validation summary against configured constraints."""
-        objective_raw = summary.get(self.objective_key, 0.0)
-        try:
-            objective_value = float(objective_raw)
-            if not math.isfinite(objective_value):
-                objective_value = -float("inf")
-        except (TypeError, ValueError):
-            objective_value = -float("inf")
+        objective_value, objective_valid = self._finite_objective(
+            summary, self.objective_key
+        )
 
         if self.mode == "profit_only":
             return CheckpointCandidate(
                 episode=int(episode),
-                eligible=True,
-                total_violation=0.0,
+                eligible=objective_valid,
+                total_violation=0.0 if objective_valid else float("inf"),
                 objective_value=objective_value,
                 constraint_values={},
-                constraint_failures=[],
+                constraint_failures=[] if objective_valid else [
+                    f"{self.objective_key}: missing/nonfinite"
+                ],
                 selection_mode="profit_only",
             )
 
-        # constrained_profit mode
+        # Both constrained modes use the same lexicographic mechanics. The V2
+        # mode differs only in which physical metrics its YAML config supplies.
         constraint_values: dict[str, float] = {}
         constraint_failures: list[str] = []
         total_violation = 0.0
-        has_nonfinite_required = False
+        has_nonfinite_required = not objective_valid
+        if not objective_valid:
+            constraint_failures.append(
+                f"{self.objective_key}: missing/nonfinite objective"
+            )
 
         for c in self.constraints:
             val_raw = summary.get(c.name)
@@ -134,7 +162,7 @@ class CheckpointSelector:
     ) -> bool:
         """Determines if candidate outranks current_best according to lexicographic rules."""
         if current_best is None:
-            return candidate.eligible if self.mode == "constrained_profit" else True
+            return candidate.eligible
 
         if self.mode == "profit_only":
             if candidate.objective_value > current_best.objective_value:
