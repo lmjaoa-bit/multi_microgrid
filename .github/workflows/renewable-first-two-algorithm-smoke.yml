@@ -17,6 +17,7 @@ on:
       - 'optimization/**'
       - 'utils/**'
       - 'scripts/run_experiment.py'
+      - 'scripts/generate_results.py'
   workflow_dispatch:
 
 permissions:
