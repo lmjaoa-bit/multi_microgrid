@@ -20,6 +20,9 @@ class EVChargingDR:
         self.delta_t = float(delta_t)
         self.episode_length = int(episode_length)
         self.cohort_mode = bool(config.get('cohorts'))
+        self.control_semantics = str(config.get("control_semantics", "legacy_deadline_minimum"))
+        if self.control_semantics not in {"legacy_deadline_minimum", "no_deadline_minimum"}:
+            raise ValueError(f"Unsupported EV control_semantics: {self.control_semantics!r}")
         self.sessions: list[dict[str, Any]] = []
         self.departure_events: list[dict[str, Any]] = []
         self.first_infeasible_hour: int | None = None
@@ -181,10 +184,17 @@ class EVChargingDR:
             if s['arrival_hour'] <= hour < s['departure_hour']:
                 required = self.remaining[group] / (self.eta * self.delta_t)
                 high = min(s['max_charge_kw'], required)
-                raw_low = max(0.0, required - s['max_charge_kw'] * (s['departure_hour'] - hour - 1))
-                if raw_low > high + 1e-8 and self.first_infeasible_hour is None:
-                    self.first_infeasible_hour = hour
-                low = min(raw_low, high)
+                if self.control_semantics == "no_deadline_minimum":
+                    low = 0.0
+                else:
+                    raw_low = max(
+                        0.0,
+                        required
+                        - s['max_charge_kw'] * (s['departure_hour'] - hour - 1),
+                    )
+                    if raw_low > high + 1e-8 and self.first_infeasible_hour is None:
+                        self.first_infeasible_hour = hour
+                    low = min(raw_low, high)
             result[group] = (float(low), float(high))
         return result
 
@@ -192,8 +202,12 @@ class EVChargingDR:
         bounds = self._group_bounds(t)
         low, high = self.feasible_bounds(t)
         power = low + raw_to_unit_interval(raw_action) * (high - low)
-        allocation = {g: b[0] for g, b in bounds.items()}
-        extra = power - low
+        allocation = (
+            {g: 0.0 for g in bounds}
+            if self.control_semantics == "no_deadline_minimum"
+            else {g: b[0] for g, b in bounds.items()}
+        )
+        extra = power if self.control_semantics == "no_deadline_minimum" else power - low
         hour = int(t) if int(t) >= self.episode_length else self._hour(t)
         ordered = sorted(self.sessions, key=lambda s: (
             s['departure_hour'] - hour - self.remaining[s['group_id']] / (self.eta * s['max_charge_kw']),
