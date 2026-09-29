@@ -131,6 +131,20 @@ class Matd3HierarchicalTransformer(MATD3):
         num_layers = int(net.get("num_layers", 2))
         forecast_horizon = int(net.get("forecast_horizon", 8))
         hidden_dim = int(net.get("hidden_dim", 64))
+        include_peer_forecast = bool(net.get("include_peer_forecast", False))
+        peer_forecast_features = tuple(
+            net.get("peer_forecast_features", ["energy_balance"])
+        )
+        if include_peer_forecast and forecast_horizon != 8:
+            raise ValueError(
+                "Ordinary Transformer peer forecast formalization requires forecast_horizon=8"
+            )
+        self.actor_forecast_context_version = (
+            "peer_balance_h8_v2"
+            if include_peer_forecast
+            else f"local_h{forecast_horizon}_v1"
+        )
+        self.peer_forecast_features = peer_forecast_features
 
         # 3 Independent Actors (one per microgrid)
         self.actors = nn.ModuleDict({
@@ -145,6 +159,8 @@ class Matd3HierarchicalTransformer(MATD3):
                 num_layers=num_layers,
                 forecast_horizon=forecast_horizon,
                 hidden_dim=hidden_dim,
+                include_peer_forecast=include_peer_forecast,
+                peer_forecast_features=peer_forecast_features,
             )
             for mg in self.agent_ids
         }).to(self.device)
