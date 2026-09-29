@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from pathlib import Path
-
-from evaluation.plotting import generate_figures
-from evaluation.service_reliability import augment_run_outputs
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from evaluation.plotting import generate_figures
+from evaluation.service_reliability import augment_run_outputs
 
 
 def generate_results(run_dir: str | Path) -> Path:
