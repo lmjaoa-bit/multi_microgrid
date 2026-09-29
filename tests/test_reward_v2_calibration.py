@@ -8,6 +8,7 @@ import pytest
 import yaml
 
 import evaluation.reward_calibration as calibration
+from experiments.training_pipeline import _validate_reward_run_mode
 from evaluation.reward_calibration import (
     build_idle_policy,
     build_service_priority_policy,
@@ -183,3 +184,31 @@ def test_service_priority_rule_does_not_call_hvac_viability():
     actions = policy({})
     assert actions["mg2"][1] > 0.0
     assert -1.0 <= actions["mg3"][1] <= 1.0
+
+
+
+def test_unlocked_reward_cannot_start_formal_run():
+    cfg = _v2_config()
+    with pytest.raises(ValueError, match="cannot start a formal run"):
+        _validate_reward_run_mode(
+            cfg, training_episodes=10, diagnostic_only=False
+        )
+
+    with pytest.raises(ValueError, match="at most 100"):
+        _validate_reward_run_mode(
+            cfg, training_episodes=101, diagnostic_only=True
+        )
+
+    diagnostic = _validate_reward_run_mode(
+        cfg, training_episodes=100, diagnostic_only=True
+    )
+    assert diagnostic["run_purpose"] == "reward_calibration"
+    assert diagnostic["formal_test_allowed"] is False
+
+    locked = deepcopy(cfg)
+    locked["reward"]["calibration_status"] = "locked"
+    formal = _validate_reward_run_mode(
+        locked, training_episodes=5000, diagnostic_only=False
+    )
+    assert formal["run_purpose"] == "formal_training"
+    assert formal["formal_test_allowed"] is True
