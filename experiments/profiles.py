@@ -14,6 +14,8 @@ from typing import Any
 
 import yaml
 
+from core.reward_v2 import resolve_reward_v2_config
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -134,8 +136,11 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
             "priority_mode", "legacy_local_first"
         )
     )
+    reward_v2 = resolve_reward_v2_config(env_config)
     dispatch_semantics = (
-        "renewable_load_first_v1"
+        reward_v2["dispatch_semantics"]
+        if reward_v2 is not None
+        else "renewable_load_first_v1"
         if dispatch_priority_mode == "renewable_load_first"
         else "legacy_local_first_v1"
     )
@@ -144,7 +149,9 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
         dr = item.get("dr", {})
         if str(dr.get("type", "")) == "commercial_hvac":
             hvac_safety_mode = (
-                "forecast_viability"
+                "soft_comfort"
+                if str(dr.get("control_semantics", "")) == "soft_comfort"
+                else "forecast_viability"
                 if bool(dr.get("forecast_viability", False))
                 else "legacy_one_step"
             )
@@ -155,11 +162,40 @@ def experiment_contract(spec, env_config, config_path, *, selected_experiment=No
         "metrics_schema_version": "service_metrics_v2",
         "dispatch_priority_mode": dispatch_priority_mode,
         "dispatch_semantics": dispatch_semantics,
+        "reward_semantics_version": (
+            reward_v2["semantics_version"] if reward_v2 is not None else "legacy"
+        ),
+        "dr_projection_semantics": (
+            reward_v2["dr_projection_semantics"] if reward_v2 is not None else None
+        ),
+        "hvac_control_semantics": (
+            reward_v2["hvac_control_semantics"] if reward_v2 is not None else None
+        ),
+        "ev_control_semantics": (
+            reward_v2["ev_control_semantics"] if reward_v2 is not None else None
+        ),
+        "observation_semantics_version": (
+            reward_v2["observation_semantics_version"] if reward_v2 is not None else None
+        ),
+        "reward_discount_semantics": (
+            reward_v2["reward_discount_semantics"] if reward_v2 is not None else None
+        ),
+        "comfort_metric_semantics": (
+            reward_v2["comfort_metric_semantics"] if reward_v2 is not None else None
+        ),
+        "carbon_information_semantics": (
+            reward_v2["carbon_information_semantics"] if reward_v2 is not None else None
+        ),
+        "settlement_value_semantics": (
+            reward_v2["settlement_value_semantics"] if reward_v2 is not None else None
+        ),
         "hvac_safety_mode": hvac_safety_mode,
         "oracle_allocation_mode": "source_priority_free_allocation",
         "full_information_oracle": True,
         "action_semantics": (
-            "single_dispatch_dr_v3"
+            "single_dispatch_dr_v4_instantaneous_physical"
+            if reward_v2 is not None and action_design_id == "single_dispatch_dr"
+            else "single_dispatch_dr_v3"
             if (
                 action_design_id == "single_dispatch_dr"
                 and str(env_config.get("dispatch", {}).get(
