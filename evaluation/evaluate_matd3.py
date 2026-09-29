@@ -912,6 +912,15 @@ def evaluate(
         "experiment_contract": contract,
         "algorithm_slug": spec.slug,
         "algorithm_display_name": spec.display_name,
+        "reward_semantics_version": contract.get(
+            "reward_semantics_version", "legacy"
+        ),
+        "reward_calibration_status": contract.get(
+            "reward_calibration_status"
+        ),
+        "reward_calibration_report_sha256": contract.get(
+            "reward_calibration_report_sha256"
+        ),
         "method_interface": {
             "action_dim": env.action_dim,
             "observation_dims": env.observation_dims,
