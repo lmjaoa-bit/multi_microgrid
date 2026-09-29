@@ -278,6 +278,8 @@ def build_reward_v2_contract(
     actor_forecast_context_version: str | None = None,
     peer_orders: Mapping[str, Sequence[str]] | None = None,
     mask_semantics: str | None = None,
+    gamma: float | None = None,
+    action_semantics: str | None = None,
 ) -> dict[str, Any]:
     resolved = resolve_reward_v2_config(config)
     if resolved is None:
@@ -301,6 +303,8 @@ def build_reward_v2_contract(
             for agent, order in sorted((peer_orders or {}).items())
         },
         "mask_semantics": mask_semantics,
+        "gamma": None if gamma is None else float(gamma),
+        "action_semantics": action_semantics,
     }
     contract["signature"] = stable_contract_hash(contract)
     return contract
