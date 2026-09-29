@@ -7,6 +7,7 @@ import pandas as pd
 
 from components.ev_sessions import cohort_schema, cohort_values
 from core.constraint_observations import ess_terminal_guidance
+from core.reward_v2 import resolve_reward_v2_config
 from core.tariffs import has_heterogeneous_tariffs, prices_from_row
 
 
@@ -31,6 +32,12 @@ class GlobalStateBuilder:
         self.dr_enabled = self.action_design == "single_dispatch_dr"
         self.heterogeneous_tariffs = has_heterogeneous_tariffs(config)
         self.episode_length = int(config.get("time", {}).get("episode_length", 24))
+        self.reward_v2 = resolve_reward_v2_config(config)
+        self.reward_v2_enabled = self.reward_v2 is not None
+        self.team_power_scale_kw = max(
+            1.0, sum(float(self.norm[mg]["power"]) for mg in self.agent_ids)
+        )
+        self.carbon_factor_scale = max(1e-9, float(profiles.carbon_max))
 
     def _dr_schema(self, mg: str) -> list[str]:
         kind = str(self.cfg_by_id[mg].get("dr", {}).get("type", ""))
@@ -80,6 +87,8 @@ class GlobalStateBuilder:
         if not self.heterogeneous_tariffs:
             names.extend(["grid_buy_price", "grid_sell_price"])
         names.append("previous_system_p2p")
+        if self.reward_v2_enabled:
+            names.extend(["team_load_peak_so_far", "grid_carbon_factor"])
         if self.control_mode == "single_dispatch":
             for mg in self.agent_ids:
                 names.extend([f"{mg}_available_charge", f"{mg}_available_discharge"])
@@ -162,6 +171,7 @@ class GlobalStateBuilder:
     def build(self, row: pd.Series, t: int, cores: Mapping[str, Any], history: Mapping[str, Any],
               exogenous_by_microgrid: Mapping[str, Mapping[str, float]] | None = None,
               dr_state_by_microgrid: Mapping[str, Mapping[str, float]] | None = None,
+              public_state: Mapping[str, float] | None = None,
               dtype: Any = np.float32) -> np.ndarray:
         values: list[float] = []
         system_norm = max(1.0, sum(self.norm[x]["trade"] for x in self.agent_ids))
@@ -203,6 +213,13 @@ class GlobalStateBuilder:
                 float(row["sell_price_per_kwh"]) / self.price_norm,
             ])
         values.append(history["total_p2p_kwh"] / system_norm)
+        if self.reward_v2_enabled:
+            if public_state is None:
+                raise RuntimeError("Reward V2 centralized state requires public_state")
+            values.extend([
+                float(public_state["team_load_peak_so_far"]) / self.team_power_scale_kw,
+                float(public_state["grid_carbon_factor"]) / self.carbon_factor_scale,
+            ])
         if self.control_mode == "single_dispatch":
             for mg in self.agent_ids:
                 battery = cores[mg].battery
