@@ -23,9 +23,11 @@ def test_default_environment_uses_common_prices_and_noncyclic_inventory():
         assert np.allclose(data[f'{name}_sell_price_per_kwh'], data['buy_price_per_kwh'] * .5)
         assert mg['battery']['initial_soc'] == mg['battery']['soc_min']
         assert mg['grid']['import_limit_kw'] is None
-        assert mg['grid']['export_limit_kw'] == 100
+        assert mg['grid']['export_limit_kw'] == 0
     assert cfg['p2p']['pair_capacity_kw'] is None
     assert cfg['terminal_soc']['mode'] == 'none'
+    assert cfg['reward']['semantics_version'] == 'generalized_system_cost_v2'
+    assert cfg['reward']['calibration_status'] == 'locked'
 
 
 def test_unbounded_import_does_not_clip_large_load_but_export_is_limited():
