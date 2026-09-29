@@ -157,6 +157,11 @@ class EpisodeMetricsCollector:
         self.team_profit = 0.0
         self.team_reward = 0.0
         self.shaping_reward = 0.0
+        self.reward_v2_seen = False
+        self.generalized_system_cost = 0.0
+        self.reward_v2_costs = defaultdict(float)
+        self.reward_v2_raw = defaultdict(float)
+        self.team_actual_load_peak_kw = 0.0
         self.profit = {mg: 0.0 for mg in ids}
         self.rewards = {mg: 0.0 for mg in ids}
         self.economics = {mg: defaultdict(float) for mg in ids}
@@ -193,8 +198,9 @@ class EpisodeMetricsCollector:
         self.ess_offer_any_fill_steps = {mg: 0 for mg in ids}
         self.ess_offer_full_fill_steps = {mg: 0 for mg in ids}
         self.violations: dict[str, list[float]] = {
-            "soc": [], "power_balance": [], "p2p_balance": [],
-            "grid_power": [], "battery_power": [],
+            "soc": [], "power_balance": [], "source_balance": [],
+            "p2p_balance": [], "grid_power": [], "battery_power": [],
+            "device_bound": [], "grid_export": [], "unmet": [],
         }
         self.hourly_rows: list[dict[str, Any]] = []
         self.ev_sessions: dict[str, list[dict[str, Any]]] = {}
@@ -414,11 +420,71 @@ class EpisodeMetricsCollector:
         p2p_buy = sum(float(info["p2p"]["by_microgrid"][mg]["p2p_buy_kw"])
                       for mg in self.agent_ids)
         p2p_balance = abs(p2p_sell - p2p_buy)
+        source_balance = 0.0
+        for residuals in info.get("source_balance_residuals", {}).values():
+            source_balance = max(
+                source_balance,
+                max((abs(float(value)) for value in residuals.values()), default=0.0),
+            )
+
+        # V2 soft-service violations are deliberately excluded.  This is only
+        # instantaneous physical feasibility: SOC/inventory/device ratings,
+        # conservation, zero export and (for the current unlimited grid) unmet.
+        device_bound = max(
+            max(soc_by_mg.values(), default=0.0),
+            max(battery_by_mg.values(), default=0.0),
+        )
+        for mg in self.agent_ids:
+            dr_cfg = self.env.cfg_by_id[mg].get("dr", {})
+            kind = str(dr_cfg.get("type", ""))
+            dr_plan = info.get("dr_plans", {}).get(mg, {})
+            dr_device = info.get("dr_devices", {}).get(mg, {})
+            if kind == "industrial_mill":
+                scale = max(float(dr_cfg.get("silo_capacity_t", 1.0)), 1e-9)
+                raw_inventory = max(
+                    float(dr_device.get("inventory_min_violation_t", 0.0)),
+                    float(dr_device.get("inventory_max_violation_t", 0.0)),
+                ) / scale
+                device_bound = max(device_bound, raw_inventory)
+            elif kind == "commercial_hvac":
+                rated = max(
+                    float(dr_cfg.get("heating_max_kw", 0.0)),
+                    float(dr_cfg.get("cooling_max_kw", 0.0)),
+                    1e-9,
+                )
+                signed = abs(float(dr_plan.get("effective_signed_power_kw", 0.0)))
+                device_bound = max(device_bound, max(0.0, signed - rated) / rated)
+            elif kind == "ev_charging":
+                rated = max(float(dr_cfg.get("max_charge_kw", 0.0)), 1e-9)
+                power = float(dr_plan.get("effective_power_kw", 0.0))
+                device_bound = max(
+                    device_bound,
+                    max(0.0, -power, power - rated) / rated,
+                )
+
+        grid_export = max(
+            (float(info["settlements"][mg].get("grid_export_kw", 0.0))
+             for mg in self.agent_ids),
+            default=0.0,
+        )
+        unmet = sum(
+            max(0.0, float(info["settlements"][mg].get("unmet_load_kw", 0.0)))
+            for mg in self.agent_ids
+        )
+
         self.violations["power_balance"].append(power_balance)
+        self.violations["source_balance"].append(source_balance)
         self.violations["p2p_balance"].append(p2p_balance)
+        self.violations["device_bound"].append(device_bound)
+        self.violations["grid_export"].append(grid_export)
+        self.violations["unmet"].append(unmet)
         return {
             "power_balance": power_balance,
+            "source_balance": source_balance,
             "p2p_balance": p2p_balance,
+            "device_bound": device_bound,
+            "grid_export": grid_export,
+            "unmet": unmet,
             "soc_by_microgrid": soc_by_mg,
             "battery_by_microgrid": battery_by_mg,
             "grid_by_microgrid": grid_by_mg,
@@ -430,6 +496,22 @@ class EpisodeMetricsCollector:
         self.team_profit += float(info["team_profit"])
         self.team_reward += float(info.get("team_reward", 0.0))
         self.shaping_reward += float(info.get("shaping_reward", 0.0))
+        generalized = info.get("generalized_system_cost")
+        if generalized is not None:
+            value = float(generalized)
+            if not math.isfinite(value):
+                raise ValueError("Non-finite generalized_system_cost in episode metrics")
+            self.reward_v2_seen = True
+            self.generalized_system_cost += value
+            self.team_actual_load_peak_kw = max(
+                self.team_actual_load_peak_kw,
+                float(info.get("team_actual_load_kw", 0.0)),
+            )
+            for key, amount in (info.get("reward_v2_breakdown") or {}).items():
+                if key.startswith("cost_"):
+                    self.reward_v2_costs[key] += float(amount)
+            for key, amount in (info.get("reward_v2_raw") or {}).items():
+                self.reward_v2_raw[key] += float(amount)
         economics: dict[str, dict[str, float]] = {}
 
         for mg in self.agent_ids:
@@ -520,6 +602,24 @@ class EpisodeMetricsCollector:
                 self._last_p2p_capacity_diag["blocked_by_pair_capacity_kwh"]
             ),
         }
+        if info.get("generalized_system_cost") is not None:
+            row.update({
+                "reward_semantics_version": str(
+                    info.get("reward_semantics_version", "")
+                ),
+                "team_reward": float(info.get("team_reward", 0.0)),
+                "team_profit": float(info.get("team_profit", 0.0)),
+                "generalized_system_cost": float(info["generalized_system_cost"]),
+                "team_actual_load_kw": float(info.get("team_actual_load_kw", 0.0)),
+                "peak_before_kw": float(info.get("peak_before_kw", 0.0)),
+                "delta_peak_kw": float(info.get("delta_peak_kw", 0.0)),
+                "peak_after_kw": float(info.get("peak_after_kw", 0.0)),
+            })
+            for key, value in (info.get("reward_v2_breakdown") or {}).items():
+                if key.startswith("cost_"):
+                    row[key] = float(value)
+            for key, value in (info.get("reward_v2_raw") or {}).items():
+                row[f"raw_{key}"] = float(value)
         for pair, usage in self._last_p2p_capacity_diag["pair_usage_kw"].items():
             row[f"p2p_{pair}_usage_kw"] = float(usage)
             row[f"p2p_{pair}_saturated"] = int(bool(
@@ -756,7 +856,11 @@ class EpisodeMetricsCollector:
             "p2p_price": info["p2p"].get("transfer_price_per_kwh"),
             "p2p_total_energy_kwh": float(info["p2p"]["total_p2p_kwh"]),
             "power_balance_violation_kw": constraints["power_balance"],
+            "source_balance_violation_kw": constraints.get("source_balance", 0.0),
             "p2p_balance_violation_kw": constraints["p2p_balance"],
+            "device_bound_violation": constraints.get("device_bound", 0.0),
+            "grid_export_max_kw": constraints.get("grid_export", 0.0),
+            "unmet_load_total_kw": constraints.get("unmet", 0.0),
         })
         return row
 
@@ -995,8 +1099,12 @@ class EpisodeMetricsCollector:
         soc_v = self._violation_summary(self.violations["soc"], "sum")
         power_v = self._violation_summary(self.violations["power_balance"], "mean_abs")
         p2p_v = self._violation_summary(self.violations["p2p_balance"], "mean_abs")
+        source_v = self._violation_summary(self.violations["source_balance"], "mean_abs")
         grid_v = self._violation_summary(self.violations["grid_power"], "sum")
         battery_v = self._violation_summary(self.violations["battery_power"], "sum")
+        device_v = self._violation_summary(self.violations["device_bound"], "sum")
+        export_v = self._violation_summary(self.violations["grid_export"], "sum")
+        unmet_v = self._violation_summary(self.violations["unmet"], "sum")
         constraints = {
             "feasible_episode": all(
                 max(values, default=0.0) <= self.tolerance
@@ -1004,10 +1112,22 @@ class EpisodeMetricsCollector:
             ),
             "soc_violation": soc_v,
             "power_balance_violation": power_v,
+            "source_balance_violation": source_v,
             "p2p_balance_violation": p2p_v,
             "grid_power_violation": {"count": grid_v["count"], "max": grid_v["max"]},
             "battery_power_violation": {"count": battery_v["count"], "max": battery_v["max"]},
+            "device_bound_violation": {"count": device_v["count"], "max": device_v["max"]},
+            "grid_export_violation": {"count": export_v["count"], "max": export_v["max"]},
+            "unmet_violation": {"count": unmet_v["count"], "max": unmet_v["max"]},
         }
+        constraints["physical_feasible_episode"] = bool(
+            max(self.violations["power_balance"], default=0.0) <= self.tolerance
+            and max(self.violations["source_balance"], default=0.0) <= self.tolerance
+            and max(self.violations["p2p_balance"], default=0.0) <= self.tolerance
+            and max(self.violations["device_bound"], default=0.0) <= self.tolerance
+            and max(self.violations["grid_export"], default=0.0) <= self.tolerance
+            and max(self.violations["unmet"], default=0.0) <= self.tolerance
+        )
 
         total_available = sum(x["renewable_available_kwh"] for x in energy.values())
         total_used = sum(x["renewable_used_kwh"] for x in energy.values())
@@ -1036,6 +1156,24 @@ class EpisodeMetricsCollector:
         result = {
             "team_profit": float(self.team_profit),
             "team_reward": float(self.team_reward),
+            "generalized_system_cost": (
+                float(self.generalized_system_cost) if self.reward_v2_seen else None
+            ),
+            "reward_v2_cost_breakdown": (
+                {key: float(value) for key, value in self.reward_v2_costs.items()}
+                if self.reward_v2_seen else None
+            ),
+            "reward_v2_raw_components": (
+                {key: float(value) for key, value in self.reward_v2_raw.items()}
+                if self.reward_v2_seen else None
+            ),
+            "team_actual_load_peak_kw": (
+                float(self.team_actual_load_peak_kw) if self.reward_v2_seen else None
+            ),
+            "reward_semantics_version": (
+                getattr(self.env, "reward_v2", {}).get("semantics_version")
+                if self.reward_v2_seen else "legacy"
+            ),
             "shaping_reward": float(self.shaping_reward),
             "profit_by_microgrid": {mg: float(self.profit[mg]) for mg in self.agent_ids},
             "reward_by_microgrid": {mg: float(self.rewards[mg]) for mg in self.agent_ids},
@@ -1104,6 +1242,62 @@ def aggregate_episode_metrics(episodes: Sequence[Mapping[str, Any]]) -> dict[str
             bool(day["constraint_statistics"]["feasible_episode"]) for day in episodes
         ])) if episodes else 0.0,
     }
+    if episodes and any(day.get("generalized_system_cost") is not None for day in episodes):
+        generalized = [
+            float(day["generalized_system_cost"])
+            for day in episodes
+            if day.get("generalized_system_cost") is not None
+        ]
+        result["generalized_system_cost_mean"] = float(np.mean(generalized))
+        result["generalized_system_cost_total"] = float(np.sum(generalized))
+        cost_keys = sorted({
+            key
+            for day in episodes
+            for key in (day.get("reward_v2_cost_breakdown") or {})
+        })
+        for key in cost_keys:
+            result[f"{key}_mean"] = float(np.mean([
+                float((day.get("reward_v2_cost_breakdown") or {}).get(key, 0.0))
+                for day in episodes
+            ]))
+        result["physical_feasible_day_rate"] = float(np.mean([
+            bool(day["constraint_statistics"].get("physical_feasible_episode", False))
+            for day in episodes
+        ]))
+        result["power_balance_residual_max_kw"] = float(max(
+            day["constraint_statistics"]["power_balance_violation"]["max_abs_kw"]
+            for day in episodes
+        ))
+        result["source_balance_residual_max_kw"] = float(max(
+            day["constraint_statistics"].get(
+                "source_balance_violation", {"max_abs_kw": 0.0}
+            )["max_abs_kw"]
+            for day in episodes
+        ))
+        result["p2p_balance_residual_max_kw"] = float(max(
+            day["constraint_statistics"]["p2p_balance_violation"]["max_abs_kw"]
+            for day in episodes
+        ))
+        result["device_bound_violation_max"] = float(max(
+            day["constraint_statistics"].get(
+                "device_bound_violation", {"max": 0.0}
+            )["max"]
+            for day in episodes
+        ))
+        result["grid_export_max_kw"] = float(max(
+            day["constraint_statistics"].get(
+                "grid_export_violation", {"max": 0.0}
+            )["max"]
+            for day in episodes
+        ))
+        result["unmet_energy_mean_kwh"] = float(np.mean([
+            sum(
+                float(stats.get("unmet_load_kwh", 0.0))
+                for stats in day["energy_statistics_by_microgrid"].values()
+            )
+            for day in episodes
+        ]))
+
     if episodes and "dr_statistics_by_microgrid" in episodes[0]:
         result["dr_statistics_by_microgrid"] = {
             mg: {
