@@ -164,7 +164,10 @@ def _extract_rollout_constraint_metrics(
         date = str(day.get("date", ""))
         rows = rows_by_date.get(date, [])
         physical_feasible = bool(
-            day.get("constraint_statistics", {}).get("feasible_episode", True)
+            day.get("constraint_statistics", {}).get(
+                "physical_feasible_episode",
+                day.get("constraint_statistics", {}).get("feasible_episode", True),
+            )
         )
         daily_services.append(
             summarize_day_services(
@@ -720,7 +723,10 @@ def evaluate(
         service_day = summarize_day_services(
             hourly_by_day[str(day["date"])],
             env.config,
-            bool(day.get("constraint_statistics", {}).get("feasible_episode", True)),
+            bool(day.get("constraint_statistics", {}).get(
+                "physical_feasible_episode",
+                day.get("constraint_statistics", {}).get("feasible_episode", True),
+            )),
             SERVICE_METRICS_SCHEMA_VERSION,
         )
         row.update(_service_daily_columns(service_day))
