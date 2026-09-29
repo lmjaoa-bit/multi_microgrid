@@ -15,9 +15,9 @@ from evaluation.coalition_evaluator import (
     CoalitionEvaluation,
     dispatch_energy_metrics,
     evaluate_day_coalitions,
+    evaluate_day_references,
 )
 from evaluation.settlement import settle_test_day
-from optimization.cooperative_dispatch import solve_generalized_dispatch_reference
 from utils.metrics_collector import (
     EpisodeMetricsCollector,
     aggregate_episode_metrics,
@@ -691,9 +691,16 @@ def evaluate(
         generalized_reference = None
         generalized_reference_error = None
         if run_milp:
-            coalition = evaluate_day_coalitions(
-                env_config, split=split, day=str(day["date"])
+            references = evaluate_day_references(
+                env_config,
+                split=split,
+                day=str(day["date"]),
+                include_generalized=bool(getattr(env, "reward_v2_enabled", False)),
+                solver_output=False,
             )
+            coalition = references.accounting
+            generalized_reference = references.generalized
+            generalized_reference_error = references.generalized_error
             if not coalition.valid:
                 warnings.warn(
                     f"Coalition MILP failure on {day['date']}; Shapley allocation marked invalid: "
@@ -701,27 +708,17 @@ def evaluate(
                     RuntimeWarning,
                     stacklevel=2,
                 )
-            if getattr(env, "reward_v2_enabled", False):
-                try:
-                    generalized_reference = solve_generalized_dispatch_reference(
-                        env_config,
-                        split=split,
-                        day=str(day["date"]),
-                        solver_output=False,
-                    )
-                    generalized_reference_trajectories[str(day["date"])] = (
-                        generalized_reference.trajectories.to_dict(orient="records")
-                    )
-                except Exception as exc:
-                    generalized_reference_error = (
-                        f"{type(exc).__name__}:{exc}"
-                    )
-                    warnings.warn(
-                        f"Generalized Reward V2 reference failed on {day['date']}: "
-                        f"{generalized_reference_error}",
-                        RuntimeWarning,
-                        stacklevel=2,
-                    )
+            if generalized_reference is not None:
+                generalized_reference_trajectories[str(day["date"])] = (
+                    generalized_reference.trajectories.to_dict(orient="records")
+                )
+            elif generalized_reference_error is not None:
+                warnings.warn(
+                    f"Generalized Reward V2 reference failed on {day['date']}: "
+                    f"{generalized_reference_error}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
         row = _daily_row(day, idle_daily[index], coalition, algorithm_slug=spec.slug)
         if getattr(env, "reward_v2_enabled", False):
             row.update({
