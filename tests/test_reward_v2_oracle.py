@@ -71,7 +71,10 @@ def _independent_cost_recompute(cfg, data, result):
             ) * float(by_id[mg]["battery"]["degradation_cost_per_kwh"])
             raw["curtailment_kwh"] += float(row["curtailment_kw"])
             raw["carbon_kg"] += grid * float(carbon[t])
-            raw["comfort_degree_hours"] += float(row.get("comfort_degree_hours", 0.0))
+            comfort = row.get("comfort_degree_hours", 0.0)
+            raw["comfort_degree_hours"] += (
+                float(comfort) if pd.notna(comfort) else 0.0
+            )
             raw["unmet_kwh"] += float(row["unmet_load_kw"])
             raw["ev_departure_shortfall_kwh"] += sum(
                 float(value)
