@@ -7,6 +7,7 @@ from typing import Any, Dict, List
 import numpy as np
 import pandas as pd
 
+from core.reward_v2 import resolve_carbon_factors, resolve_reward_v2_config
 from core.tariffs import (
     build_buy_price,
     build_sell_price,
@@ -30,6 +31,11 @@ class DataManager:
             path = root / path
         self.df = pd.read_csv(path)
         self.data_quality_flags: list[str] = []
+        if resolve_reward_v2_config(self.config) is not None:
+            carbon = resolve_carbon_factors(self.config, self.df)
+            if "grid_carbon_factor_kg_per_kwh" not in self.df.columns:
+                self.df["grid_carbon_factor_kg_per_kwh"] = carbon
+                self.data_quality_flags.append("fixed_grid_carbon_factor")
         self.temperature_columns: list[str] = []
         ts_col = data_cfg.get("timestamp_col", "timestamp")
         required = {ts_col, "load_kw", "buy_price_per_kwh", "ghi_w_per_m2", "wind_speed_mps"}
