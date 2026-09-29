@@ -27,6 +27,9 @@ def test_two_algorithm_replay_update_and_checkpoint_smoke(
     env = MultiMicrogridEnv(spec.build_environment_config(base), split="train")
     settings = yaml.safe_load(spec.default_config_path.read_text(encoding="utf-8"))
     settings = deepcopy(settings)
+    assert settings["algorithm"]["gamma"] == pytest.approx(1.0)
+    assert settings["validation"]["selection"]["mode"] == "physical_constrained_objective"
+    assert settings["validation"]["selection"]["objective"] == "team_reward_mean"
     settings["algorithm"]["replay_capacity"] = 100
     settings.setdefault("logging", {})["diagnostic_interval"] = 2
     model = spec.create(env, settings, device="cpu", seed=17)
@@ -71,3 +74,5 @@ def test_two_algorithm_replay_update_and_checkpoint_smoke(
     network = settings["algorithm"].get("network", {})
     if "transformer" in spec.slug:
         assert network["forecast_horizon"] == 8
+        assert network["include_peer_forecast"] is True
+        assert network["peer_forecast_features"] == ["energy_balance"]
