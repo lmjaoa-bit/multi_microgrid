@@ -42,13 +42,14 @@ def test_mill_last_hour_only_protects_next_silo_state(env: MultiMicrogridEnv) ->
     assert abs(plan["silo_after_t"] - mill.initial_silo_t) > mill.terminal_tolerance_t
 
 
-def test_ev_minimum_charge_enforces_departure_feasibility(env: MultiMicrogridEnv) -> None:
+def test_v2_ev_has_no_deadline_minimum_projection(env: MultiMicrogridEnv) -> None:
     ev = env.dr_devices["mg3"]
 
     low, high = ev.feasible_bounds(6)
 
-    assert low > 0.0
-    assert low <= high <= ev.max_charge_kw + 1e-9
+    assert ev.control_semantics == "no_deadline_minimum"
+    assert low == pytest.approx(0.0)
+    assert 0.0 <= high <= ev.max_charge_kw + 1e-9
 
 
 def test_hvac_bounds_never_call_terminal_optimizer(
@@ -99,6 +100,9 @@ def test_terminal_penalty_reports_every_device(env: MultiMicrogridEnv) -> None:
     assert all(item["total_penalty"] == pytest.approx(0.0) for item in breakdown.values())
     assert info["terminal_constraint_penalty_total"] == pytest.approx(0.0)
     assert not any(info["terminal_soc_infeasible"].values())
-    assert rewards["mg1"] == pytest.approx(
-        info["team_profit"] / env.accounting.reward_scale
+    assert info["generalized_system_cost"] is not None
+    assert info["team_reward"] == pytest.approx(
+        -info["generalized_system_cost"] / env.reward_v2["reward_scale"]
     )
+    for mg in env.agent_ids:
+        assert rewards[mg] == pytest.approx(info["team_reward"])
