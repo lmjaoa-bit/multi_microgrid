@@ -61,6 +61,28 @@ def test_hvac_18_to_19_uses_result_unoccupied_band():
     assert result["strict_feasible_day"] is True
 
 
+def test_hvac_comfort_tolerance_ignores_float_roundoff_but_not_real_violation():
+    rounding_excursion = _row(
+        "2026-09-01T10:00:00", "2026-09-01T11:00:00",
+        occupied=True, low=21.0, high=25.0, t_air=25.0000002,
+    )
+    rounded = summarize_day_services(
+        [rounding_excursion], _config(), True, "service_metrics_v2"
+    )
+    assert rounded["hvac"]["comfort_rate"] == 1.0
+    assert rounded["strict_feasible_day"] is True
+
+    real_excursion = _row(
+        "2026-09-01T10:00:00", "2026-09-01T11:00:00",
+        occupied=True, low=21.0, high=25.0, t_air=25.000002,
+    )
+    violated = summarize_day_services(
+        [real_excursion], _config(), True, "service_metrics_v2"
+    )
+    assert violated["hvac"]["comfort_rate"] == 0.0
+    assert violated["strict_feasible_day"] is False
+
+
 def test_hvac_aggregation_uses_success_over_opportunities():
     first = {"data_complete": True, "strict_feasible_day": True, "unmet_energy_kwh": 0.0, "hvac": {"occupied_success_count": 1, "occupied_boundary_count": 1, "boundary_success_count": 1, "boundary_count": 1, "comfort_violation_degree_hours": 0.0, "terminal_success": None}, "mill": {}, "ev": {}}
     second = {"data_complete": True, "strict_feasible_day": True, "unmet_energy_kwh": 0.0, "hvac": {"occupied_success_count": 8, "occupied_boundary_count": 9, "boundary_success_count": 8, "boundary_count": 9, "comfort_violation_degree_hours": 0.0, "terminal_success": None}, "mill": {}, "ev": {}}

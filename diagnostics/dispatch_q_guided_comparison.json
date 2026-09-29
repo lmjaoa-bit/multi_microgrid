@@ -1,0 +1,228 @@
+{
+  "protocol": {
+    "training_episodes": 300,
+    "seeds": [
+      42,
+      43,
+      44
+    ],
+    "test_days_per_seed": 3,
+    "validation_interval": 50,
+    "validation_days": 3,
+    "checkpoint": "validation-selected best_model.pt",
+    "comparison": "Q guidance versus identical warmup and exploration without guidance",
+    "limitation": "Same three test dates for all seeds; not nine independent dates or full convergence."
+  },
+  "runs": [
+    {
+      "algorithm": "matd3_dispatch_q_guided",
+      "seed": 42,
+      "run_path": "outputs/working_runs/matd3_dispatch_q_guided/runs/MATD3Q-GUIDEDDISPATCH_2026-09-29_17-21-54_seed42",
+      "best_episode": 150,
+      "best_validation_cost": 604.9715443298613,
+      "mean_test_cost": 1380.71871729626,
+      "mg1_replay_actor_saturation_last50": 0.12265625,
+      "test_days": [
+        {
+          "date": "2018-01-28",
+          "cost": 683.5622416551307,
+          "mg1_charge_kwh": 205.6888824786989,
+          "mg1_discharge_kwh": 49.1196200119575
+        },
+        {
+          "date": "2018-01-29",
+          "cost": 1102.5153622654434,
+          "mg1_charge_kwh": 279.35013183025944,
+          "mg1_discharge_kwh": 252.11336000067146
+        },
+        {
+          "date": "2018-01-30",
+          "cost": 2356.0785479682054,
+          "mg1_charge_kwh": 364.9539335337713,
+          "mg1_discharge_kwh": 329.3708250698722
+        }
+      ],
+      "figures": {
+        "png": 15,
+        "pdf": 15
+      },
+      "status": "COMPLETED",
+      "checkpoint_sha256": "28254b24875421d051a7786e8daa15c039aaf7737001d2fe41bf8abee479a132"
+    },
+    {
+      "algorithm": "matd3_dispatch_q_guided",
+      "seed": 43,
+      "run_path": "outputs/working_runs/matd3_dispatch_q_guided/runs/MATD3Q-GUIDEDDISPATCH_2026-09-29_17-27-21_seed43",
+      "best_episode": 300,
+      "best_validation_cost": 564.463676017466,
+      "mean_test_cost": 1372.4855913488295,
+      "mg1_replay_actor_saturation_last50": 0.043046875,
+      "test_days": [
+        {
+          "date": "2018-01-28",
+          "cost": 719.5466881542991,
+          "mg1_charge_kwh": 193.54650308461026,
+          "mg1_discharge_kwh": 43.90292707910741
+        },
+        {
+          "date": "2018-01-29",
+          "cost": 1046.0060233443955,
+          "mg1_charge_kwh": 128.45774622634053,
+          "mg1_discharge_kwh": 115.302206670928
+        },
+        {
+          "date": "2018-01-30",
+          "cost": 2351.9040625477937,
+          "mg1_charge_kwh": 188.38443749999388,
+          "mg1_discharge_kwh": 169.86439307876455
+        }
+      ],
+      "figures": {
+        "png": 15,
+        "pdf": 15
+      },
+      "status": "COMPLETED",
+      "checkpoint_sha256": "680b1e86db6bfd92d823b542513b9ba055a1818ccac20066ba6cc7af878e908d"
+    },
+    {
+      "algorithm": "matd3_dispatch_q_guided",
+      "seed": 44,
+      "run_path": "outputs/working_runs/matd3_dispatch_q_guided/runs/MATD3Q-GUIDEDDISPATCH_2026-09-29_17-27-21_seed44",
+      "best_episode": 300,
+      "best_validation_cost": 590.4461205868694,
+      "mean_test_cost": 1317.9515380918522,
+      "mg1_replay_actor_saturation_last50": 0.07015625,
+      "test_days": [
+        {
+          "date": "2018-01-28",
+          "cost": 637.9666963460293,
+          "mg1_charge_kwh": 164.6519811849505,
+          "mg1_discharge_kwh": 14.354734166908926
+        },
+        {
+          "date": "2018-01-29",
+          "cost": 976.9731288764833,
+          "mg1_charge_kwh": 203.39529334154088,
+          "mg1_discharge_kwh": 182.66434923198958
+        },
+        {
+          "date": "2018-01-30",
+          "cost": 2338.914789053044,
+          "mg1_charge_kwh": 286.0511205805038,
+          "mg1_discharge_kwh": 257.49027264280016
+        }
+      ],
+      "figures": {
+        "png": 15,
+        "pdf": 15
+      },
+      "status": "COMPLETED",
+      "checkpoint_sha256": "40b26532b1a2b94b8b7aa01fb11d249267a1ab398c6017657bea30488e6d403e"
+    },
+    {
+      "algorithm": "matd3_dispatch_exploration",
+      "seed": 42,
+      "run_path": "outputs/working_runs/matd3_dispatch_exploration/runs/MATD3DISPATCHEXPLORATION_2026-09-29_17-21-54_seed42",
+      "best_episode": 150,
+      "best_validation_cost": 586.5228155915529,
+      "mean_test_cost": 1481.7824080664727,
+      "mg1_replay_actor_saturation_last50": 0.677421875,
+      "test_days": [
+        {
+          "date": "2018-01-28",
+          "cost": 695.3312942897288,
+          "mg1_charge_kwh": 0.0,
+          "mg1_discharge_kwh": 0.0
+        },
+        {
+          "date": "2018-01-29",
+          "cost": 1268.457946019186,
+          "mg1_charge_kwh": 0.0,
+          "mg1_discharge_kwh": 0.0
+        },
+        {
+          "date": "2018-01-30",
+          "cost": 2481.5579838905032,
+          "mg1_charge_kwh": 0.0,
+          "mg1_discharge_kwh": 0.0
+        }
+      ],
+      "figures": {
+        "png": 15,
+        "pdf": 15
+      },
+      "status": "COMPLETED",
+      "checkpoint_sha256": "2fba3ba934e6b7975e73469fa9887875bed2fb09d74111fa268756d6a8d79f10"
+    },
+    {
+      "algorithm": "matd3_dispatch_exploration",
+      "seed": 43,
+      "run_path": "outputs/working_runs/matd3_dispatch_exploration/runs/MATD3DISPATCHEXPLORATION_2026-09-29_17-27-21_seed43",
+      "best_episode": 150,
+      "best_validation_cost": 597.4001693515398,
+      "mean_test_cost": 1486.610221824896,
+      "mg1_replay_actor_saturation_last50": 1.0,
+      "test_days": [
+        {
+          "date": "2018-01-28",
+          "cost": 684.1256100072505,
+          "mg1_charge_kwh": 0.0,
+          "mg1_discharge_kwh": 0.0
+        },
+        {
+          "date": "2018-01-29",
+          "cost": 1245.9775385160583,
+          "mg1_charge_kwh": 0.0,
+          "mg1_discharge_kwh": 0.0
+        },
+        {
+          "date": "2018-01-30",
+          "cost": 2529.727516951379,
+          "mg1_charge_kwh": 0.0,
+          "mg1_discharge_kwh": 0.0
+        }
+      ],
+      "figures": {
+        "png": 15,
+        "pdf": 15
+      },
+      "status": "COMPLETED",
+      "checkpoint_sha256": "007c9383a633f6598f65b3279d21ea17ba0f58f02f667b79d2d1804d22521e67"
+    },
+    {
+      "algorithm": "matd3_dispatch_exploration",
+      "seed": 44,
+      "run_path": "outputs/working_runs/matd3_dispatch_exploration/runs/MATD3DISPATCHEXPLORATION_2026-09-29_17-27-21_seed44",
+      "best_episode": 200,
+      "best_validation_cost": 558.5955131236426,
+      "mean_test_cost": 1455.5164214063798,
+      "mg1_replay_actor_saturation_last50": 1.0,
+      "test_days": [
+        {
+          "date": "2018-01-28",
+          "cost": 673.8395890608127,
+          "mg1_charge_kwh": 0.0,
+          "mg1_discharge_kwh": 0.0
+        },
+        {
+          "date": "2018-01-29",
+          "cost": 1228.8434854179875,
+          "mg1_charge_kwh": 0.0,
+          "mg1_discharge_kwh": 0.0
+        },
+        {
+          "date": "2018-01-30",
+          "cost": 2463.8661897403395,
+          "mg1_charge_kwh": 0.0,
+          "mg1_discharge_kwh": 0.0
+        }
+      ],
+      "figures": {
+        "png": 15,
+        "pdf": 15
+      },
+      "status": "COMPLETED",
+      "checkpoint_sha256": "b40bdd0961f78767ea7051282d6fed10fdd3842aacab907f4269df5470127ec8"
+    }
+  ]
+}

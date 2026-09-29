@@ -5,7 +5,10 @@ from pathlib import Path
 
 import pytest
 
-from experiments.training_pipeline import build_parser
+from experiments.training_pipeline import (
+    _validate_checkpoint_selection_contract,
+    build_parser,
+)
 from experiments.training_recovery import (
     config_text_hash,
     ensure_recoverable,
@@ -19,6 +22,21 @@ from utils.training_history import TrainingHistoryJournal
 def test_parser_accepts_resume_run_as_path() -> None:
     args = build_parser().parse_args(["--resume-run", "saved/run"])
     assert args.resume_run == Path("saved/run")
+
+
+def test_formal_training_requires_validation_checkpoint_selection() -> None:
+    with pytest.raises(ValueError, match="requires validation"):
+        _validate_checkpoint_selection_contract(
+            validation_enabled=False,
+            formal_test_allowed=True,
+        )
+
+
+def test_diagnostic_run_can_skip_validation() -> None:
+    _validate_checkpoint_selection_contract(
+        validation_enabled=False,
+        formal_test_allowed=False,
+    )
 
 
 def test_config_hash_ignores_windows_newline_translation() -> None:

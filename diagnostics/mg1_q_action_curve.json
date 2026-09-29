@@ -1,0 +1,87 @@
+{
+  "source_run": "outputs\\working_runs\\matd3_dispatch_exploration\\runs\\MATD3DISPATCHEXPLORATION_2026-09-29_17-01-13_seed42",
+  "checkpoint": "outputs\\working_runs\\matd3_dispatch_exploration\\runs\\MATD3DISPATCHEXPLORATION_2026-09-29_17-01-13_seed42\\checkpoints\\best_model.pt",
+  "checkpoint_sha256": "a54a6c6065006d028dff45c39885bd18676e5d3e80760f46287e42e69000e662",
+  "scope": "Diagnostic counterfactuals; not formal performance comparison.",
+  "data": {
+    "day": "2018-03-06",
+    "hour": 9,
+    "actor_action": 0.9999901652336121,
+    "actor_logit": 6.11029052734375,
+    "tanh_derivative": 1.9669532775878906e-05,
+    "curve": [
+      {
+        "raw": -1.0,
+        "charge_kw": 65.0,
+        "discharge_kw": 0.0,
+        "q1": -2.8586435317993164,
+        "q2": -2.825606107711792,
+        "dq1_du": -0.3443787693977356
+      },
+      {
+        "raw": -0.75,
+        "charge_kw": 48.75,
+        "discharge_kw": 0.0,
+        "q1": -2.9445762634277344,
+        "q2": -2.846797227859497,
+        "dq1_du": -0.3437071442604065
+      },
+      {
+        "raw": -0.5,
+        "charge_kw": 32.5,
+        "discharge_kw": 0.0,
+        "q1": -3.030503273010254,
+        "q2": -2.882624626159668,
+        "dq1_du": -0.3437071442604065
+      },
+      {
+        "raw": -0.1,
+        "charge_kw": 6.5,
+        "discharge_kw": 0.0,
+        "q1": -3.167985677719116,
+        "q2": -3.020456314086914,
+        "dq1_du": -0.3437071442604065
+      },
+      {
+        "raw": 0.0,
+        "charge_kw": 0.0,
+        "discharge_kw": 0.0,
+        "q1": -3.2023568153381348,
+        "q2": -3.0577614307403564,
+        "dq1_du": -0.3437071442604065
+      },
+      {
+        "raw": 0.1,
+        "charge_kw": 0.0,
+        "discharge_kw": 0.0,
+        "q1": -3.2023568153381348,
+        "q2": -3.0577614307403564,
+        "dq1_du": 0.0
+      },
+      {
+        "raw": 0.5,
+        "charge_kw": 0.0,
+        "discharge_kw": 0.0,
+        "q1": -3.2023568153381348,
+        "q2": -3.0577614307403564,
+        "dq1_du": 0.0
+      },
+      {
+        "raw": 0.99,
+        "charge_kw": 0.0,
+        "discharge_kw": 0.0,
+        "q1": -3.2023568153381348,
+        "q2": -3.0577614307403564,
+        "dq1_du": 0.0
+      },
+      {
+        "raw": 1.0,
+        "charge_kw": 0.0,
+        "discharge_kw": 0.0,
+        "q1": -3.2023568153381348,
+        "q2": -3.0577614307403564,
+        "dq1_du": 0.0
+      }
+    ]
+  }
+}

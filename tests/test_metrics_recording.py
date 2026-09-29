@@ -279,3 +279,62 @@ def test_ess_offer_energy_accounting_applies_delta_t_once() -> None:
     )
     # throughput_kwh is already an energy value from BatteryModel.commit.
     assert step["battery_throughput_kwh"] == 6.0
+
+
+def test_hvac_soft_comfort_summary_counts_real_violations_not_legacy_feasibility_flag() -> None:
+    env = SimpleNamespace(
+        agent_ids=["mg2"],
+        action_design="single_dispatch_dr",
+        delta_t=1.0,
+        cfg_by_id={"mg2": {"dr": {"type": "commercial_hvac"}}},
+        cores={"mg2": SimpleNamespace(
+            battery=SimpleNamespace(soc=0.5, initial_soc=0.5, capacity_kwh=100.0)
+        )},
+    )
+    collector = EpisodeMetricsCollector(env)
+    collector.steps = 1
+    collector._record_dr_step(
+        "mg2",
+        {
+            "plans": {
+                "mg2": {
+                    "flexible_load_kw": 31.0,
+                    "dr_projected": False,
+                    "ess_projected": False,
+                    "dr_supply_infeasible": False,
+                }
+            },
+            "dr_plans": {
+                "mg2": {
+                    "flexible_load_kw": 31.0,
+                    "heating_power_kw": 0.0,
+                    "cooling_power_kw": 31.0,
+                    "comfort_infeasible": False,
+                    "terminal_thermal_infeasible": False,
+                }
+            },
+            "dr_devices": {
+                "mg2": {
+                    "t_air_c": 19.0,
+                    "t_mass_c": 20.0,
+                    "comfort_violation_c": 2.0,
+                    "comfort_degree_hours": 2.0,
+                }
+            },
+            "dr_state_after": {
+                "mg2": {
+                    "t_air_c": 19.0,
+                    "t_mass_c": 20.0,
+                    "comfort_lower_margin_c": -2.0,
+                    "comfort_upper_margin_c": 6.0,
+                }
+            },
+        },
+    )
+
+    summary = collector._dr_summary("mg2")
+
+    assert summary["comfort_violation_rate"] == 1.0
+    assert summary["comfort_violation_degree_hours"] == 2.0
+    assert summary["comfort_infeasible_rate"] == 1.0
+    assert summary["legacy_comfort_infeasible_rate"] == 0.0

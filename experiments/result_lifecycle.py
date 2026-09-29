@@ -49,6 +49,8 @@ def _run_git(project_root: Path, *args: str) -> str:
         cwd=project_root,
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         check=True,
     )
     return result.stdout.strip()

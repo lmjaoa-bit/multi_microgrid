@@ -7,7 +7,9 @@ import numpy as np
 
 
 SERVICE_METRICS_SCHEMA_VERSION = "service_metrics_v2"
-DEFAULT_TOLERANCE = 1e-7
+# Comfort bands are reported at 0.1 C precision, while HVAC integration uses
+# floating-point state updates. Ignore sub-microdegree numerical excursions.
+DEFAULT_TOLERANCE = 1e-6
 
 
 class ServiceMetricDataError(ValueError):

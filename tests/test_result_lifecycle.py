@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import subprocess
+from types import SimpleNamespace
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -11,6 +12,7 @@ import pytest
 from experiments.layout import DEFAULT_WORKING_OUTPUT_ROOT
 from experiments.result_lifecycle import (
     PromotionError,
+    _run_git,
     capture_git_identity,
     inspect_run,
     promote_run,
@@ -80,6 +82,20 @@ def test_managed_parser_defaults_to_working_runs():
 def test_managed_parser_preserves_explicit_output_root(tmp_path: Path):
     args = build_managed_parser().parse_args(["--output-root", str(tmp_path)])
     assert args.output_root == tmp_path
+
+
+def test_git_output_is_decoded_as_utf8_on_windows(monkeypatch, tmp_path: Path):
+    calls = {}
+
+    def fake_run(command, **kwargs):
+        calls.update(kwargs)
+        return SimpleNamespace(stdout="分支/工作区\n")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert _run_git(tmp_path, "status") == "分支/工作区"
+    assert calls["encoding"] == "utf-8"
+    assert calls["errors"] == "replace"
 
 
 def test_capture_git_identity_reports_branch_commit_and_dirty(tmp_path: Path):

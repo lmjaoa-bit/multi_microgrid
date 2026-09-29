@@ -30,6 +30,8 @@ def test_retained_plugins_keep_isolated_configs():
     names = available_algorithm_names()
     assert set(names) == {
         "matd3_dispatch",
+        "matd3_dispatch_exploration",
+        "matd3_dispatch_q_guided",
         "matd3_forecast_context",
         "matd3_hierarchical_transformer",
     }
@@ -61,6 +63,8 @@ def test_matd3_and_ordinary_t_receive_same_peer_energy_summary():
 def test_explicit_forecast_context_plugin_is_registered_for_new_runs():
     assert set(available_algorithm_names()) == {
         "matd3_dispatch",
+        "matd3_dispatch_exploration",
+        "matd3_dispatch_q_guided",
         "matd3_forecast_context",
         "matd3_hierarchical_transformer",
     }

@@ -149,6 +149,17 @@ def _validate_reward_run_mode(
     }
 
 
+def _validate_checkpoint_selection_contract(
+    *, validation_enabled: bool, formal_test_allowed: bool
+) -> None:
+    """Formal test runs must select their checkpoint from validation results."""
+    if formal_test_allowed and not validation_enabled:
+        raise ValueError(
+            "Formal training requires validation to select best_model.pt; "
+            "--no-validation is only allowed for diagnostic-only runs"
+        )
+
+
 def _git_commit() -> str | None:
     try:
         result = subprocess.run(
@@ -428,6 +439,10 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         env_config,
         training_episodes=training_episodes,
         diagnostic_only=bool(getattr(args, "diagnostic_only", False)),
+    )
+    _validate_checkpoint_selection_contract(
+        validation_enabled=validation_enabled,
+        formal_test_allowed=bool(reward_run_mode["formal_test_allowed"]),
     )
     if validation_enabled and validation_interval <= 0:
         raise ValueError("validation.interval must be positive")

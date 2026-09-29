@@ -44,6 +44,8 @@ def test_default_and_public_selectors_keep_matd3_default(catalog_root):
     assert resolve_training_args(command(), catalog_root).algorithm == "matd3_dispatch"
     assert set(available_algorithm_names()) == {
         "matd3_dispatch",
+        "matd3_dispatch_exploration",
+        "matd3_dispatch_q_guided",
         "matd3_forecast_context",
         "matd3_hierarchical_transformer",
     }

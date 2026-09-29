@@ -455,6 +455,11 @@ def _daily_row(
     row.update(coalition.flat_status_fields())
     row["coalition_solve_failure_count"] = coalition.failure_count
     row["coalition_all_solved"] = coalition.valid
+    accounting_grand = coalition.grand_result
+    row["accounting_coalition_hvac_comfort_semantics"] = (
+        (accounting_grand.metadata or {}).get("hvac_comfort_semantics")
+        if accounting_grand is not None else None
+    )
     settlement = settle_test_day(
         coalition.values,
         matd3_joint_profit=matd3_profit,
@@ -757,6 +762,12 @@ def evaluate(
                 ),
                 "generalized_reference_proven_optimal": (
                     (generalized_reference.metadata or {}).get("proven_optimal")
+                    if generalized_reference is not None else None
+                ),
+                "generalized_reference_hvac_comfort_semantics": (
+                    (generalized_reference.metadata or {}).get(
+                        "hvac_comfort_semantics"
+                    )
                     if generalized_reference is not None else None
                 ),
                 "generalized_reference_replayed_trajectory_cost": (

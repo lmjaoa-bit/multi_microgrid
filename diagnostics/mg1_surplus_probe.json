@@ -1,0 +1,162 @@
+[
+  {
+    "seed": 42,
+    "actor": {
+      "cost": 3201.1189866826635,
+      "throughput": 0.0,
+      "charge": 0.0,
+      "gridcharge": 0.0
+    },
+    "surplus_charge": {
+      "cost": 3182.9138234790444,
+      "throughput": 82.75294604357333,
+      "charge": 43.496949300169945,
+      "gridcharge": 0.0
+    },
+    "cost_reduction": 18.205163203619122
+  },
+  {
+    "seed": 43,
+    "actor": {
+      "cost": 1510.3905853544416,
+      "throughput": 0.0,
+      "charge": 0.0,
+      "gridcharge": 0.0
+    },
+    "surplus_charge": {
+      "cost": 1437.3514022655725,
+      "throughput": 336.4421052631579,
+      "charge": 176.8421052631579,
+      "gridcharge": 0.0
+    },
+    "cost_reduction": 73.0391830888691
+  },
+  {
+    "seed": 44,
+    "actor": {
+      "cost": 1741.1582934747937,
+      "throughput": 0.0,
+      "charge": 0.0,
+      "gridcharge": 0.0
+    },
+    "surplus_charge": {
+      "cost": 1732.0144839148309,
+      "throughput": 176.84210526315792,
+      "charge": 176.84210526315792,
+      "gridcharge": 0.0
+    },
+    "cost_reduction": 9.143809559962847
+  },
+  {
+    "seed": 45,
+    "actor": {
+      "cost": 1492.46537700599,
+      "throughput": 0.0,
+      "charge": 0.0,
+      "gridcharge": 0.0
+    },
+    "surplus_charge": {
+      "cost": 1320.2122371300177,
+      "throughput": 486.01627255253754,
+      "charge": 255.4619041012024,
+      "gridcharge": 5.199061508066871e-05
+    },
+    "cost_reduction": 172.25313987597224
+  },
+  {
+    "seed": 46,
+    "actor": {
+      "cost": 1510.3905853544416,
+      "throughput": 0.0,
+      "charge": 0.0,
+      "gridcharge": 0.0
+    },
+    "surplus_charge": {
+      "cost": 1437.3514022655725,
+      "throughput": 336.4421052631579,
+      "charge": 176.8421052631579,
+      "gridcharge": 0.0
+    },
+    "cost_reduction": 73.0391830888691
+  },
+  {
+    "seed": 47,
+    "actor": {
+      "cost": 1268.0705171593704,
+      "throughput": 0.0,
+      "charge": 0.0,
+      "gridcharge": 0.0
+    },
+    "surplus_charge": {
+      "cost": 1196.6734409381324,
+      "throughput": 380.4343786003511,
+      "charge": 199.96550780570362,
+      "gridcharge": 0.0
+    },
+    "cost_reduction": 71.39707622123797
+  },
+  {
+    "seed": 48,
+    "actor": {
+      "cost": 2391.77286160342,
+      "throughput": 0.0,
+      "charge": 0.0,
+      "gridcharge": 0.0
+    },
+    "surplus_charge": {
+      "cost": 2247.8901183245653,
+      "throughput": 336.44210526315794,
+      "charge": 176.84210526315786,
+      "gridcharge": 0.0
+    },
+    "cost_reduction": 143.88274327885483
+  },
+  {
+    "seed": 49,
+    "actor": {
+      "cost": 1644.5558117502444,
+      "throughput": 0.0,
+      "charge": 0.0,
+      "gridcharge": 0.0
+    },
+    "surplus_charge": {
+      "cost": 1578.164251532406,
+      "throughput": 312.3654008259061,
+      "charge": 176.84210526315792,
+      "gridcharge": 0.0
+    },
+    "cost_reduction": 66.39156021783833
+  },
+  {
+    "seed": 50,
+    "actor": {
+      "cost": 2388.93039639853,
+      "throughput": 0.0,
+      "charge": 0.0,
+      "gridcharge": 0.0
+    },
+    "surplus_charge": {
+      "cost": 2234.809052184741,
+      "throughput": 336.4421052631579,
+      "charge": 176.84210526315786,
+      "gridcharge": 0.0
+    },
+    "cost_reduction": 154.1213442137887
+  },
+  {
+    "seed": 51,
+    "actor": {
+      "cost": 1296.414111964304,
+      "throughput": 0.0,
+      "charge": 0.0,
+      "gridcharge": 0.0
+    },
+    "surplus_charge": {
+      "cost": 1235.9692592291153,
+      "throughput": 435.34584492207,
+      "charge": 312.7179211154113,
+      "gridcharge": 2.145462704561396e-05
+    },
+    "cost_reduction": 60.44485273518876
+  }
+]

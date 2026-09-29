@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from core.reward_v2 import calculate_reward_v2, resolve_carbon_factors
-from optimization.common_constraints import build_dispatch_data
+from optimization.common_constraints import build_dispatch_data, solve_dispatch
 from optimization.cooperative_dispatch import solve_generalized_dispatch_reference
 
 
@@ -109,6 +109,7 @@ def test_generalized_solver_objective_matches_trajectory():
         replayed["generalized_system_cost"] - float(result.total_cost)
     ) <= tolerance
     assert result.metadata["objective_kind"] == "generalized_cost"
+    assert result.metadata["hvac_comfort_semantics"] == "soft_penalty"
     assert result.metadata["replayed_trajectory_cost"] == pytest.approx(
         result.total_cost, rel=1e-6, abs=1e-6
     )
@@ -150,6 +151,30 @@ def test_oracle_soft_service_and_zero_export():
     assert result.cost_breakdown["cost_peak"] == pytest.approx(
         expected_peak_cost, rel=1e-6, abs=1e-6
     )
+
+
+def test_accounting_coalition_oracle_keeps_v2_hvac_comfort_soft():
+    cfg = _v2_config()
+    cfg["microgrids"][1]["dr"]["occupied_comfort_c"] = [60.0, 61.0]
+    cfg["microgrids"][1]["dr"]["unoccupied_comfort_c"] = [60.0, 61.0]
+    _, data = build_dispatch_data(cfg, split="test", day="2018-01-28")
+
+    result = solve_dispatch(
+        cfg,
+        data,
+        data.agent_ids,
+        cooperative=True,
+        include_dr=True,
+        objective_kind="accounting_profit",
+    )
+
+    assert result.status == "kOptimal"
+    assert result.metadata["hvac_comfort_semantics"] == (
+        "soft_service_unpriced_in_accounting_objective"
+    )
+    hvac = result.trajectories.loc[result.trajectories["microgrid"] == "mg2"]
+    assert "comfort_violation_c" in hvac
+    assert float(hvac["comfort_violation_c"].max()) > 1.0
 
 
 def test_solver_incumbent_metadata_is_not_presented_as_bound():

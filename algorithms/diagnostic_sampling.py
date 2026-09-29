@@ -342,8 +342,16 @@ def _sampled_update(self, batch_size: int):
                     current_actions[mg] if mg == active else current_actions[mg].detach()
                     for mg in self.agent_ids
                 ]
-                projected, plans = self.project_actions(state, torch.stack(joint, dim=1))
+                joint_raw = torch.stack(joint, dim=1)
+                projected, plans = self.project_actions(state, joint_raw)
                 loss = -critic.q1(state, projected.flatten(1)).mean()
+                auxiliary_metrics = {}
+                auxiliary_loss = getattr(self, "actor_auxiliary_loss", None)
+                if callable(auxiliary_loss):
+                    extra_loss, auxiliary_metrics = auxiliary_loss(
+                        active, state, joint_raw, batch["observations"][active]
+                    )
+                    loss = loss + extra_loss
                 optimizer.zero_grad(set_to_none=True)
                 loss.backward()
 
@@ -382,6 +390,10 @@ def _sampled_update(self, batch_size: int):
                         preclip_norm,
                         pre_step,
                     )
+                    actor_diagnostics[active].update({
+                        name: float(value.detach())
+                        for name, value in auxiliary_metrics.items()
+                    })
                 self._soft_update(actor, self.target_actors[active])
                 self._soft_update(critic, self.target_critics[active])
             finally:

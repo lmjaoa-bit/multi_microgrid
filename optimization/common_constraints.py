@@ -317,7 +317,7 @@ def solve_dispatch(
                         )
                         model.addConstr(dr[(mg,"air",t+1)] + low_slack >= low)
                         model.addConstr(dr[(mg,"air",t+1)] - high_slack <= high)
-                    else:
+                    elif device.control_semantics != "soft_comfort":
                         model.addConstr(dr[(mg,"air",t+1)] >= low)
                         model.addConstr(dr[(mg,"air",t+1)] <= high)
                 # The environment converts positive final temperature deviation
@@ -824,21 +824,21 @@ def solve_dispatch(
                     heat = float(model.val(dr[(mg,"heat",t)]))
                     cool = float(model.val(dr[(mg,"cool",t)]))
                     flexible = heat + cool
+                    air_after = float(model.val(dr[(mg,"air",t+1)]))
+                    mass_after = float(model.val(dr[(mg,"mass",t+1)]))
+                    comfort_low, comfort_high = device._state_comfort_bounds(t+1)
+                    comfort_low_slack = max(0.0, comfort_low - air_after)
+                    comfort_high_slack = max(0.0, air_after - comfort_high)
                     dr_row = {
                         "hvac_heating_kw": heat,
                         "hvac_cooling_kw": cool,
-                        "hvac_air_after_c": float(model.val(dr[(mg,"air",t+1)])),
-                        "hvac_mass_after_c": float(model.val(dr[(mg,"mass",t+1)])),
+                        "hvac_air_after_c": air_after,
+                        "hvac_mass_after_c": mass_after,
+                        "comfort_low_slack_c": comfort_low_slack,
+                        "comfort_high_slack_c": comfort_high_slack,
+                        "comfort_violation_c": comfort_low_slack + comfort_high_slack,
+                        "comfort_degree_hours": (comfort_low_slack + comfort_high_slack) * dt,
                     }
-                    if generalized:
-                        low_slack = float(model.val(dr[(mg, "comfort_low_slack", t)]))
-                        high_slack = float(model.val(dr[(mg, "comfort_high_slack", t)]))
-                        dr_row.update({
-                            "comfort_low_slack_c": low_slack,
-                            "comfort_high_slack_c": high_slack,
-                            "comfort_violation_c": low_slack + high_slack,
-                            "comfort_degree_hours": (low_slack + high_slack) * dt,
-                        })
                 else:
                     flexible = float(model.val(dr[(mg,"ev_charge",t)]))
                     dr_row = {
@@ -1019,6 +1019,21 @@ def solve_dispatch(
         if generalized and generalized_breakdown is not None
         else cost_breakdown if include_dr else None
     )
+    hvac_ids = [
+        mg for mg in ids
+        if str(cfg_by_id[mg].get("dr", {}).get("type")) == "commercial_hvac"
+    ] if include_dr else []
+    if not hvac_ids:
+        hvac_comfort_semantics = "not_applicable"
+    elif generalized:
+        hvac_comfort_semantics = "soft_penalty"
+    elif any(
+        str(cfg_by_id[mg]["dr"].get("control_semantics")) == "soft_comfort"
+        for mg in hvac_ids
+    ):
+        hvac_comfort_semantics = "soft_service_unpriced_in_accounting_objective"
+    else:
+        hvac_comfort_semantics = "hard_service_constraint"
     return DispatchResult(("cooperative_full_information_relaxed" if cooperative else
                            "independent_full_information") if include_dr else
                           ("cooperative" if cooperative else "independent"),
@@ -1047,6 +1062,7 @@ def solve_dispatch(
                               "p2p_enabled": p2p_enabled,
                               "cooperative_effective": cooperative,
                               "objective_kind": objective_kind,
+                              "hvac_comfort_semantics": hvac_comfort_semantics,
                               "solver_objective_value": solver_objective_value,
                               "solver_objective_bound": solver_bound,
                               "solver_mip_gap": solver_gap,

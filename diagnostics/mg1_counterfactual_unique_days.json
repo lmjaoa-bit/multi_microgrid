@@ -1,0 +1,353 @@
+{
+  "source_run": "outputs\\working_runs\\matd3_dispatch_exploration\\runs\\MATD3DISPATCHEXPLORATION_2026-09-29_17-01-13_seed42",
+  "checkpoint": "outputs\\working_runs\\matd3_dispatch_exploration\\runs\\MATD3DISPATCHEXPLORATION_2026-09-29_17-01-13_seed42\\checkpoints\\best_model.pt",
+  "checkpoint_sha256": "a54a6c6065006d028dff45c39885bd18676e5d3e80760f46287e42e69000e662",
+  "scope": "Diagnostic counterfactuals; not formal performance comparison.",
+  "data": [
+    {
+      "day": "2018-01-01",
+      "actor": {
+        "cost": 1735.7998306239988,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 1657.6929248318986,
+        "throughput": 374.83410335237903,
+        "charge": 238.91247783529153,
+        "gridcharge": 1.9599413706217206e-05
+      },
+      "one_step_charge": {
+        "cost": 1695.8323431824351,
+        "throughput": 123.66249999967675,
+        "charge": 65.0,
+        "gridcharge": 0.0
+      },
+      "counterfactual": {
+        "hour": 11,
+        "surplus": 76.9749755859375,
+        "charge_action": -1.0,
+        "q1_delta": 0.13858294486999512,
+        "q2_delta": 0.15284645557403564,
+        "true_return_delta": 0.39967487441563554,
+        "immediate_reward_delta": 0.025999999999999995
+      },
+      "cost_reduction": 78.10690579210018
+    },
+    {
+      "day": "2018-02-02",
+      "actor": {
+        "cost": 2251.064376732319,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 2246.0179277716875,
+        "throughput": 176.84210526315786,
+        "charge": 176.84210526315786,
+        "gridcharge": 0.0
+      },
+      "one_step_charge": {
+        "cost": 2249.2031421255165,
+        "throughput": 65.0,
+        "charge": 65.0,
+        "gridcharge": 0.0
+      },
+      "counterfactual": {
+        "hour": 18,
+        "surplus": 309.98919677734375,
+        "charge_action": -1.0,
+        "q1_delta": 0.0866745114326477,
+        "q2_delta": 0.25253552198410034,
+        "true_return_delta": 0.018612346068024643,
+        "immediate_reward_delta": 0.025999999999999995
+      },
+      "cost_reduction": 5.046448960631551
+    },
+    {
+      "day": "2018-03-06",
+      "actor": {
+        "cost": 1432.994434245608,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 1300.0430137752505,
+        "throughput": 336.44210526315794,
+        "charge": 176.84210526315792,
+        "gridcharge": 0.0
+      },
+      "one_step_charge": {
+        "cost": 1389.2629246420722,
+        "throughput": 123.66250000000001,
+        "charge": 65.0,
+        "gridcharge": 0.0
+      },
+      "counterfactual": {
+        "hour": 9,
+        "surplus": 566.8626098632812,
+        "charge_action": -1.0,
+        "q1_delta": 0.34371328353881836,
+        "q2_delta": 0.23215532302856445,
+        "true_return_delta": 0.43731509603535823,
+        "immediate_reward_delta": 0.026000000000000023
+      },
+      "cost_reduction": 132.95142047035756
+    },
+    {
+      "day": "2018-04-07",
+      "actor": {
+        "cost": 1369.3665775690308,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 1373.3978961200378,
+        "throughput": 176.8421052631579,
+        "charge": 176.8421052631579,
+        "gridcharge": 0.0
+      },
+      "one_step_charge": {
+        "cost": 1367.5793389924568,
+        "throughput": 65.0,
+        "charge": 65.0,
+        "gridcharge": 0.0
+      },
+      "counterfactual": {
+        "hour": 11,
+        "surplus": 989.0464477539062,
+        "charge_action": -1.0,
+        "q1_delta": 0.2778644561767578,
+        "q2_delta": 0.22795724868774414,
+        "true_return_delta": 0.017872385765739907,
+        "immediate_reward_delta": 0.026000000000000023
+      },
+      "cost_reduction": -4.031318551006962
+    },
+    {
+      "day": "2018-05-09",
+      "actor": {
+        "cost": 1736.1797999022708,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 1605.2025619759447,
+        "throughput": 336.44210526315794,
+        "charge": 176.84210526315792,
+        "gridcharge": 1.6364793111733889e-06
+      },
+      "one_step_charge": {
+        "cost": 1687.760405752203,
+        "throughput": 123.66250000000002,
+        "charge": 65.0,
+        "gridcharge": 0.0
+      },
+      "counterfactual": {
+        "hour": 13,
+        "surplus": 288.1003723144531,
+        "charge_action": -1.0,
+        "q1_delta": 0.26125240325927734,
+        "q2_delta": 0.2007904052734375,
+        "true_return_delta": 0.4841939415006764,
+        "immediate_reward_delta": 0.025999999999999995
+      },
+      "cost_reduction": 130.9772379263261
+    },
+    {
+      "day": "2018-06-10",
+      "actor": {
+        "cost": 1803.9046262820964,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 1654.2915426462127,
+        "throughput": 336.44210526315794,
+        "charge": 176.8421052631579,
+        "gridcharge": 0.0
+      },
+      "one_step_charge": {
+        "cost": 1747.392646616989,
+        "throughput": 123.66250000000001,
+        "charge": 65.0,
+        "gridcharge": 0.0
+      },
+      "counterfactual": {
+        "hour": 11,
+        "surplus": 209.37644958496094,
+        "charge_action": -1.0,
+        "q1_delta": 0.16846394538879395,
+        "q2_delta": 0.007205009460449219,
+        "true_return_delta": 0.5651197966510777,
+        "immediate_reward_delta": 0.02600000000000001
+      },
+      "cost_reduction": 149.61308363588364
+    },
+    {
+      "day": "2018-07-12",
+      "actor": {
+        "cost": 1541.2056072563075,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 1537.4380768759145,
+        "throughput": 176.84210526315792,
+        "charge": 176.84210526315792,
+        "gridcharge": 0.0
+      },
+      "one_step_charge": {
+        "cost": 1537.7119629294716,
+        "throughput": 65.0,
+        "charge": 65.0,
+        "gridcharge": 0.0
+      },
+      "counterfactual": {
+        "hour": 11,
+        "surplus": 841.40625,
+        "charge_action": -1.0,
+        "q1_delta": 0.28026890754699707,
+        "q2_delta": 0.2887301445007324,
+        "true_return_delta": 0.0349364432683581,
+        "immediate_reward_delta": 0.025999999999999968
+      },
+      "cost_reduction": 3.7675303803930547
+    },
+    {
+      "day": "2018-08-13",
+      "actor": {
+        "cost": 1819.0349152729286,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 1818.5046140743434,
+        "throughput": 176.84210526315792,
+        "charge": 176.84210526315792,
+        "gridcharge": 0.0
+      },
+      "one_step_charge": {
+        "cost": 1816.4020706134006,
+        "throughput": 65.0,
+        "charge": 65.0,
+        "gridcharge": 0.0
+      },
+      "counterfactual": {
+        "hour": 12,
+        "surplus": 914.4820556640625,
+        "charge_action": -1.0,
+        "q1_delta": 0.2602691650390625,
+        "q2_delta": 0.27861595153808594,
+        "true_return_delta": 0.026328446595277555,
+        "immediate_reward_delta": 0.026000000000000023
+      },
+      "cost_reduction": 0.5303011985852208
+    },
+    {
+      "day": "2018-09-14",
+      "actor": {
+        "cost": 3632.735157581232,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 3632.735157581232,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "one_step_charge": {
+        "cost": 3632.735157581232,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "cost_reduction": 0.0
+    },
+    {
+      "day": "2018-10-16",
+      "actor": {
+        "cost": 3442.056107790677,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 3321.6434213786924,
+        "throughput": 288.4179317243397,
+        "charge": 151.59943848848343,
+        "gridcharge": 1.3681225155881549e-05
+      },
+      "one_step_charge": {
+        "cost": 3398.1045608064355,
+        "throughput": 113.1275370657444,
+        "charge": 59.46256875991821,
+        "gridcharge": 0.0
+      },
+      "counterfactual": {
+        "hour": 11,
+        "surplus": 59.46257019042969,
+        "charge_action": -0.9148087721604568,
+        "q1_delta": 0.1525406837463379,
+        "q2_delta": 0.0532606840133667,
+        "true_return_delta": 0.43951546984241396,
+        "immediate_reward_delta": 0.023785027503967285
+      },
+      "cost_reduction": 120.4126864119844
+    },
+    {
+      "day": "2018-11-18",
+      "actor": {
+        "cost": 2618.060812916139,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 2618.060812916139,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "one_step_charge": {
+        "cost": 2618.060812916139,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "cost_reduction": 0.0
+    },
+    {
+      "day": "2018-12-21",
+      "actor": {
+        "cost": 4019.6968080723364,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "surplus_charge": {
+        "cost": 4019.6968080723364,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "one_step_charge": {
+        "cost": 4019.6968080723364,
+        "throughput": 0.0,
+        "charge": 0.0,
+        "gridcharge": 0.0
+      },
+      "cost_reduction": 0.0
+    }
+  ]
+}

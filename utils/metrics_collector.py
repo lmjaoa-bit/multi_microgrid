@@ -17,7 +17,7 @@ from core.tariffs import prices_from_row
 
 
 EPSILON = 1e-9
-DEFAULT_TOLERANCE = 1e-7
+DEFAULT_TOLERANCE = 1e-6
 
 
 def safe_ratio(numerator: float, denominator: float) -> float:
@@ -308,6 +308,20 @@ class EpisodeMetricsCollector:
             totals["heating_energy_kwh"] += float(dr_plan.get("heating_power_kw", 0.0)) * dt
             totals["cooling_energy_kwh"] += float(dr_plan.get("cooling_power_kw", 0.0)) * dt
             totals["comfort_infeasible_steps"] += float(bool(dr_plan.get("comfort_infeasible", False)))
+            comfort_violation_c = float(dr_device.get(
+                "comfort_violation_c",
+                max(
+                    0.0,
+                    -float(state_after.get("comfort_lower_margin_c", 0.0)),
+                    -float(state_after.get("comfort_upper_margin_c", 0.0)),
+                ),
+            ))
+            totals["comfort_violation_steps"] += float(
+                comfort_violation_c > self.tolerance
+            )
+            totals["comfort_degree_hours"] += float(dr_device.get(
+                "comfort_degree_hours", comfort_violation_c * dt
+            ))
             totals["terminal_infeasible_steps"] += float(bool(dr_plan.get("terminal_thermal_infeasible", False)))
         elif kind == "ev_charging":
             totals["ev_charge_energy_kwh"] += float(dr_plan.get("effective_power_kw", 0.0)) * dt
@@ -909,11 +923,21 @@ class EpisodeMetricsCollector:
                 "terminal_infeasible_rate": safe_ratio(totals["terminal_infeasible_steps"], self.steps),
             })
         elif kind == "commercial_hvac":
+            comfort_violation_rate = safe_ratio(
+                totals["comfort_violation_steps"], self.steps
+            )
             summary.update({
                 "hvac_energy_kwh": float(totals["hvac_energy_kwh"]),
                 "heating_energy_kwh": float(totals["heating_energy_kwh"]),
                 "cooling_energy_kwh": float(totals["cooling_energy_kwh"]),
-                "comfort_infeasible_rate": safe_ratio(totals["comfort_infeasible_steps"], self.steps),
+                "comfort_violation_rate": comfort_violation_rate,
+                "comfort_violation_degree_hours": float(totals["comfort_degree_hours"]),
+                # Compatibility alias. In soft-comfort mode, the old device
+                # infeasibility flag is always false and no longer measures service.
+                "comfort_infeasible_rate": comfort_violation_rate,
+                "legacy_comfort_infeasible_rate": safe_ratio(
+                    totals["comfort_infeasible_steps"], self.steps
+                ),
                 "terminal_thermal_infeasible_rate": safe_ratio(totals["terminal_infeasible_steps"], self.steps),
                 "terminal_t_air_c": self.dr_last[mg].get("t_air_c"),
                 "terminal_t_mass_c": self.dr_last[mg].get("t_mass_c"),
