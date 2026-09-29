@@ -231,6 +231,9 @@ def test_renewable_first_rejects_unsupported_market_semantics(mutation, match):
 
 def test_legacy_mode_retains_finite_pair_capacity_readability():
     cfg = _main_config()
+    # Legacy readability is tested as an explicit legacy fixture. Reward V2 is
+    # intentionally incompatible with legacy_local_first and must stay so.
+    cfg.pop("reward", None)
     cfg["dispatch"]["priority_mode"] = "legacy_local_first"
     cfg["p2p"]["pair_capacity_kw"] = 75.0
     validate_config(cfg)
