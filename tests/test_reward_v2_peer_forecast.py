@@ -68,7 +68,7 @@ def test_v2_forecast_contract_matches_b_feature_order():
         key: float(env.obs_builder.norm[mg][key])
         for key in ("load", "pv", "wind", "power")
     }
-    study_b = ForecastContextTransformerActor(
+    study_b = ForecastContextActor(
         env.obs_builder.schema(mg),
         env.agent_ids,
         mg,
