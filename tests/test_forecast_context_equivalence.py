@@ -25,6 +25,14 @@ def _configs() -> tuple[dict, dict, dict]:
             "configs/algorithms/matd3_forecast_context.yaml"
         ).read_text(encoding="utf-8")
     )
+    # This test protects the historical 2x2 ablation boundary.  The current
+    # ordinary Transformer has intentionally moved to Reward V2 + peer H8, so
+    # reconstruct the pre-V2 Group-A contract instead of mutating the archived
+    # forecast-context implementation to follow the new formal default.
+    environment.pop("reward", None)
+    ordinary["algorithm"]["gamma"] = group_a["algorithm"]["gamma"]
+    ordinary["algorithm"]["network"]["include_peer_forecast"] = False
+    ordinary["algorithm"]["network"]["peer_forecast_features"] = ["energy_balance"]
     ordinary["logging"]["diagnostic_interval"] = 0
     group_a["logging"]["diagnostic_interval"] = 0
     return environment, ordinary, group_a
