@@ -4,6 +4,8 @@ from typing import Any, Mapping
 
 import numpy as np
 
+from core.reward_v2 import resolve_reward_v2_config
+
 
 def _number(value: Any, name: str, minimum: float | None = None) -> float:
     try:
@@ -316,4 +318,32 @@ def validate_config(config: Mapping[str, Any]) -> None:
             raise ValueError(
                 "single_dispatch_dr requires mg1=industrial_mill, "
                 "mg2=commercial_hvac, mg3=ev_charging"
+            )
+
+    reward_v2 = resolve_reward_v2_config(config)
+    if reward_v2 is not None:
+        if dispatch_mode != "renewable_load_first":
+            raise ValueError("Reward V2 requires dispatch.priority_mode=renewable_load_first")
+        if terminal.get("mode") != "none":
+            raise ValueError("Reward V2 requires terminal_soc.mode=none")
+        for mg in config["microgrids"]:
+            if float(mg.get("grid", {}).get("export_limit_kw", 0.0)) != 0.0:
+                raise ValueError(
+                    f"{mg['id']}: Reward V2 requires grid.export_limit_kw=0"
+                )
+        hvac = next(
+            mg["dr"] for mg in config["microgrids"]
+            if mg.get("dr", {}).get("type") == "commercial_hvac"
+        )
+        if str(hvac.get("control_semantics", "")) != "soft_comfort":
+            raise ValueError(
+                "Reward V2 requires mg2.dr.control_semantics=soft_comfort"
+            )
+        ev = next(
+            mg["dr"] for mg in config["microgrids"]
+            if mg.get("dr", {}).get("type") == "ev_charging"
+        )
+        if str(ev.get("control_semantics", "")) != "no_deadline_minimum":
+            raise ValueError(
+                "Reward V2 requires mg3.dr.control_semantics=no_deadline_minimum"
             )
