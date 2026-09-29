@@ -165,6 +165,8 @@ class Matd3HierarchicalTransformer(MATD3):
                     for mg in self.agent_ids
                 },
                 mask_semantics="shared_forecast_valid_zero_before_encode_v1",
+                gamma=self.gamma,
+                action_semantics=self.projector.semantics,
             )
 
         # 3 Independent Actors (one per microgrid)
