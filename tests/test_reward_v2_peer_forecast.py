@@ -8,7 +8,7 @@ import torch
 import yaml
 
 from algorithms.matd3_forecast_context.actor import (
-    ForecastContextTransformerActor,
+    ForecastContextActor,
 )
 from algorithms.matd3_hierarchical_transformer.actor import (
     HierarchicalTransformerActor,
