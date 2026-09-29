@@ -44,8 +44,9 @@ def main(argv: list[str] | None = None) -> int:
     args = _apply_algorithm_runtime_defaults(build_managed_parser().parse_args(argv))
     summary = train(args)
     run_dir = Path(str(summary["run_directory"]))
-    augment_run_outputs(run_dir)
-    generate_results(run_dir)
+    if bool(summary.get("formal_test_completed", True)):
+        augment_run_outputs(run_dir)
+        generate_results(run_dir)
     update_run_metadata_git_identity(run_dir, identity)
     return 0
 
