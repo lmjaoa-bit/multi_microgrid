@@ -1180,7 +1180,11 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     print("TRAINING COMPLETE")
     print("=" * 60)
     print(f"Run ID: {run_id}\nSeed: {args.seed}\nEpisodes: {training_episodes}\nTotal Steps: {total_steps}")
-    print(f"Best validation episode: {best_episode}\nBest validation team profit: {best_validation_score:.4f}")
+    print(
+        f"Best validation episode: {best_episode}\n"
+        f"Best validation objective ({selector.objective_key}): "
+        f"{best_validation_score:.4f}"
+    )
     print(f"Final-100 profit: {training_summary['final_100_profit_mean']:.4f}")
     print(f"Final-500 profit: {training_summary['final_500_profit_mean']:.4f}")
     print(f"Best checkpoint: {best_checkpoint}\nFinal checkpoint: {final_checkpoint}")
