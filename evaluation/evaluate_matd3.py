@@ -756,6 +756,18 @@ def evaluate(
                     )
                     if generalized_reference is not None else None
                 ),
+                "generalized_reference_scenario_fingerprint": (
+                    (generalized_reference.metadata or {}).get(
+                        "scenario_fingerprint"
+                    )
+                    if generalized_reference is not None else None
+                ),
+                "generalized_reference_initial_state_fingerprint": (
+                    (generalized_reference.metadata or {}).get(
+                        "initial_state_fingerprint"
+                    )
+                    if generalized_reference is not None else None
+                ),
             })
         if coalition is not None and coalition.grand_result is not None:
             from optimization.oracle_replay import compare_oracle_market_replay
