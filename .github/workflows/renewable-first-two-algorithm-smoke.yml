@@ -40,10 +40,63 @@ jobs:
         run: python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
       - name: Install dependencies
         run: python -m pip install -r requirements.txt
-      - name: Check implementation diff whitespace
-        run: git diff --check d085ff71be9a...HEAD
+      - name: Check implementation diff and protected paths
+        run: |
+          git diff --check d085ff71be9a...HEAD
+          changed="$(git diff --name-only d085ff71be9a...HEAD)"
+          if printf '%s\n' "$changed" | grep -E '^(algorithms/matd3/|configs/algorithms/matd3\.yaml$|algorithms/matd3_forecast_context/|configs/algorithms/matd3_forecast_context\.yaml$|outputs/retained_releases/|releases/)'; then
+            echo "Protected historical/canonical path changed"
+            exit 1
+          fi
       - name: Regenerate Yancheng-area data
         run: python scripts/build_spatial_market_data.py
+      - name: Record reproducibility manifest
+        run: |
+          mkdir -p /tmp/renewable_first_smoke
+          python - <<'PY'
+          import hashlib
+          import importlib.metadata as metadata
+          import json
+          import platform
+          import subprocess
+          from pathlib import Path
+
+          def sha256(path):
+              digest = hashlib.sha256()
+              with Path(path).open('rb') as handle:
+                  for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+                      digest.update(chunk)
+              return digest.hexdigest()
+
+          tracked = [
+              'data/spatial_market_2018_train.csv',
+              'data/spatial_market_2018_val.csv',
+              'data/spatial_market_2018_test.csv',
+              'configs/cooperative.yaml',
+              'configs/smoke/matd3_dispatch.yaml',
+              'configs/smoke/matd3_hierarchical_transformer.yaml',
+          ]
+          packages = [
+              'torch', 'numpy', 'pandas', 'PyYAML', 'pytest',
+              'highspy', 'matplotlib', 'rich',
+          ]
+          manifest = {
+              'implementation_start_commit': 'd085ff71be9a',
+              'head_commit': subprocess.check_output(
+                  ['git', 'rev-parse', 'HEAD'], text=True
+              ).strip(),
+              'python': platform.python_version(),
+              'file_sha256': {path: sha256(path) for path in tracked},
+              'dependencies': {
+                  name: metadata.version(name) for name in packages
+              },
+          }
+          Path('/tmp/renewable_first_smoke/verification_manifest.json').write_text(
+              json.dumps(manifest, indent=2, sort_keys=True),
+              encoding='utf-8',
+          )
+          print(json.dumps(manifest, indent=2, sort_keys=True))
+          PY
       - name: Verify Reward V2 shared semantics
         run: |
           python - <<'PY'
