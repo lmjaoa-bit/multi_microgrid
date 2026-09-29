@@ -462,10 +462,14 @@ class EpisodeMetricsCollector:
                     max(0.0, -power, power - rated) / rated,
                 )
 
-        grid_export = max(
-            (float(info["settlements"][mg].get("grid_export_kw", 0.0))
-             for mg in self.agent_ids),
-            default=0.0,
+        grid_export = (
+            max(
+                (float(info["settlements"][mg].get("grid_export_kw", 0.0))
+                 for mg in self.agent_ids),
+                default=0.0,
+            )
+            if bool(getattr(self.env, "reward_v2_enabled", False))
+            else 0.0
         )
         unmet = sum(
             max(0.0, float(info["settlements"][mg].get("unmet_load_kw", 0.0)))
