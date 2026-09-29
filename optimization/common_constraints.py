@@ -136,6 +136,11 @@ def solve_dispatch(
     generalized = objective_kind == "generalized_cost"
     reward_v2 = resolve_reward_v2_config(config) if generalized else None
     if generalized:
+        if reward_v2 is None:
+            raise ValueError(
+                "generalized_cost objective requires reward.semantics_version="
+                "generalized_system_cost_v2"
+            )
         all_ids = [str(mg["id"]) for mg in config["microgrids"]]
         if ids != all_ids:
             raise ValueError(
@@ -373,8 +378,14 @@ def solve_dispatch(
                         dr_power[(mg,t)] = charge
                         model.addConstr(dr[(mg,"ev_energy",t+1)] ==
                                         dr[(mg,"ev_energy",t)] + device.eta*charge*dt)
-                    shortfall = dvar("ev_terminal_shortfall",mg,data.horizon,
-                                     lb=0.0,ub=inf,obj=rate)
+                    shortfall = dvar(
+                        "ev_terminal_shortfall", mg, data.horizon,
+                        lb=0.0, ub=inf,
+                        obj=(
+                            float(reward_v2["ev_shortfall_price_per_kwh"])
+                            if generalized else rate
+                        ),
+                    )
                     model.addConstr(shortfall >= capacity*device.target_soc -
                                     dr[(mg,"ev_energy",data.horizon)])
                     dr_terminal[mg].append(shortfall)
