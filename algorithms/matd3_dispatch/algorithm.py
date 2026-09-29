@@ -12,6 +12,7 @@ from torch import nn
 from algorithms.matd3 import MATD3
 from algorithms.matd3.actor import Actor
 from core.joint_action_projection import JointActionProjector
+from core.reward_v2 import build_reward_v2_contract
 
 
 class Matd3Dispatch(MATD3):
@@ -65,6 +66,26 @@ class Matd3Dispatch(MATD3):
         self.projection_signature = hashlib.sha256(
             json.dumps(signature, sort_keys=True, default=str).encode()
         ).hexdigest()
+        self.reward_v2_contract = None
+        if getattr(env, "reward_v2_enabled", False):
+            reward_normalizers = {
+                "by_microgrid": copy.deepcopy(env.obs_builder.norm),
+                "team_power_scale_kw": float(env.obs_builder.team_power_scale_kw),
+                "carbon_factor_scale": float(env.obs_builder.carbon_factor_scale),
+            }
+            self.reward_v2_contract = build_reward_v2_contract(
+                env.config,
+                self.observation_schemas,
+                self.state_schema,
+                reward_normalizers,
+                algorithm_slug="matd3_dispatch",
+                actor_forecast_context_version="baseline_flat_v2",
+                peer_orders={
+                    mg: [peer for peer in self.agent_ids if peer != mg]
+                    for mg in self.agent_ids
+                },
+                mask_semantics="shared_forecast_valid_v1",
+            )
 
         # Rebuild only the actors because the base constructor used the
         # effective critic action dimension (3) for its temporary actors.
@@ -267,6 +288,7 @@ class Matd3Dispatch(MATD3):
             "projection_signature": self.projection_signature,
             "observation_schemas": self.observation_schemas,
             "state_schema": self.state_schema,
+            "reward_v2_contract": copy.deepcopy(self.reward_v2_contract),
             "actors": self.actors.state_dict(),
             "target_actors": self.target_actors.state_dict(),
             "critics": self.critics.state_dict(),
@@ -276,6 +298,12 @@ class Matd3Dispatch(MATD3):
 
     def load(self, path):
         checkpoint = torch.load(Path(path), map_location=self.device, weights_only=True)
+        if self.reward_v2_contract is not None:
+            saved_contract = checkpoint.get("reward_v2_contract")
+            if saved_contract is None:
+                raise ValueError("Reward V2 checkpoint contract is missing")
+            if saved_contract != self.reward_v2_contract:
+                raise ValueError("Reward V2 checkpoint contract mismatch")
         if checkpoint.get("algorithm_slug") != "matd3_dispatch":
             raise ValueError("Checkpoint belongs to a different algorithm")
         if checkpoint.get("action_semantics") != self.projector.semantics:
