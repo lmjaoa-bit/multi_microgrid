@@ -257,3 +257,61 @@ def test_constrained_profit_accepts_first_eligible_as_best():
     )
     assert candidate.eligible is True
     assert selector.is_better(candidate, None) is True
+
+
+
+def test_physical_selector_ignores_soft_service_rate():
+    selector = CheckpointSelector({
+        "mode": "physical_constrained_objective",
+        "objective": "team_reward_mean",
+        "constraints": {
+            "physical_feasible_day_rate": {"min": 1.0, "atol": 1e-7},
+            "power_balance_residual_max_kw": {"max": 0.0, "atol": 1e-7},
+            "grid_export_max_kw": {"max": 0.0, "atol": 1e-7},
+        },
+    })
+    lower = selector.evaluate({
+        "team_reward_mean": -10.0,
+        "physical_feasible_day_rate": 1.0,
+        "power_balance_residual_max_kw": 0.0,
+        "grid_export_max_kw": 0.0,
+        "hvac_comfort_rate": 0.25,
+        "ev_departure_success_rate": 0.0,
+    }, episode=100)
+    higher = selector.evaluate({
+        "team_reward_mean": -8.0,
+        "physical_feasible_day_rate": 1.0,
+        "power_balance_residual_max_kw": 0.0,
+        "grid_export_max_kw": 0.0,
+        "hvac_comfort_rate": 0.0,
+        "ev_departure_success_rate": 0.0,
+    }, episode=200)
+    assert selector.requires_eligible_checkpoint is True
+    assert lower.eligible and higher.eligible
+    assert selector.is_better(higher, lower)
+
+
+@pytest.mark.parametrize("bad", [{}, {"team_reward_mean": float("nan")}, {"team_reward_mean": float("inf")}])
+def test_missing_or_nonfinite_objective_never_wins(bad):
+    selector = CheckpointSelector({
+        "mode": "physical_constrained_objective",
+        "objective": "team_reward_mean",
+        "constraints": {"physical_feasible_day_rate": {"min": 1.0}},
+    })
+    summary = {"physical_feasible_day_rate": 1.0, **bad}
+    candidate = selector.evaluate(summary, episode=1)
+    assert candidate.eligible is False
+    assert math.isinf(candidate.total_violation)
+    assert selector.is_better(candidate, None) is False
+
+
+def test_unknown_selection_mode_is_rejected():
+    with pytest.raises(ValueError, match="Unknown checkpoint selection mode"):
+        CheckpointSelector({"mode": "typo"})
+
+
+def test_profit_only_missing_objective_cannot_be_best():
+    selector = CheckpointSelector({"mode": "profit_only", "objective": "team_profit_mean"})
+    candidate = selector.evaluate({}, episode=1)
+    assert candidate.eligible is False
+    assert selector.is_better(candidate, None) is False
