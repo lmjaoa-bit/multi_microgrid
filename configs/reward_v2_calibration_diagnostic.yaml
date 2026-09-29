@@ -67,13 +67,13 @@ reward:
 
 cost:
   unmet_load_cost_per_kwh: 20.0
-  renewable_curtailment_cost_per_kwh: 0.02
-  curtailment_price_per_kwh: 0.02
+  renewable_curtailment_cost_per_kwh: 0.05
+  curtailment_price_per_kwh: 0.05
   carbon_price_per_kg: 0.10
   peak_price_per_kw: 1.0
   mill_unserved_price_per_t: 100.0
-  comfort_price_per_degree_hour: 2.0
-  ev_shortfall_price_per_kwh: 1.5
+  comfort_price_per_degree_hour: 10.0
+  ev_shortfall_price_per_kwh: 3.0
   reward_scale: 100.0
 
 # In this environment load_profile.target_mean_kw means uncontrollable/base
@@ -163,7 +163,7 @@ microgrids:
     dr:
       type: ev_charging
       scenario_seed: 42
-      departure_penalty_per_kwh: 1.5
+      departure_penalty_per_kwh: 3.0
       control_semantics: no_deadline_minimum
       fleet_capacity_kwh: 780.0
       initial_soc: 0.50
