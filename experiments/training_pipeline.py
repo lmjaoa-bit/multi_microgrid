@@ -22,6 +22,7 @@ import yaml
 
 from algorithms.registry import get_algorithm_spec
 from envs.multi_microgrid_env import MultiMicrogridEnv
+from core.reward_v2 import resolve_reward_v2_config
 from evaluation.evaluate_matd3 import evaluate, evaluate_policy_on_days
 from evaluation.plotting import generate_figures
 from experiments.checkpoint_selector import CheckpointCandidate, CheckpointSelector
@@ -97,11 +98,55 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--no-milp", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--no-dashboard", action="store_true")
     parser.add_argument(
+        "--diagnostic-only",
+        action="store_true",
+        help=(
+            "Reward V2 calibration/diagnostic run: max 100 complete-day "
+            "episodes and no formal test/settlement/plot stage"
+        ),
+    )
+    parser.add_argument(
         "--resume-run",
         type=Path,
         help="Resume a supported interrupted run in its existing directory",
     )
     return parser
+
+
+def _validate_reward_run_mode(
+    env_config: Mapping[str, Any],
+    *,
+    training_episodes: int,
+    diagnostic_only: bool,
+) -> dict[str, Any]:
+    """Fail closed when Reward V2 coefficients have not been locked."""
+    reward_v2 = resolve_reward_v2_config(env_config)
+    if reward_v2 is None:
+        if diagnostic_only:
+            raise ValueError("--diagnostic-only requires Reward V2")
+        return {
+            "reward_v2": None,
+            "run_purpose": "formal_training",
+            "formal_test_allowed": True,
+        }
+
+    status = str(reward_v2["calibration_status"])
+    if status == "diagnostic" and not diagnostic_only:
+        raise ValueError(
+            "Reward V2 calibration_status=diagnostic cannot start a formal run; "
+            "use --diagnostic-only for calibration work"
+        )
+    if diagnostic_only and int(training_episodes) > 100:
+        raise ValueError(
+            "Reward V2 diagnostic runs are limited to at most 100 complete-day episodes"
+        )
+    return {
+        "reward_v2": reward_v2,
+        "run_purpose": (
+            "reward_calibration" if diagnostic_only else "formal_training"
+        ),
+        "formal_test_allowed": not diagnostic_only,
+    }
 
 
 def _git_commit() -> str | None:
@@ -379,6 +424,11 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     learning_curve_seed = int(learning_curve_cfg.get("seed", 424242))
     if training_episodes <= 0 or test_episodes <= 0:
         raise ValueError("Training and test episode counts must be positive")
+    reward_run_mode = _validate_reward_run_mode(
+        env_config,
+        training_episodes=training_episodes,
+        diagnostic_only=bool(getattr(args, "diagnostic_only", False)),
+    )
     if validation_enabled and validation_interval <= 0:
         raise ValueError("validation.interval must be positive")
     if learning_curve_enabled and learning_curve_interval_steps <= 0:
@@ -461,6 +511,16 @@ def train(args: argparse.Namespace) -> dict[str, object]:
             "y_axis": "average_episode_return",
         },
         "runtime": runtime_settings,
+        "run_purpose": reward_run_mode["run_purpose"],
+        "formal_test_completed": False,
+        "reward_semantics_version": (
+            reward_run_mode["reward_v2"]["semantics_version"]
+            if reward_run_mode["reward_v2"] is not None else "legacy"
+        ),
+        "reward_calibration_status": (
+            reward_run_mode["reward_v2"]["calibration_status"]
+            if reward_run_mode["reward_v2"] is not None else None
+        ),
     }
     if resume_requested:
         snapshot_path = run_dir / "config_snapshot.yaml"
@@ -997,6 +1057,42 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     metadata["end_time"] = datetime.now().astimezone().isoformat()
     write_json(run_dir / "run_metadata.json", metadata)
 
+    if not reward_run_mode["formal_test_allowed"]:
+        diagnostics_dir = run_dir / "diagnostics"
+        diagnostics_dir.mkdir(parents=True, exist_ok=True)
+        summary = {
+            **training_summary,
+            "algorithm_slug": spec.slug,
+            "algorithm_display_name": spec.display_name,
+            "run_id": run_id,
+            "run_directory": str(run_dir),
+            "run_purpose": "reward_calibration",
+            "formal_test_completed": False,
+            "checkpoint": str(final_checkpoint),
+            "best_checkpoint": str(best_checkpoint),
+            "diagnostics_directory": str(diagnostics_dir),
+        }
+        metadata["run_purpose"] = "reward_calibration"
+        metadata["formal_test_completed"] = False
+        write_json(run_dir / "run_metadata.json", metadata)
+        write_json(run_dir / "summary.json", summary)
+        write_json(algorithm_root / "latest_run.json", {
+            "algorithm_slug": spec.slug,
+            "algorithm_display_name": spec.display_name,
+            "run_id": run_id,
+            "run_directory": str(run_dir),
+        })
+        write_run_status(
+            run_dir,
+            "COMPLETED",
+            completed_episode=training_episodes,
+            total_steps=total_steps,
+            durable_recovery_point=durable_recovery_point,
+            run_purpose="reward_calibration",
+            formal_test_completed=False,
+        )
+        return summary
+
     write_run_status(
         run_dir,
         "EVALUATING",
@@ -1028,6 +1124,8 @@ def train(args: argparse.Namespace) -> dict[str, object]:
             durable_recovery_point=durable_recovery_point,
         )
         raise
+    metadata["formal_test_completed"] = True
+    write_json(run_dir / "run_metadata.json", metadata)
     summary = {
         **training_summary,
         "algorithm_slug": spec.slug,
@@ -1041,6 +1139,8 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "algorithm_ess_terminal_soc": test_result["algorithm"]["ess"]["terminal_soc_mean"],
         "matd3_ess_terminal_soc": test_result["matd3"]["ess"]["terminal_soc_mean"],
         "test_evaluation": str(run_dir / "test_evaluation.json"),
+        "run_purpose": "formal_training",
+        "formal_test_completed": True,
     }
     write_json(run_dir / "summary.json", summary)
     write_json(algorithm_root / "latest_run.json", {
