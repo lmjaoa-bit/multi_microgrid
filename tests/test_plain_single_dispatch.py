@@ -33,7 +33,7 @@ def test_plain_matd3_uses_two_raw_actions_and_three_effective_critic_controls():
     assert env.action_dim == plain.action_dim == 2
     assert plain.raw_action_dim == 2
     assert plain.effective_action_dim == 3
-    assert plain.projector.semantics == "single_dispatch_dr_v3"
+    assert plain.projector.semantics == "single_dispatch_dr_v4_instantaneous_physical"
     for mg in env.agent_ids:
         actor = plain.actors[mg]
         assert type(actor) is Actor
