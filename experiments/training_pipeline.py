@@ -243,6 +243,10 @@ def _validation_record(
         "feasible_rate": summary["feasible_rate"],
         "is_best": bool(is_best),
     }
+    if "team_reward_mean" in summary:
+        rec["team_reward_mean"] = summary["team_reward_mean"]
+    if "generalized_system_cost_mean" in summary:
+        rec["generalized_system_cost_mean"] = summary["generalized_system_cost_mean"]
     if candidate is not None and candidate.selection_mode != "profit_only":
         rec.update({
             "selection_mode": candidate.selection_mode,
@@ -725,14 +729,19 @@ def train(args: argparse.Namespace) -> dict[str, object]:
             ep_record.update(_diagnostic_means(diagnostics))
             _append_actor_diagnostics(run_dir / "actor_diagnostics.csv", episode_index + 1, ep_record)
             economics = ep_record["economic_breakdown_by_microgrid"]
-            ep_record["reward_decomposition"] = {
-                "grid_import_cost": sum(x["grid_import_cost"] for x in economics.values()),
-                "grid_export_revenue": sum(x["grid_export_revenue"] for x in economics.values()),
-                "degradation_cost": sum(x["battery_degradation_cost"] for x in economics.values()),
-                "unmet_load_cost": sum(x["unmet_load_cost"] for x in economics.values()),
-                "curtailment_cost": sum(x["renewable_curtailment_cost"] for x in economics.values()),
-                "terminal_soc_penalty": sum(x["terminal_soc_penalty"] for x in economics.values()),
-            }
+            if ep_record.get("reward_v2_cost_breakdown") is not None:
+                ep_record["reward_decomposition"] = dict(
+                    ep_record["reward_v2_cost_breakdown"]
+                )
+            else:
+                ep_record["reward_decomposition"] = {
+                    "grid_import_cost": sum(x["grid_import_cost"] for x in economics.values()),
+                    "grid_export_revenue": sum(x["grid_export_revenue"] for x in economics.values()),
+                    "degradation_cost": sum(x["battery_degradation_cost"] for x in economics.values()),
+                    "unmet_load_cost": sum(x["unmet_load_cost"] for x in economics.values()),
+                    "curtailment_cost": sum(x["renewable_curtailment_cost"] for x in economics.values()),
+                    "terminal_soc_penalty": sum(x["terminal_soc_penalty"] for x in economics.values()),
+                }
             history.append(ep_record)
             rolling = {
                 "team_profit_ma_50": _moving(history, "team_profit", 50),
@@ -781,7 +790,9 @@ def train(args: argparse.Namespace) -> dict[str, object]:
                     val_summary, episode_index + 1, candidate=candidate, is_best=is_best,
                 ))
                 write_json(run_dir / "validation_history.json", validation_history)
-                ep_record["best_validation_profit"] = best_validation_score
+                ep_record["best_validation_objective"] = best_validation_score
+                if selector.objective_key == "team_profit_mean":
+                    ep_record["best_validation_profit"] = best_validation_score
 
             should_evaluate_learning_curve = learning_curve_enabled and (
                 total_steps >= next_learning_curve_step
@@ -884,10 +895,10 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     )
 
     algorithm.save(final_checkpoint)
-    if validation_enabled and selector.mode == "constrained_profit":
+    if validation_enabled and selector.requires_eligible_checkpoint:
         if best_candidate is None or not best_candidate.eligible:
             error = RuntimeError(
-                "No service-eligible validation checkpoint was found; "
+                "No physically eligible validation checkpoint was found; "
                 "refusing to use any existing/final checkpoint as best_model.pt."
             )
             write_training_error(
@@ -927,7 +938,11 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     elif not best_checkpoint.exists():
         algorithm.save(best_checkpoint)
         best_episode = training_episodes
-        best_validation_score = float(history[-1]["team_profit"])
+        fallback_key = (
+            "team_reward" if selector.objective_key == "team_reward_mean"
+            else "team_profit"
+        )
+        best_validation_score = float(history[-1][fallback_key])
     training_seconds = prior_training_seconds + time.perf_counter() - train_started
     checkpoint_selection = {
         "selection_mode": selector.mode,
@@ -958,7 +973,11 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         "final_100_profit_std": float(np.std(final_100)),
         "final_500_profit_mean": float(np.mean(final_500)),
         "final_500_profit_std": float(np.std(final_500)),
-        "best_validation_profit_mean": best_validation_score,
+        "best_validation_objective": best_validation_score,
+        "best_validation_profit_mean": (
+            best_validation_score
+            if selector.objective_key == "team_profit_mean" else None
+        ),
         "checkpoint_selection": checkpoint_selection,
         "learning_curve_enabled": learning_curve_enabled,
         "learning_curve_evaluations": len(learning_curve_history),
