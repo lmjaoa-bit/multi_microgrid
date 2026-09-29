@@ -747,7 +747,7 @@ def solve_dispatch(
     if include_dr and not generalized and status != "kOptimal":
         raise RuntimeError(f"Full-information oracle not proven optimal: {status}")
     if not solution_valid:
-        raise RuntimeError(f"Dispatch oracle has no feasible incumbent: {status}")
+        raise RuntimeError(f"Dispatch oracle failed: no feasible incumbent ({status})")
     solver_info = model.getInfo()
     solver_objective_value = float(model.getObjectiveValue())
     solver_bound_raw = getattr(solver_info, "mip_dual_bound", None)
@@ -939,6 +939,14 @@ def solve_dispatch(
     total_profit = float(sum(profit_by.values()))
     result_frame = pd.DataFrame(rows)
 
+    def _row_finite_or_zero(row: Mapping[str, Any], key: str) -> float:
+        value = row.get(key, 0.0)
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return 0.0
+        return parsed if np.isfinite(parsed) else 0.0
+
     generalized_breakdown = None
     replayed_generalized_cost = None
     if generalized:
@@ -977,12 +985,12 @@ def solve_dispatch(
                     grid_import * float(carbon_factors[t]) * dt
                 )
                 raw["unmet_kwh"] += float(row["unmet_load_kw"]) * dt
-                raw["comfort_degree_hours"] += float(
-                    row.get("comfort_degree_hours", 0.0)
+                raw["comfort_degree_hours"] += _row_finite_or_zero(
+                    row, "comfort_degree_hours"
                 )
                 raw["ev_departure_shortfall_kwh"] += sum(
-                    float(value)
-                    for key, value in row.items()
+                    _row_finite_or_zero(row, str(key))
+                    for key in row.index
                     if str(key).startswith("ev_")
                     and str(key).endswith("_departure_shortfall_kwh")
                 )
