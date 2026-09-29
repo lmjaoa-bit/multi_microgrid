@@ -13,7 +13,7 @@ algorithm:
   actor_lr: 0.0002
   actor_max_grad_norm: 1.0
   critic_lr: 0.0003
-  gamma: 0.99
+  gamma: 1.0
   tau: 0.005
   policy_delay: 2
   target_policy_noise: 0.2
@@ -29,6 +29,8 @@ algorithm:
     num_layers: 2
     hidden_dim: 64
     forecast_horizon: 8
+    include_peer_forecast: true
+    peer_forecast_features: [energy_balance]
 runtime:
   device: cuda
   cpu_threads: 4
@@ -50,14 +52,16 @@ validation:
   deterministic_policy: true
   fixed_scenarios: true
   selection:
-    mode: constrained_profit
-    objective: team_profit_mean
+    mode: physical_constrained_objective
+    objective: team_reward_mean
     constraints:
-      strict_feasible_day_rate: {min: 1.0, atol: 1.0e-7}
+      physical_feasible_day_rate: {min: 1.0, atol: 1.0e-7}
+      power_balance_residual_max_kw: {max: 0.0, atol: 1.0e-7}
+      source_balance_residual_max_kw: {max: 0.0, atol: 1.0e-7}
+      p2p_balance_residual_max_kw: {max: 0.0, atol: 1.0e-7}
+      device_bound_violation_max: {max: 0.0, atol: 1.0e-7}
+      grid_export_max_kw: {max: 0.0, atol: 1.0e-7}
       unmet_energy_mean_kwh: {max: 0.0, atol: 1.0e-7}
-      hvac_comfort_rate: {min: 1.0, atol: 1.0e-7}
-      mill_downstream_service_completion_rate: {min: 1.0, atol: 1.0e-7}
-      ev_departure_success_rate: {min: 1.0, atol: 1.0e-7}
 logging:
   diagnostic_interval: 20
   incremental_history: true
