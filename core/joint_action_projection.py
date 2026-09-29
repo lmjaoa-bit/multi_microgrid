@@ -19,6 +19,7 @@ class JointActionProjector:
 
     LEGACY_SEMANTICS = "single_dispatch_dr_v2"
     RENEWABLE_FIRST_SEMANTICS = "single_dispatch_dr_v3"
+    REWARD_V2_SEMANTICS = "single_dispatch_dr_v4_instantaneous_physical"
 
     def __init__(self, config, schema, normalizers, price_norm):
         self.ids = [str(mg["id"]) for mg in config["microgrids"]]
@@ -31,11 +32,15 @@ class JointActionProjector:
         )
         if self.dispatch_mode not in {"legacy_local_first", "renewable_load_first"}:
             raise ValueError(f"Unsupported dispatch.priority_mode: {self.dispatch_mode!r}")
-        self.semantics = (
-            self.RENEWABLE_FIRST_SEMANTICS
-            if self.dispatch_mode == "renewable_load_first"
-            else self.LEGACY_SEMANTICS
-        )
+        reward_version = str(config.get("reward", {}).get("semantics_version", ""))
+        if reward_version == "generalized_system_cost_v2":
+            self.semantics = self.REWARD_V2_SEMANTICS
+        else:
+            self.semantics = (
+                self.RENEWABLE_FIRST_SEMANTICS
+                if self.dispatch_mode == "renewable_load_first"
+                else self.LEGACY_SEMANTICS
+            )
         self.ess = SingleDispatchProjector(config, schema, normalizers, price_norm)
         self.p2p_enabled = bool(
             config.get("env", {}).get("mode", "cooperative") == "cooperative"
