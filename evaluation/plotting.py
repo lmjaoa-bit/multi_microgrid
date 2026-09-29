@@ -22,6 +22,22 @@ LIGHT_GREY = "#E6E9EB"
 PALETTE = [BLUE, GOLD, ORANGE, OLIVE, PINK]
 
 
+def _plot_safe_label(value: Any) -> str:
+    """Return a font-independent display label for the ordinary Transformer.
+
+    Stored run IDs and metadata remain unchanged.  CI plots cannot assume a
+    CJK-capable font is installed, so the known current-method label gets an
+    ASCII rendering at presentation time only.
+    """
+    text = str(value)
+    if text in {"普通 T", "普通T"}:
+        return "Ordinary Transformer"
+    for prefix in ("普通T_", "普通 T_"):
+        if text.startswith(prefix):
+            return "OrdinaryT_" + text[len(prefix):]
+    return text
+
+
 def _read_json(path: Path, default: Any = None) -> Any:
     if not path.exists():
         return default
@@ -454,7 +470,7 @@ def generate_figures(
             "semantics_version", "legacy"
         )
     )
-    algorithm_label = str(
+    algorithm_label = _plot_safe_label(
         summary.get("algorithm_display_name")
         or metadata.get("algorithm_display_name")
         or metadata.get("algorithm")
@@ -480,7 +496,7 @@ def generate_figures(
     vs_idle = summary.get("comparisons", {}).get("vs_idle", {})
     dashboard_rows = [
         ("Algorithm", algorithm_label),
-        ("Run ID", metadata.get("run_id", root.name)),
+        ("Run ID", _plot_safe_label(metadata.get("run_id", root.name))),
         ("Seed", metadata.get("seed", summary.get("test_seed"))),
         ("Checkpoint", Path(str(summary.get("checkpoint_used", ""))).name),
         ("Checkpoint Episode", summary.get("checkpoint_episode")),
