@@ -7,7 +7,11 @@ import pandas as pd
 import pytest
 import yaml
 
-from evaluation.plotting import _training_convergence_figure, generate_figures
+from evaluation.plotting import (
+    _plot_safe_label,
+    _training_convergence_figure,
+    generate_figures,
+)
 from evaluation.service_reliability import augment_run_outputs
 
 
@@ -230,3 +234,14 @@ def test_service_augmentation_preserves_reward_and_selection(tmp_path: Path):
     # Service augmentation may add strict service metrics, but it must not
     # rewrite the saved physical-feasibility field.
     assert after_daily["feasible_day"].tolist() == before_daily["feasible_day"].tolist()
+
+
+
+def test_ordinary_transformer_plot_label_is_font_safe():
+    assert _plot_safe_label("普通 T") == "Ordinary Transformer"
+    assert _plot_safe_label("普通T") == "Ordinary Transformer"
+    assert (
+        _plot_safe_label("普通T_2026-09-29_05-13-30_seed42")
+        == "OrdinaryT_2026-09-29_05-13-30_seed42"
+    )
+    assert _plot_safe_label("MATD3") == "MATD3"
