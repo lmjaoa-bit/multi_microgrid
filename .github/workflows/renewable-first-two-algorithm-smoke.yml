@@ -105,6 +105,7 @@ jobs:
       - name: Verify updates checkpoints contracts and MILP settlement
         run: |
           python - <<'PY'
+          import hashlib
           import json
           import math
           from pathlib import Path
@@ -133,8 +134,15 @@ jobs:
               actor = [float(x['actor_loss']) for x in history if x.get('actor_loss') is not None]
               assert critic and all(math.isfinite(x) for x in critic)
               assert actor and all(math.isfinite(x) for x in actor)
-              assert (run_dir / 'checkpoints' / 'best_model.pt').is_file()
-              assert (run_dir / 'checkpoints' / 'final_model.pt').is_file()
+              best_path = run_dir / 'checkpoints' / 'best_model.pt'
+              final_path = run_dir / 'checkpoints' / 'final_model.pt'
+              assert best_path.is_file()
+              assert final_path.is_file()
+              best_sha = hashlib.sha256(best_path.read_bytes()).hexdigest()
+              assert summary['checkpoint_used'].endswith('/checkpoints/best_model.pt')
+              assert summary['checkpoint_sha256'] == best_sha
+              assert len(summary['environment_config_sha256']) == 64
+              assert len(summary['algorithm_config_sha256']) == 64
               pngs = sorted((run_dir / 'figures').glob('*.png'))
               pdfs = sorted((run_dir / 'figures').glob('*.pdf'))
               assert len(pngs) == 15, [p.name for p in pngs]
@@ -146,6 +154,7 @@ jobs:
               assert summary['generalized_reference_enabled'] is True
               assert int(summary['generalized_reference_solve_count']) == 2
               assert int(summary['generalized_reference_success_count']) == 2
+              assert float(summary['generalized_reference_cost_mean']) > 0.0
               contract = metadata['experiment_contract']
               contracts[slug] = contract
               assert contract['dispatch_semantics'] == 'renewable_load_first_v2_no_grid_export'
