@@ -941,10 +941,14 @@ def evaluate(
         "generalized_reference_enabled": bool(
             run_milp and getattr(env, "reward_v2_enabled", False)
         ),
-        "generalized_reference_solve_count": int(sum(
-            row.get("generalized_reference_available") is not None
+        "generalized_reference_solve_count": (
+            len(daily_rows)
+            if run_milp and getattr(env, "reward_v2_enabled", False) else 0
+        ),
+        "generalized_reference_success_count": int(sum(
+            bool(row.get("generalized_reference_available", False))
             for row in daily_rows
-        )) if getattr(env, "reward_v2_enabled", False) else 0,
+        )),
         "team_profit_statistics": matd3_summary["team_profit_statistics"],
         "team_reward_statistics": matd3_summary["team_reward_statistics"],
         "generalized_system_cost_mean": matd3_summary.get(
