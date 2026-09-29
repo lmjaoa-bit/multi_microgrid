@@ -16,6 +16,7 @@ from algorithms.matd3_hierarchical_transformer.actor import (
     HierarchicalTransformerActor,
 )
 from core.joint_action_projection import JointActionProjector
+from core.reward_v2 import build_reward_v2_contract
 
 
 class Matd3HierarchicalTransformer(MATD3):
@@ -145,6 +146,26 @@ class Matd3HierarchicalTransformer(MATD3):
             else f"local_h{forecast_horizon}_v1"
         )
         self.peer_forecast_features = peer_forecast_features
+        self.reward_v2_contract = None
+        if getattr(env, "reward_v2_enabled", False):
+            reward_normalizers = {
+                "by_microgrid": copy.deepcopy(env.obs_builder.norm),
+                "team_power_scale_kw": float(env.obs_builder.team_power_scale_kw),
+                "carbon_factor_scale": float(env.obs_builder.carbon_factor_scale),
+            }
+            self.reward_v2_contract = build_reward_v2_contract(
+                env.config,
+                self.observation_schemas,
+                self.state_schema,
+                reward_normalizers,
+                algorithm_slug="matd3_hierarchical_transformer",
+                actor_forecast_context_version=self.actor_forecast_context_version,
+                peer_orders={
+                    mg: [peer for peer in self.agent_ids if peer != mg]
+                    for mg in self.agent_ids
+                },
+                mask_semantics="shared_forecast_valid_zero_before_encode_v1",
+            )
 
         # 3 Independent Actors (one per microgrid)
         self.actors = nn.ModuleDict({
@@ -398,6 +419,9 @@ class Matd3HierarchicalTransformer(MATD3):
             "projection_signature": self.projection_signature,
             "observation_schemas": self.observation_schemas,
             "state_schema": self.state_schema,
+            "actor_forecast_context_version": self.actor_forecast_context_version,
+            "peer_forecast_features": list(self.peer_forecast_features),
+            "reward_v2_contract": copy.deepcopy(self.reward_v2_contract),
             "actors": self.actors.state_dict(),
             "target_actors": self.target_actors.state_dict(),
             "critics": self.critics.state_dict(),
@@ -407,6 +431,14 @@ class Matd3HierarchicalTransformer(MATD3):
 
     def load(self, path: str | Path) -> None:
         checkpoint = torch.load(Path(path), map_location=self.device, weights_only=False)
+        if self.reward_v2_contract is not None:
+            saved_contract = checkpoint.get("reward_v2_contract")
+            if saved_contract is None:
+                raise ValueError("Reward V2 checkpoint contract is missing")
+            if saved_contract != self.reward_v2_contract:
+                raise ValueError("Reward V2 checkpoint contract mismatch")
+            if checkpoint.get("actor_forecast_context_version") != self.actor_forecast_context_version:
+                raise ValueError("Actor forecast context version mismatch")
         self._validate_actor_feature_metadata(checkpoint)
         slug = checkpoint.get("algorithm_slug")
         if slug != "matd3_hierarchical_transformer":
