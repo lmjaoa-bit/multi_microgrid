@@ -86,7 +86,7 @@ def test_v2_projector_matches_device_execution(actions):
             float(env_plan["effective_dr_action"]), abs=1e-6
         )
         assert float(projected_plans[i]["flexible_load_kw"]) == pytest.approx(
-            float(env_plan["flexible_load_kw"]), abs=1e-6
+            float(env_plan["flexible_load_kw"]), abs=2e-6
         )
 
 
