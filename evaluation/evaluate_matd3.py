@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import warnings
 from pathlib import Path
@@ -26,6 +27,14 @@ from utils.metrics_collector import (
     write_csv,
     write_json,
 )
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _legacy_summary(episodes: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -952,6 +961,9 @@ def evaluate(
             "definition": "same dates, initial SOC configuration, and per-day environment seeds",
         },
         "checkpoint_used": str(chk_path),
+        "checkpoint_sha256": _sha256_file(chk_path),
+        "environment_config_sha256": _sha256_file(cfg_path.resolve()),
+        "algorithm_config_sha256": _sha256_file(alg_path.resolve()),
         "checkpoint_episode": metadata.get("best_episode"),
         "checkpoint_selection_metric": metadata.get("selection_metric", "validation_team_profit_mean"),
         "coalition_milp_enabled": bool(run_milp),
@@ -967,6 +979,9 @@ def evaluate(
             bool(row.get("generalized_reference_available", False))
             for row in daily_rows
         )),
+        "generalized_reference_cost_mean": _mean(
+            daily_rows, "generalized_reference_cost"
+        ) if run_milp and getattr(env, "reward_v2_enabled", False) else None,
         "team_profit_statistics": matd3_summary["team_profit_statistics"],
         "team_reward_statistics": matd3_summary["team_reward_statistics"],
         "generalized_system_cost_mean": matd3_summary.get(
