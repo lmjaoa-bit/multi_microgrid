@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 import yaml
 
 from algorithms.registry import get_algorithm_spec
@@ -86,7 +87,9 @@ def test_reference_evaluation_saves_complete_hourly_and_daily_results(tmp_path: 
     assert (tmp_path / "dr_reference_hourly_trajectories" / f"{day}.csv").is_file()
     daily_frame = pd.read_csv(tmp_path / "dr_reference_daily_metrics.csv")
     assert daily_frame.loc[0, "date"] == day
-    assert daily_frame.loc[0, "reference_team_profit"] == daily[0]["team_profit"]
+    assert daily_frame.loc[0, "reference_team_profit"] == pytest.approx(
+        daily[0]["team_profit"], rel=1e-12, abs=1e-12
+    )
 
 
 def test_reference_evaluation_and_save_is_one_formal_test_operation(tmp_path: Path) -> None:
