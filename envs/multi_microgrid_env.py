@@ -23,6 +23,7 @@ from core.grid_settlement import ExternalGrid
 from core.microgrid_core import MicrogridCore
 from core.observation import ObservationBuilder
 from core.profiles import HeterogeneousProfileModel
+from core.reward_v2 import calculate_reward_v2, resolve_reward_v2_config
 from core.types import CoordinationHistory
 from core.tariffs import prices_from_row
 from envs.cooperative_energy_sharing import CooperativeEnergySharing
@@ -52,6 +53,8 @@ class MultiMicrogridEnv:
             )
         )
         self.dr_enabled = self.action_design == "single_dispatch_dr"
+        self.reward_v2 = resolve_reward_v2_config(self.config)
+        self.reward_v2_enabled = self.reward_v2 is not None
         sharing_cfg = self.config.get("ess_sharing", {})
         self.ess_sharing_control_mode = str(sharing_cfg.get("control_mode", "single_dispatch"))
         self.ess_sharing_observation_mode = str(sharing_cfg.get("observation_mode", "cross_microgrid"))
@@ -135,6 +138,7 @@ class MultiMicrogridEnv:
         self._last_observations: dict[str, np.ndarray] | None = None
         self._last_global_state: np.ndarray | None = None
         self._terminated = False
+        self.daily_load_peak_kw = 0.0
 
     @property
     def action_dim(self) -> int:
@@ -160,6 +164,9 @@ class MultiMicrogridEnv:
             "dispatch_priority_mode": self.dispatch_priority_mode,
             "action_semantics": getattr(
                 self.action_projector, "semantics", "unknown"
+            ),
+            "reward_semantics_version": (
+                self.reward_v2["semantics_version"] if self.reward_v2 is not None else "legacy"
             ),
         }
 
@@ -275,6 +282,22 @@ class MultiMicrogridEnv:
                 })
         return result
 
+    def _public_state(self, index: int) -> dict[str, float]:
+        if self.episode_context_df is None:
+            raise RuntimeError("Call reset() first")
+        if self.reward_v2_enabled:
+            bounded = min(max(0, int(index)), self.episode_length - 1)
+            row = self.episode_df.iloc[bounded]
+            carbon = float(row["grid_carbon_factor_kg_per_kwh"])
+        else:
+            bounded = min(max(0, int(index)), len(self.episode_context_df) - 1)
+            row = self.episode_context_df.iloc[bounded]
+            carbon = float(row.get("grid_carbon_factor_kg_per_kwh", 0.0))
+        return {
+            "team_load_peak_so_far": float(self.daily_load_peak_kw),
+            "grid_carbon_factor": carbon,
+        }
+
     def _observations(
         self,
         exogenous_by_microgrid: Mapping[str, Mapping[str, float]] | None = None,
@@ -299,6 +322,7 @@ class MultiMicrogridEnv:
                 soc_by_microgrid=soc_by_microgrid,
                 battery_flex_by_microgrid=battery_flex,
                 dr_state_by_microgrid=dr_states,
+                public_state=self._public_state(index),
             )
             for mg in self.agent_ids
         }
@@ -321,6 +345,7 @@ class MultiMicrogridEnv:
             self.history,
             exogenous_by_microgrid=current,
             dr_state_by_microgrid=dr_states,
+            public_state=self._public_state(index),
             dtype=dtype,
         )
 
@@ -357,6 +382,7 @@ class MultiMicrogridEnv:
                 )
         self.t = 0
         self._terminated = False
+        self.daily_load_peak_kw = 0.0
         self.history = self._empty_history()
         current = self._exogenous_at(0)
         dr_states = self._dr_states(0)
@@ -545,6 +571,7 @@ class MultiMicrogridEnv:
             mg: self.dr_devices[mg].plan(float(decoded[mg]["dr"]), self.t)
             for mg in self.agent_ids
         }
+        peak_before_kw = float(self.daily_load_peak_kw)
         actual_current: dict[str, dict[str, float]] = {}
         for mg in self.agent_ids:
             base = float(base_current[mg]["load_kw"])
@@ -556,6 +583,12 @@ class MultiMicrogridEnv:
                 "actual_load_kw": base + flexible,
                 "load_kw": base + flexible,
             }
+
+        team_actual_load_kw = float(
+            sum(float(actual_current[mg]["actual_load_kw"]) for mg in self.agent_ids)
+        )
+        delta_peak_kw = max(0.0, team_actual_load_kw - peak_before_kw)
+        peak_after_kw = max(peak_before_kw, team_actual_load_kw)
 
         raw_array = np.asarray(
             [actions[mg] for mg in self.agent_ids], dtype=np.float64
@@ -883,6 +916,11 @@ class MultiMicrogridEnv:
             )
             costs[mg]["ev_departure_penalty"] = departure_penalty
             costs[mg]["physical_profit"] -= departure_penalty
+            costs[mg]["operating_margin_before_penalties"] = float(
+                costs[mg]["grid_export_revenue"]
+                - costs[mg]["grid_import_cost"]
+                - costs[mg]["battery_degradation_cost"]
+            )
             costs[mg]["individual_accounting_profit"] = float(
                 costs[mg]["physical_profit"] + transfer
             )
@@ -904,8 +942,62 @@ class MultiMicrogridEnv:
         team_profit = sum(
             costs[mg]["physical_profit"] for mg in self.agent_ids
         )
-        team_reward = team_profit / self.accounting.reward_scale
+        operating_margin_before_penalties = sum(
+            costs[mg]["operating_margin_before_penalties"] for mg in self.agent_ids
+        )
+        reward_v2_raw = None
+        reward_v2_breakdown = None
+        generalized_system_cost = None
+        if self.reward_v2_enabled:
+            carbon_factor = float(row["grid_carbon_factor_kg_per_kwh"])
+            reward_v2_raw = {
+                "grid_import_cost": float(sum(
+                    costs[mg]["grid_import_cost"] for mg in self.agent_ids
+                )),
+                "battery_degradation_cost": float(sum(
+                    costs[mg]["battery_degradation_cost"] for mg in self.agent_ids
+                )),
+                "curtailment_kwh": float(sum(
+                    settlements[mg]["renewable_curtailment_kw"] * self.delta_t
+                    for mg in self.agent_ids
+                )),
+                "carbon_kg": float(
+                    carbon_factor
+                    * sum(
+                        settlements[mg]["grid_import_kw"] * self.delta_t
+                        for mg in self.agent_ids
+                    )
+                ),
+                "delta_peak_kw": float(delta_peak_kw),
+                "mill_unserved_t": float(sum(
+                    item.get("downstream_unserved_t", 0.0)
+                    for item in dr_devices_after.values()
+                )),
+                "comfort_degree_hours": float(sum(
+                    item.get("comfort_degree_hours", 0.0)
+                    for item in dr_devices_after.values()
+                )),
+                "ev_departure_shortfall_kwh": float(sum(
+                    item.get("ev_departure_shortfall_kwh", 0.0)
+                    for item in dr_devices_after.values()
+                )),
+                "unmet_kwh": float(sum(
+                    settlements[mg]["unmet_load_kw"] * self.delta_t
+                    for mg in self.agent_ids
+                )),
+            }
+            reward_v2_breakdown = calculate_reward_v2(
+                raw=reward_v2_raw,
+                rates=self.reward_v2,
+            )
+            generalized_system_cost = float(
+                reward_v2_breakdown["generalized_system_cost"]
+            )
+            team_reward = float(reward_v2_breakdown["team_reward"])
+        else:
+            team_reward = team_profit / self.accounting.reward_scale
         rewards = {mg: float(team_reward) for mg in self.agent_ids}
+        self.daily_load_peak_kw = float(peak_after_kw)
 
         requested_buy = sum(
             float(plans[mg]["p2p_load_demand_kw"])
@@ -972,7 +1064,21 @@ class MultiMicrogridEnv:
             "devices": devices,
             "costs": costs,
             "team_profit": float(team_profit),
+            "operating_margin_before_penalties": float(
+                operating_margin_before_penalties
+            ),
             "team_reward": float(team_reward),
+            "generalized_system_cost": generalized_system_cost,
+            "reward_v2_raw": reward_v2_raw,
+            "reward_v2_breakdown": reward_v2_breakdown,
+            "reward_semantics_version": (
+                self.reward_v2["semantics_version"]
+                if self.reward_v2 is not None else "legacy"
+            ),
+            "team_actual_load_kw": float(team_actual_load_kw),
+            "peak_before_kw": float(peak_before_kw),
+            "delta_peak_kw": float(delta_peak_kw),
+            "peak_after_kw": float(peak_after_kw),
             "shaping_reward": 0.0,
             "terminal_soc_penalty": {
                 mg: float(terminal_breakdown[mg]["total_penalty"])
