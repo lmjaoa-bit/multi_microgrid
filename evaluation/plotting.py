@@ -229,6 +229,7 @@ def _training_convergence_figure(
     validation: Sequence[Mapping[str, Any]],
     *,
     warmup_steps: int | float | None,
+    reward_semantics_version: str = "legacy",
 ) -> Any:
     import matplotlib.pyplot as plt
 
@@ -241,24 +242,83 @@ def _training_convergence_figure(
         [item.get("episode", index + 1) for index, item in enumerate(training)],
         dtype=float,
     )
-    raw = np.asarray([item.get("team_profit", np.nan) for item in training], dtype=float)
+    is_v2 = reward_semantics_version == "generalized_system_cost_v2"
+    metric_key = "team_reward" if is_v2 else "team_profit"
+    validation_key = "team_reward_mean" if is_v2 else "team_profit_mean"
+    raw = np.asarray(
+        [item.get(metric_key, np.nan) for item in training], dtype=float
+    )
     moving = pd.Series(raw).rolling(100, min_periods=1).mean().to_numpy()
-    ax.plot(episodes, raw, color=BLUE, alpha=0.18, linewidth=0.8,
-            label="Training Team Profit (raw)")
-    ax.plot(episodes, moving, color=BLUE, linewidth=2.3, label="Team Profit MA100")
+    raw_label = (
+        "Training Generalized Return (raw)"
+        if is_v2 else "Training Team Profit (raw)"
+    )
+    ma_label = "Generalized Return MA100" if is_v2 else "Team Profit MA100"
+    validation_label = (
+        "Validation Mean Generalized Return"
+        if is_v2 else "Validation Mean Team Profit"
+    )
+    ax.plot(
+        episodes, raw, color=BLUE, alpha=0.18, linewidth=0.8,
+        label=raw_label,
+    )
+    ax.plot(episodes, moving, color=BLUE, linewidth=2.3, label=ma_label)
 
-    if validation:
-        val_x = [item["episode"] for item in validation]
-        val_y = [item["team_profit_mean"] for item in validation]
-        ax.plot(val_x, val_y, color=GOLD, marker="o", linewidth=1.8,
-                label="Validation Mean Team Profit")
-        best = max(validation, key=lambda item: float(item["team_profit_mean"]))
-        ax.scatter([best["episode"]], [best["team_profit_mean"]], color=ORANGE, zorder=5)
+    valid_validation = [
+        item for item in validation
+        if item.get(validation_key) is not None
+        and np.isfinite(float(item[validation_key]))
+    ]
+    if valid_validation:
+        val_x = [item["episode"] for item in valid_validation]
+        val_y = [item[validation_key] for item in valid_validation]
+        ax.plot(
+            val_x, val_y, color=GOLD, marker="o", linewidth=1.8,
+            label=validation_label,
+        )
+        best = max(
+            valid_validation, key=lambda item: float(item[validation_key])
+        )
+        ax.scatter(
+            [best["episode"]], [best[validation_key]], color=ORANGE, zorder=5
+        )
         ax.annotate(
-            f"Best: ep {best['episode']}\n{best['team_profit_mean']:.1f}",
-            (best["episode"], best["team_profit_mean"]),
+            f"Best: ep {best['episode']}\n{float(best[validation_key]):.3f}",
+            (best["episode"], best[validation_key]),
             xytext=(8, 12), textcoords="offset points", fontsize=8,
         )
+
+    if is_v2:
+        accounting = np.asarray(
+            [item.get("team_profit", np.nan) for item in training], dtype=float
+        )
+        accounting_ma = (
+            pd.Series(accounting).rolling(100, min_periods=1).mean().to_numpy()
+        )
+        ax_profit = ax.twinx()
+        ax_profit.plot(
+            episodes,
+            accounting_ma,
+            color=OLIVE,
+            linewidth=1.5,
+            linestyle="--",
+            label="Accounting Profit MA100",
+        )
+        val_profit = [
+            item for item in validation
+            if item.get("team_profit_mean") is not None
+            and np.isfinite(float(item["team_profit_mean"]))
+        ]
+        if val_profit:
+            ax_profit.plot(
+                [item["episode"] for item in val_profit],
+                [item["team_profit_mean"] for item in val_profit],
+                color=PINK,
+                linewidth=1.2,
+                marker=".",
+                label="Validation Mean Accounting Profit",
+            )
+        ax_profit.set_ylabel("Accounting Profit")
 
     warmup_episode = _warmup_episode_position(training, warmup_steps)
     if warmup_episode is not None:
@@ -270,11 +330,19 @@ def _training_convergence_figure(
 
     ax.set_title("Training Convergence")
     ax.set_xlabel("Training Episode")
-    ax.set_ylabel("Team Profit")
+    ax.set_ylabel(
+        "Generalized Return (-generalized cost / scale)"
+        if is_v2 else "Team Profit"
+    )
     ax.grid(axis="y")
     if len(episodes) > 1:
         ax.set_xlim(left=1.0, right=float(episodes[-1]))
-    ax.legend(loc="best")
+    if is_v2 and len(fig.axes) > 1:
+        handles, labels = ax.get_legend_handles_labels()
+        handles2, labels2 = fig.axes[1].get_legend_handles_labels()
+        ax.legend(handles + handles2, labels + labels2, loc="best")
+    else:
+        ax.legend(loc="best")
     return fig
 
 
@@ -401,8 +469,15 @@ def generate_figures(
         ("Seed", metadata.get("seed", summary.get("test_seed"))),
         ("Checkpoint", Path(str(summary.get("checkpoint_used", ""))).name),
         ("Checkpoint Episode", summary.get("checkpoint_episode")),
-        ("Joint Team Profit", summary.get("joint_team_profit_mean")),
-        ("Gain vs Idle", vs_idle.get("gain_mean_abs")),
+        (
+            "Accounting Joint Team Profit"
+            if reward_semantics_version == "generalized_system_cost_v2"
+            else "Joint Team Profit",
+            summary.get("joint_team_profit_mean"),
+        ),
+        ("Generalized Cost", summary.get("generalized_system_cost_mean"))
+        if reward_semantics_version == "generalized_system_cost_v2"
+        else ("Gain vs Idle", vs_idle.get("gain_mean_abs")),
         ("Win Rate vs Idle", None if vs_idle.get("win_rate") is None else f"{100*vs_idle['win_rate']:.1f}%"),
         ("Cooperation Surplus", summary.get("cooperation_surplus_mean")),
         ("Cooperation Gain", None if summary.get("cooperation_gain_pct_mean") is None else f"{summary['cooperation_gain_pct_mean']:.1f}%"),
@@ -435,7 +510,19 @@ def generate_figures(
         if isinstance(loaded_snapshot, Mapping):
             config_snapshot = loaded_snapshot
     warmup_steps = config_snapshot.get("algorithm", {}).get("algorithm", {}).get("warmup_steps")
-    fig = _training_convergence_figure(training, validation, warmup_steps=warmup_steps)
+    reward_semantics_version = str(
+        summary.get("reward_semantics_version")
+        or metadata.get("reward_semantics_version")
+        or config_snapshot.get("environment", {}).get("reward", {}).get(
+            "semantics_version", "legacy"
+        )
+    )
+    fig = _training_convergence_figure(
+        training,
+        validation,
+        warmup_steps=warmup_steps,
+        reward_semantics_version=reward_semantics_version,
+    )
     fig.tight_layout()
     written += _save(fig, figure_dir, "01_training_convergence", formats)
 
@@ -451,7 +538,14 @@ def generate_figures(
     mean_std = [_mean_std(daily, field) for field in fields]
     written += _save(
         _bar_figure(labels, [item[0] for item in mean_std], [item[1] for item in mean_std],
-                    title="Joint Team Profit", ylabel="Average Team Profit (Mean ± 1 Std)"),
+                    title=(
+                        "Accounting Joint Team Profit"
+                        if reward_semantics_version == "generalized_system_cost_v2"
+                        else "Joint Team Profit"
+                    ),
+                    ylabel="Average Accounting Profit (Mean ± 1 Std)"
+                    if reward_semantics_version == "generalized_system_cost_v2"
+                    else "Average Team Profit (Mean ± 1 Std)"),
         figure_dir, "02_joint_team_profit", formats,
     )
 
