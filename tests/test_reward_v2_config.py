@@ -16,7 +16,18 @@ from experiments.profiles import ROOT
 
 
 def _legacy_config():
-    return yaml.safe_load((ROOT / "configs/cooperative.yaml").read_text(encoding="utf-8"))
+    cfg = yaml.safe_load((ROOT / "configs/cooperative.yaml").read_text(encoding="utf-8"))
+    cfg.pop("reward", None)
+    for key in (
+        "curtailment_price_per_kwh",
+        "carbon_price_per_kg",
+        "peak_price_per_kw",
+        "mill_unserved_price_per_t",
+        "comfort_price_per_degree_hour",
+        "ev_shortfall_price_per_kwh",
+    ):
+        cfg.get("cost", {}).pop(key, None)
+    return cfg
 
 
 def _v2_config():
@@ -147,3 +158,15 @@ def test_reward_v2_pure_numeric_fixture():
     result = calculate_reward_v2(raw=raw, rates=rates)
     assert result["generalized_system_cost"] == pytest.approx(54.0)
     assert result["team_reward"] == pytest.approx(-5.4)
+
+
+
+def test_locked_v2_requires_calibration_report_hash():
+    cfg = _v2_config()
+    cfg["reward"]["calibration_status"] = "locked"
+    with pytest.raises(ValueError, match="calibration_report_sha256"):
+        resolve_reward_v2_config(cfg)
+
+    cfg["reward"]["calibration_report_sha256"] = "a" * 64
+    resolved = resolve_reward_v2_config(cfg)
+    assert resolved["calibration_report_sha256"] == "a" * 64
