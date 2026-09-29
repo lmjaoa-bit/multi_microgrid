@@ -88,7 +88,7 @@ def _finite_training_diagnostics(run_dir: Path, gamma: float) -> dict[str, Any]:
 
 
 def _selected_frame(env: MultiMicrogridEnv, days: list[str]) -> pd.DataFrame:
-    frame = env.data.frame.copy()
+    frame = env.data.df.copy()
     dates = pd.to_datetime(frame["timestamp"]).dt.date.astype(str)
     return frame.loc[dates.isin(days)].reset_index(drop=True)
 
