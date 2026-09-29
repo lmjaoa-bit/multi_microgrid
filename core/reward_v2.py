@@ -105,6 +105,15 @@ def resolve_reward_v2_config(
         raise ValueError(
             "reward.calibration_status must be diagnostic or locked for Reward V2"
         )
+    calibration_report_sha256 = reward.get("calibration_report_sha256")
+    if status == "locked":
+        value = str(calibration_report_sha256 or "").lower()
+        if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
+            raise ValueError(
+                "locked Reward V2 requires reward.calibration_report_sha256 "
+                "as a 64-character lowercase SHA256"
+            )
+        calibration_report_sha256 = value
 
     time_cfg = config.get("time", {})
     if (
@@ -137,6 +146,7 @@ def resolve_reward_v2_config(
     resolved = {
         "semantics_version": REWARD_V2_VERSION,
         "calibration_status": status,
+        "calibration_report_sha256": calibration_report_sha256,
         "curtailment_price_per_kwh": float(curtail),
         "carbon_price_per_kg": _finite_nonnegative(
             cost.get("carbon_price_per_kg"), "cost.carbon_price_per_kg"
