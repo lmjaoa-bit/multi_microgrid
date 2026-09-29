@@ -212,6 +212,7 @@ def test_unlocked_reward_cannot_start_formal_run():
 
     locked = deepcopy(cfg)
     locked["reward"]["calibration_status"] = "locked"
+    locked["reward"]["calibration_report_sha256"] = "0" * 64
     formal = _validate_reward_run_mode(
         locked, training_episodes=5000, diagnostic_only=False
     )
