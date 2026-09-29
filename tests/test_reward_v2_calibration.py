@@ -148,10 +148,15 @@ def test_service_priority_rule_does_not_call_hvac_viability():
 
     class HVAC:
         t_air = 20.0
+        t_mass = 20.0
         heat_max_kw = 35.0
         cool_max_kw = 35.0
-        def _comfort_bounds(self, t):
+        def _state_comfort_bounds(self, t):
             return (21.0, 25.0)
+        def _next_state(self, t_air, t_mass, q_hvac, t):
+            return (t_air + 0.1 * q_hvac, t_mass)
+        def _q_to_signed_electric(self, q_hvac):
+            return q_hvac
         def prepare_viability(self, *args, **kwargs):
             raise AssertionError("future viability must not be called")
 
