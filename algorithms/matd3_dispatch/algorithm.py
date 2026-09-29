@@ -85,6 +85,8 @@ class Matd3Dispatch(MATD3):
                     for mg in self.agent_ids
                 },
                 mask_semantics="shared_forecast_valid_v1",
+                gamma=self.gamma,
+                action_semantics=self.projector.semantics,
             )
 
         # Rebuild only the actors because the base constructor used the
