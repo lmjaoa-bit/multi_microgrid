@@ -40,6 +40,7 @@ MARKET_FEATURE_NAMES = (
     "grid_buy_price", "grid_sell_price",
     "previous_p2p_net", "previous_grid_net", "previous_system_p2p",
     "previous_ess_p2p_accepted",
+    "team_load_peak_so_far", "grid_carbon_factor",
 )
 
 PEER_SUMMARY_SUFFIXES = (
@@ -82,13 +83,23 @@ class HierarchicalTransformerActor(nn.Module):
         num_layers: int = 2,
         forecast_horizon: int = 8,
         hidden_dim: int = 64,
+        include_peer_forecast: bool = False,
+        peer_forecast_features: Sequence[str] = ("energy_balance",),
     ) -> None:
         super().__init__()
         self.schema = tuple(schema)
         self.active_agent = str(active_agent)
         self.agent_ids = tuple(agent_ids)
         self.peers = tuple(mg for mg in agent_ids if mg != active_agent)
+        if len(self.peers) != 2:
+            raise ValueError("Hierarchical Transformer requires exactly two peers per actor")
+        if not isinstance(include_peer_forecast, bool):
+            raise ValueError("include_peer_forecast must be boolean")
+        if isinstance(peer_forecast_features, (str, bytes)) or tuple(peer_forecast_features) != ("energy_balance",):
+            raise ValueError("peer_forecast_features must be [energy_balance]")
         self.forecast_horizon = int(forecast_horizon)
+        self.include_peer_forecast = bool(include_peer_forecast)
+        self.peer_forecast_features = tuple(peer_forecast_features)
         self.embed_dim = int(embed_dim)
         if self.embed_dim % num_heads != 0:
             raise ValueError(f"embed_dim ({embed_dim}) must be divisible by num_heads ({num_heads})")
@@ -220,8 +231,11 @@ class HierarchicalTransformerActor(nn.Module):
         # 7. 8-hour Forecast indices & encoder (Vectorized: [batch, forecast_horizon, 6])
         # Each step has: [load, pv, wind, price, temp_feature, valid_feature]
         all_forecast_indices: list[int] = []
+        all_peer_forecast_indices: list[int] = []
         self.has_temp_by_step: list[bool] = []
         self.has_valid_by_step: list[bool] = []
+        self.local_source_schema_names: list[tuple[str, ...]] = []
+        self.peer_source_schema_names: list[tuple[str, ...]] = []
 
         dummy_idx = self.hour_indices[0]  # safe fallback index for dummy slicing
         for k in range(1, self.forecast_horizon + 1):
@@ -247,12 +261,43 @@ class HierarchicalTransformerActor(nn.Module):
                 all_forecast_indices.append(dummy_idx)
                 self.has_valid_by_step.append(False)
 
+            self.local_source_schema_names.append((
+                f"load_t+{k}", f"pv_t+{k}", f"wind_t+{k}", f"price_t+{k}",
+                temp_name if temp_name in names else "<zero_non_hvac>",
+                valid_name if valid_name in names else "<implicit_valid>",
+            ))
+            if self.include_peer_forecast:
+                peer_names = tuple(
+                    f"{peer}_energy_balance_t+{k}" for peer in self.peers
+                )
+                all_peer_forecast_indices.extend(get_idx(name) for name in peer_names)
+                self.peer_source_schema_names.append(peer_names)
+            else:
+                self.peer_source_schema_names.append(tuple())
+
+        self.local_source_schema_names = tuple(self.local_source_schema_names)
+        self.peer_source_schema_names = tuple(self.peer_source_schema_names)
+        self.ordered_forecast_feature_names = (
+            "local_base_net_load", "buy_price", "temperature", "valid",
+            "future_hour_sin", "future_hour_cos",
+        ) + (
+            ("peer_0_energy_balance", "peer_1_energy_balance")
+            if self.include_peer_forecast else tuple()
+        )
         self.register_buffer("all_forecast_indices", torch.tensor(all_forecast_indices, dtype=torch.long), persistent=False)
+        self.register_buffer(
+            "all_peer_forecast_indices",
+            torch.tensor(all_peer_forecast_indices, dtype=torch.long),
+            persistent=False,
+        )
         self.register_buffer("temp_mask", torch.tensor(self.has_temp_by_step, dtype=torch.float32).unsqueeze(0).unsqueeze(-1), persistent=False)
         self.register_buffer("valid_mask_present", torch.tensor(self.has_valid_by_step, dtype=torch.bool), persistent=False)
 
+        self.forecast_feature_dim = 6 + (
+            self.num_peers if self.include_peer_forecast else 0
+        )
         self.forecast_encoder = nn.Sequential(
-            nn.Linear(6, hidden_dim),
+            nn.Linear(self.forecast_feature_dim, hidden_dim),
             nn.LayerNorm(hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, embed_dim),
@@ -342,6 +387,47 @@ class HierarchicalTransformerActor(nn.Module):
             - wind * scales[2]
         ) / scales[3]
 
+    def _build_forecast_features(self, obs: torch.Tensor) -> torch.Tensor:
+        """Build finite [B,H,6/8] features and zero every invalid token."""
+        if obs.ndim != 2 or obs.shape[-1] != len(self.schema):
+            raise ValueError(
+                f"Expected observation shape [batch_size, {len(self.schema)}], got {obs.shape}"
+            )
+        batch_size = obs.shape[0]
+        local_raw = obs.index_select(-1, self.all_forecast_indices).reshape(
+            batch_size, self.forecast_horizon, 6
+        )
+        raw_valid = local_raw[:, :, 5:6]
+        f_valid = torch.where(
+            torch.isfinite(raw_valid), raw_valid, torch.zeros_like(raw_valid)
+        )
+        f_valid = f_valid.clamp(0.0, 1.0)
+        valid = f_valid >= 0.5
+        finite_local = torch.nan_to_num(local_raw, nan=0.0, posinf=0.0, neginf=0.0)
+        f_load = finite_local[:, :, 0:1]
+        f_pv = finite_local[:, :, 1:2]
+        f_wind = finite_local[:, :, 2:3]
+        f_price = finite_local[:, :, 3:4]
+        f_temp = finite_local[:, :, 4:5] * self.temp_mask
+        f_net_load = self._physical_net_load(f_load, f_pv, f_wind)
+
+        hour_feats = obs.index_select(-1, self.hour_idx_tensor)
+        sin0 = hour_feats[:, 0:1].unsqueeze(1)
+        cos0 = hour_feats[:, 1:2].unsqueeze(1)
+        sin_k = sin0 * self.step_cos + cos0 * self.step_sin
+        cos_k = cos0 * self.step_cos - sin0 * self.step_sin
+
+        features = torch.cat(
+            [f_net_load, f_price, f_temp, f_valid, sin_k, cos_k], dim=-1
+        )
+        if self.include_peer_forecast:
+            peer = obs.index_select(-1, self.all_peer_forecast_indices).reshape(
+                batch_size, self.forecast_horizon, self.num_peers
+            )
+            peer = torch.nan_to_num(peer, nan=0.0, posinf=0.0, neginf=0.0)
+            features = torch.cat([features, peer], dim=-1)
+        return torch.where(valid.expand_as(features), features, torch.zeros_like(features))
+
     def _build_tokens(self, obs: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor | None]:
         batch_size = obs.shape[0]
 
@@ -372,38 +458,26 @@ class HierarchicalTransformerActor(nn.Module):
         supply_input = torch.cat([load, pv, wind, base_balance, balance_sign], dim=-1)
         supply_tok = self.supply_encoder(supply_input).unsqueeze(1)
 
-        # 4. P2P Trade & System Grid Margin Token: [B, 1, embed_dim]
+        # 4. P2P trade token.  The extra scalar is historical P2P headroom,
+        # not a daily-load peak margin.  V2 peak and carbon are explicit fields
+        # inside trade_feats when present in the observation schema.
         trade_feats = obs.index_select(-1, self.trade_idx_tensor)
         if "previous_system_p2p" in self.schema:
             sys_p2p = obs[:, self.schema.index("previous_system_p2p"):self.schema.index("previous_system_p2p") + 1]
-            sys_margin = 1.0 - torch.clamp(sys_p2p, 0.0, 1.0)
+            p2p_headroom = 1.0 - torch.clamp(sys_p2p, 0.0, 1.0)
         else:
-            sys_margin = torch.ones((batch_size, 1), device=obs.device, dtype=torch.float32)
-        trade_input = torch.cat([trade_feats, sys_margin], dim=-1)
+            p2p_headroom = torch.ones((batch_size, 1), device=obs.device, dtype=obs.dtype)
+        trade_input = torch.cat([trade_feats, p2p_headroom], dim=-1)
         trade_tok = self.trade_encoder(trade_input).unsqueeze(1)
 
         # 5. Peer Energy Summary Tokens: [B, num_peers, embed_dim]
         peer_raw = obs.index_select(-1, self.all_peer_indices).reshape(batch_size, self.num_peers, self.peer_dim)
         peer_tokens = self.peer_encoder(peer_raw)
 
-        # 6. Temporal Forecast Tokens (Vectorized across all 8 steps in ONE operation): [B, 8, embed_dim]
-        f_raw = obs.index_select(-1, self.all_forecast_indices).reshape(batch_size, self.forecast_horizon, 6)
-        f_load = f_raw[:, :, 0:1]
-        f_pv = f_raw[:, :, 1:2]
-        f_wind = f_raw[:, :, 2:3]
-        f_price = f_raw[:, :, 3:4]
-        # Physical base net load; positive means an electricity deficit.
-        f_net_load = self._physical_net_load(f_load, f_pv, f_wind)
-        f_temp = f_raw[:, :, 4:5] * self.temp_mask
-        f_valid = f_raw[:, :, 5:6]
-
-        hour_feats = obs.index_select(-1, self.hour_idx_tensor)
-        sin0 = hour_feats[:, 0:1].unsqueeze(1)
-        cos0 = hour_feats[:, 1:2].unsqueeze(1)
-        sin_k = sin0 * self.step_cos + cos0 * self.step_sin
-        cos_k = cos0 * self.step_cos - sin0 * self.step_sin
-
-        f_input = torch.cat([f_net_load, f_price, f_temp, f_valid, sin_k, cos_k], dim=-1)
+        # 6. Temporal Forecast Tokens.  Formal V2 uses local H8 context plus
+        # the two peers' future energy_balance channels in the same token.
+        f_input = self._build_forecast_features(obs)
+        f_valid = f_input[:, :, 3:4]
         forecast_tokens = self.forecast_encoder(f_input)
 
         # Assemble all 14 tokens in single tensor concatenation: [B, 14, embed_dim]
