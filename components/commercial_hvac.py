@@ -67,6 +67,11 @@ class CommercialHVACDR:
         self._bounds_cache_key: tuple[int, float, float] | None = None
         self._bounds_cache_value: tuple[float, float] | None = None
         self.forecast_viability = bool(config.get("forecast_viability", False))
+        self.control_semantics = str(config.get("control_semantics", "legacy_comfort_projection"))
+        if self.control_semantics not in {"legacy_comfort_projection", "soft_comfort"}:
+            raise ValueError(f"Unsupported HVAC control_semantics: {self.control_semantics!r}")
+        if self.control_semantics == "soft_comfort":
+            self.forecast_viability = False
         self._viability_result: HVACViabilityResult | None = None
         self._viability_t: int | None = None
 
@@ -189,6 +194,8 @@ class CommercialHVACDR:
     def prepare_viability(
         self, t: int, snapshot: HVACForecastSnapshot
     ) -> HVACViabilityResult:
+        if self.control_semantics == "soft_comfort":
+            raise RuntimeError("HVAC soft_comfort semantics do not use forecast viability")
         if not self.forecast_viability:
             raise RuntimeError("HVAC forecast viability is not enabled")
         if self._viability_t == int(t) and self._viability_result is not None:
@@ -217,6 +224,8 @@ class CommercialHVACDR:
     def feasible_bounds(self, t: int) -> tuple[float, float]:
         if not 0 <= int(t) < self.episode_length:
             return (0.0, 0.0)
+        if self.control_semantics == "soft_comfort":
+            return (-float(self.cool_max_kw), float(self.heat_max_kw))
         key = (int(t), round(float(self.t_air), 10), round(float(self.t_mass), 10))
         if self._bounds_cache_key == key and self._bounds_cache_value is not None:
             return self._bounds_cache_value
@@ -372,7 +381,9 @@ class CommercialHVACDR:
                 if self._viability_result is not None else 0.0
             ),
             "hvac_viability_status": (
-                self._viability_result.status
+                "soft_comfort"
+                if self.control_semantics == "soft_comfort"
+                else self._viability_result.status
                 if self._viability_result is not None else "legacy_one_step"
             ),
             "hvac_forecast_snapshot_id": (
