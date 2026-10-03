@@ -1,0 +1,101 @@
+# Update-enabled numerical acceptance smoke; formal YAML remains unchanged.
+algorithm:
+  name: matd3_mlp_dueling_critic_h24_q_guided
+  hidden_dims:
+  - 128
+  - 128
+  actor_lr: 0.0002
+  actor_max_grad_norm: 1.0
+  critic_lr: 0.0003
+  gamma: 1.0
+  tau: 0.005
+  policy_delay: 2
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  batch_size: 8
+  replay_capacity: 256
+  warmup_steps: 8
+  learning_starts: 8
+  exploration_noise: 0.15
+  dispatch_random_action_prob: 0.1
+  dispatch_q_guidance_weight: 0.01
+  dispatch_q_guidance_margin: 0.01
+  network:
+    feature_semantics: physical_power_balance_v1
+    embed_dim: 32
+    num_heads: 4
+    num_layers: 2
+    hidden_dim: 64
+    forecast_horizon: 24
+    include_peer_forecast: true
+    peer_forecast_features:
+    - energy_balance
+  critic_network:
+    value:
+      forecast_horizon: 24
+      embed_dim: 48
+      num_heads: 4
+      num_layers: 2
+      feedforward_dim: 128
+    advantage:
+      hidden_dim: 128
+      use_value_context: true
+      detach_value_context: true
+      action_reinjection: true
+      reference_action: zero
+runtime:
+  device: cpu
+  cpu_threads: 1
+  interop_threads: 1
+training:
+  episodes: 3
+  test_episodes: 2
+learning_curve:
+  enabled: true
+  interval_steps: 600
+  eval_episodes: 10
+  deterministic_policy: true
+  fixed_scenarios: true
+  evaluate_initial_policy: true
+  seed: 424242
+validation:
+  enabled: true
+  interval: 1
+  deterministic_policy: true
+  fixed_scenarios: true
+  selection:
+    mode: physical_constrained_objective
+    objective: team_reward_mean
+    constraints:
+      physical_feasible_day_rate:
+        min: 1.0
+        atol: 1.0e-07
+      power_balance_residual_max_kw:
+        max: 0.0
+        atol: 1.0e-07
+      source_balance_residual_max_kw:
+        max: 0.0
+        atol: 1.0e-07
+      p2p_balance_residual_max_kw:
+        max: 0.0
+        atol: 1.0e-07
+      device_bound_violation_max:
+        max: 0.0
+        atol: 1.0e-07
+      grid_export_max_kw:
+        max: 0.0
+        atol: 1.0e-07
+      unmet_energy_mean_kwh:
+        max: 0.0
+        atol: 1.0e-07
+  max_days: 2
+logging:
+  diagnostic_interval: 1
+  incremental_history: true
+  history_snapshot_interval: 500
+  dashboard: false
+  dashboard_refresh_hz: 4
+  rolling_windows:
+  - 50
+  - 100
+  - 500

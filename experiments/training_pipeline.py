@@ -73,8 +73,11 @@ except ModuleNotFoundError as exc:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run the shared train-test-settlement-plot pipeline")
-    parser.add_argument("--algorithm", default=None,
-                        help="Registered algorithm plugin name: matd3 or matd3_hierarchical_transformer")
+    parser.add_argument(
+        "--algorithm",
+        default=None,
+        help="Registered algorithm plugin slug (for example, matd3 or matd3_hierarchical_transformer)",
+    )
     parser.add_argument("--config", type=Path, default=None)
     parser.add_argument("--experiment", help="Named bundle from configs/experiment_profiles.yaml")
     parser.add_argument("--policy", choices=("mlp", "transformer"), help="Network under the selected/default action design")

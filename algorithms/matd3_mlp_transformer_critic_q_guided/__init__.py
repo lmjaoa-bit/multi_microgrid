@@ -1,0 +1,3 @@
+from algorithms.matd3_mlp_transformer_critic_q_guided.algorithm import Matd3MlpTransformerCriticQGuided
+
+__all__ = ["Matd3MlpTransformerCriticQGuided"]

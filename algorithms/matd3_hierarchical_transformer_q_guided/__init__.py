@@ -1,0 +1,3 @@
+from algorithms.matd3_hierarchical_transformer_q_guided.algorithm import Matd3HierarchicalTransformerQGuided
+
+__all__ = ["Matd3HierarchicalTransformerQGuided"]

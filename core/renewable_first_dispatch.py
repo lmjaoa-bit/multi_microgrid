@@ -76,7 +76,13 @@ def clear_renewable_first(
         load_after_local_res - res_peer_load.sum(dim=1)
     ).clamp_min(0.0)
 
-    ess_local_load = torch.minimum(discharge_request, load_after_renewable)
+    # With zero residual demand the local execution is constant zero. Avoid
+    # minimum(0, 0)'s half-gradient into a physically inactive discharge path.
+    ess_local_load = torch.where(
+        load_after_renewable > 0.0,
+        torch.minimum(discharge_request, load_after_renewable),
+        torch.zeros_like(discharge_request),
+    )
     load_after_local_ess = (
         load_after_renewable - ess_local_load
     ).clamp_min(0.0)

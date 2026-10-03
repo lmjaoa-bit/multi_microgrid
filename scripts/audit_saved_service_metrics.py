@@ -99,7 +99,7 @@ def _source_metadata(source: Path, paths: list[Path]) -> dict[str, dict[str, Any
     result: dict[str, dict[str, Any]] = {}
     for path in paths:
         stat = path.stat()
-        result[str(path.relative_to(source))] = {
+        result[path.relative_to(source).as_posix()] = {
             "sha256": _sha256(path),
             "size_bytes": int(stat.st_size),
             "modified_time_utc": datetime.fromtimestamp(

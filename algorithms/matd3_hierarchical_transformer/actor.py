@@ -51,6 +51,12 @@ PEER_SUMMARY_SUFFIXES = (
 POWER_NORMALIZER_KEYS = ("load", "pv", "wind", "power")
 
 
+def _exact_gelu(value: torch.Tensor) -> torch.Tensor:
+    # Keep the original exact GELU math while bypassing the fused inference
+    # Transformer path, whose CUDA output can drift on fully masked forecasts.
+    return nn.functional.gelu(value)
+
+
 class HierarchicalTransformerActor(nn.Module):
     """Hierarchical Categorized-Token Spatio-Temporal Transformer Actor.
 
@@ -321,7 +327,7 @@ class HierarchicalTransformerActor(nn.Module):
             nhead=num_heads,
             dim_feedforward=embed_dim * 2,
             dropout=0.0,
-            activation="gelu",
+            activation=_exact_gelu,
             batch_first=True,
             norm_first=True,
         )

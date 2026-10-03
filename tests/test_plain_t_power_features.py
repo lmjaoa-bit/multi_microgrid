@@ -257,6 +257,39 @@ def test_power_normalizer_buffer_is_nonpersistent_and_moves_with_actor(train_env
         torch.testing.assert_close(cpu_out, gpu_out, rtol=2e-5, atol=2e-6)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA unavailable")
+@pytest.mark.parametrize("seed", [0, 1, 2, 42, 1234])
+def test_masked_eval_cpu_cuda_agree_with_double_precision_reference(train_env, seed):
+    with torch.random.fork_rng(devices=[0]):
+        torch.manual_seed(seed)
+        cpu_actor = _build_actor(train_env).eval()
+        gpu_actor = copy.deepcopy(cpu_actor).cuda().eval()
+        reference = copy.deepcopy(cpu_actor).double().eval()
+        obs = _empty_obs(cpu_actor, batch_size=2)
+        with torch.no_grad():
+            expected = reference(obs.double()).float()
+            cpu_output = cpu_actor(obs)
+            gpu_output = gpu_actor(obs.cuda()).cpu()
+        torch.testing.assert_close(cpu_output, expected, rtol=2e-5, atol=2e-6)
+        torch.testing.assert_close(gpu_output, expected, rtol=2e-5, atol=2e-6)
+        torch.testing.assert_close(cpu_output, gpu_output, rtol=2e-5, atol=2e-6)
+
+
+def test_exact_gelu_preserves_training_forward_and_parameter_gradients(train_env):
+    actor = _build_actor(train_env).train()
+    reference = copy.deepcopy(actor)
+    for layer in reference.transformer.layers:
+        layer.activation = torch.nn.functional.gelu
+        layer.activation_relu_or_gelu = 2
+    obs = _empty_obs(actor, batch_size=2)
+    actual, expected = actor(obs), reference(obs)
+    torch.testing.assert_close(actual, expected, rtol=0, atol=0)
+    actual_grads = torch.autograd.grad(actual.sum(), tuple(actor.parameters()))
+    expected_grads = torch.autograd.grad(expected.sum(), tuple(reference.parameters()))
+    for left, right in zip(actual_grads, expected_grads):
+        torch.testing.assert_close(left, right, rtol=0, atol=0)
+
+
 def test_algorithm_uses_env_power_normalizers_and_train_statistics_for_all_splits(configs):
     env_cfg, algo_cfg = configs
     train_norms = None

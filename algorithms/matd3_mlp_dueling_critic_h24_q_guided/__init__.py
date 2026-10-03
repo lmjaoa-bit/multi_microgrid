@@ -1,0 +1,3 @@
+from algorithms.matd3_mlp_dueling_critic_h24_q_guided.algorithm import Matd3MlpDuelingCriticH24QGuided
+
+__all__ = ["Matd3MlpDuelingCriticH24QGuided"]

@@ -34,6 +34,11 @@ def test_retained_plugins_keep_isolated_configs():
         "matd3_dispatch_q_guided",
         "matd3_forecast_context",
         "matd3_hierarchical_transformer",
+        "matd3_hierarchical_transformer_q_guided",
+        "matd3_hierarchical_transformer_q_readout",
+        "matd3_mlp_transformer_critic_q_guided",
+        "matd3_mlp_transformer_critic_h24_q_guided",
+        "matd3_mlp_dueling_critic_h24_q_guided",
     }
 
     # Every retained plugin owns a matching algorithm config.
@@ -67,6 +72,11 @@ def test_explicit_forecast_context_plugin_is_registered_for_new_runs():
         "matd3_dispatch_q_guided",
         "matd3_forecast_context",
         "matd3_hierarchical_transformer",
+        "matd3_hierarchical_transformer_q_guided",
+        "matd3_hierarchical_transformer_q_readout",
+        "matd3_mlp_transformer_critic_q_guided",
+        "matd3_mlp_transformer_critic_h24_q_guided",
+        "matd3_mlp_dueling_critic_h24_q_guided",
     }
 
 

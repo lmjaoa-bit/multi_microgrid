@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
 import yaml
 
@@ -66,6 +67,35 @@ def test_unsaturated_positive_demand_retains_gradient():
     executed = ledger["actual_discharge_kw"][0, 0]
     grad = torch.autograd.grad(executed, discharge)[0]
     assert grad[0, 0] > 0.0
+
+
+@pytest.mark.parametrize("p2p_enabled", [False, True])
+def test_zero_demand_gradients_match_finite_differences_in_mixed_batches(p2p_enabled):
+    discharge = torch.tensor([[10., 0., 0.], [3., 0., 0.]], dtype=torch.float64, requires_grad=True)
+    zeros = torch.zeros_like(discharge)
+    load = torch.tensor([[0., 0., 0.], [8., 0., 0.]], dtype=torch.float64)
+    executed = clear_renewable_first(zeros, load, zeros, discharge,
+                                    p2p_enabled=p2p_enabled)["actual_discharge_kw"]
+    gradients = torch.autograd.grad(executed.sum(), discharge)[0]
+    expected = [[0., 0., 0.], [1., 1., 1.]] if p2p_enabled else [[0., 0., 0.], [1., 0., 0.]]
+    torch.testing.assert_close(gradients, torch.tensor(expected, dtype=torch.float64),
+                               rtol=0, atol=0)
+    bumped = discharge.detach().clone()
+    bumped[0] += 1e-4
+    changed = clear_renewable_first(zeros, load, zeros, bumped,
+                                   p2p_enabled=p2p_enabled)["actual_discharge_kw"]
+    torch.testing.assert_close(changed[0], executed[0].detach(), rtol=0, atol=0)
+
+
+def test_zero_local_demand_retains_peer_discharge_gradient():
+    discharge = torch.tensor([[3., 0., 0.]], dtype=torch.float64, requires_grad=True)
+    zeros = torch.zeros_like(discharge)
+    load = torch.tensor([[0., 8., 0.]], dtype=torch.float64)
+    ledger = clear_renewable_first(zeros, load, zeros, discharge, p2p_enabled=True)
+    gradient = torch.autograd.grad(ledger["actual_discharge_kw"][0, 0], discharge)[0]
+    assert ledger["ess_local_load_kw"][0, 0] == 0.
+    assert ledger["ess_peer_load_kw"][0, 0, 1] == 3.
+    assert gradient[0, 0] == 1.
 
 
 def _rollout_invalid_request(raw_ess: float):
