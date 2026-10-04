@@ -6,8 +6,8 @@ from algorithms.registry import AlgorithmSpec, PROJECT_ROOT
 
 ALGORITHM_SPEC = AlgorithmSpec(
     slug="matd3_plan_transformer",
-    display_name="Matd3PlanTransformer",
+    display_name="Plan-Transformer",
     algorithm_class=Matd3PlanTransformer,
     default_config_path=PROJECT_ROOT / "configs" / "algorithms" / "matd3_plan_transformer.yaml",
-    description="Experimental variant derived from MATD3.",
+    description="Two-layer NOW cross-attention with a causally supervised auxiliary H24 SOC/ESS plan.",
 )
