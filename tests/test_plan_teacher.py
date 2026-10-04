@@ -91,3 +91,59 @@ def test_context_rejects_missing_valid_forecast(case):
     env.forecasts._valid_array[0, 0] = 0
     with pytest.raises(PlanningContextRejected, match='forecast'):
         capture_planning_context(env, obs, state, {})
+
+
+def test_teacher_is_reproducible_cached_and_physically_attainable(case):
+    from algorithms.matd3_plan_transformer.forecast_scenario import capture_planning_context, build_forecast_environment
+    from algorithms.matd3_plan_transformer.plan_teacher import PlanTeacher
+    env, obs, state = case
+    before = fingerprint(env)
+    ctx = capture_planning_context(env, obs, state, {})
+    settings = dict(population=4, elite=2, iterations=1, max_labels=2)
+    teacher = PlanTeacher(settings, seed=19)
+    label = teacher.solve(ctx)
+    other = PlanTeacher(settings, seed=19).solve(ctx)
+    assert label.valid
+    assert label.best_cost <= min(label.baseline_costs) + 1e-7
+    np.testing.assert_array_equal(label.actions, other.actions)
+    assert teacher.solve(ctx) is label
+    assert teacher.solve_calls == 1
+    worker = build_forecast_environment(ctx)
+    cost = 0.0
+    for j in range(24):
+        _, _, _, info = worker.step(dict(zip(env.agent_ids, label.actions[j])))
+        cost += info['generalized_system_cost']
+        for mg in env.agent_ids:
+            assert label.soc_after[mg][j] == pytest.approx(worker.cores[mg].battery.soc)
+    assert cost == pytest.approx(label.best_cost)
+    assert fingerprint(env) == before
+
+
+@pytest.mark.parametrize('settings', [{'elite': 33}, {'population': 0}, {'iterations': 0}, {'initial_std': float('nan')}, {'update_rate': 0}])
+def test_teacher_rejects_invalid_settings(settings):
+    from algorithms.matd3_plan_transformer.plan_teacher import PlanTeacher
+    with pytest.raises(ValueError):
+        PlanTeacher(settings, seed=1)
+
+
+def test_auxiliary_pool_is_separate_and_context_consumed_once(case):
+    from algorithms.matd3_plan_transformer.forecast_scenario import capture_planning_context
+    from algorithms.matd3_plan_transformer.plan_teacher import PlanTeacher
+    from algorithms.matd3_plan_transformer.replay_buffer import PlanReplayBuffer
+    import torch
+    env, obs, state = case
+    ctx = capture_planning_context(env, obs, state, {})
+    label = PlanTeacher(dict(population=2, elite=1, iterations=1), 3).solve(ctx)
+    replay = PlanReplayBuffer(10, 2, 1, 2)
+    replay.bind_context(ctx, label)
+    actions = {mg: np.zeros(2) for mg in env.agent_ids}
+    nxt, rewards, done, info = env.step(actions)
+    replay.add(obs, state, actions, rewards['mg1'], nxt, info['global_state_after'], done)
+    assert len(replay) == 1
+    aux = replay.sample_auxiliary(32, env.agent_ids, torch.device('cpu'))
+    assert aux.mask.shape == (1, 24)
+    assert not aux.soc_after['mg1'].requires_grad
+    assert replay.pending_context is None
+    replay.bind_context(ctx, label)
+    with pytest.raises(ValueError, match='context'):
+        replay.add(nxt, info['global_state_after'], actions, 0, nxt, info['global_state_after'], False)
