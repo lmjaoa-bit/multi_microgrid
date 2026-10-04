@@ -39,6 +39,7 @@ def test_retained_plugins_keep_isolated_configs():
         "matd3_mlp_transformer_critic_q_guided",
         "matd3_mlp_transformer_critic_h24_q_guided",
         "matd3_mlp_dueling_critic_h24_q_guided",
+        "matd3_plan_transformer",
     }
 
     # Every retained plugin owns a matching algorithm config.
@@ -77,6 +78,7 @@ def test_explicit_forecast_context_plugin_is_registered_for_new_runs():
         "matd3_mlp_transformer_critic_q_guided",
         "matd3_mlp_transformer_critic_h24_q_guided",
         "matd3_mlp_dueling_critic_h24_q_guided",
+        "matd3_plan_transformer",
     }
 
 

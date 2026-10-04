@@ -21,6 +21,7 @@ import numpy as np
 import yaml
 
 from algorithms.registry import get_algorithm_spec
+from algorithms.base import TrainingContextConsumerProtocol, AlgorithmDiagnosticsProtocol
 from envs.multi_microgrid_env import MultiMicrogridEnv
 from core.reward_v2 import resolve_reward_v2_config
 from evaluation.evaluate_matd3 import evaluate, evaluate_policy_on_days
@@ -69,6 +70,11 @@ except ModuleNotFoundError as exc:
 
         def render_final_summary(self, **_: Any) -> None:
             pass
+
+
+def _capture_training_context(algorithm, env, observations, state, metadata):
+    if isinstance(algorithm, TrainingContextConsumerProtocol):
+        algorithm.capture_training_context(env, observations, state, metadata)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -573,6 +579,9 @@ def train(args: argparse.Namespace) -> dict[str, object]:
 
     env = MultiMicrogridEnv(env_config, split="train")
     algorithm = spec.create(env, algorithm_cfg, device=args.device, seed=args.seed)
+    if isinstance(algorithm, AlgorithmDiagnosticsProtocol):
+        algorithm.configure_diagnostics(run_dir / 'auxiliary_plan',
+            {'algorithm_slug': spec.slug, 'training_seed': args.seed})
     settings = algorithm_cfg["algorithm"]
     warmup = int(settings.get("warmup_steps", 1000))
     batch_size = int(settings.get("batch_size", 128))
@@ -770,6 +779,9 @@ def train(args: argparse.Namespace) -> dict[str, object]:
             diagnostics: list[dict[str, Any]] = []
             done = False
             while not done:
+                _capture_training_context(algorithm, env, observations, state,
+                    {'episode_index': episode_index, 'total_steps': total_steps,
+                     'day': str(reset_info['day'])})
                 if total_steps < warmup:
                     actions = {
                         mg: rng.uniform(-1.0, 1.0, env.action_dim).astype(np.float32) for mg in ids
@@ -972,6 +984,8 @@ def train(args: argparse.Namespace) -> dict[str, object]:
         durable_recovery_point=durable_recovery_point,
     )
 
+    if isinstance(algorithm, AlgorithmDiagnosticsProtocol):
+        algorithm.set_diagnostic_phase(None, {'training_complete': True})
     algorithm.save(final_checkpoint)
     if validation_enabled and selector.requires_eligible_checkpoint:
         if best_candidate is None or not best_candidate.eligible:

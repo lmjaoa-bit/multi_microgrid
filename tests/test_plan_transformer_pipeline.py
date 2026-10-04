@@ -87,3 +87,50 @@ def test_ablation_disables_teacher_without_changing_network(case):
     assert list(other.actors.state_dict()) == list(model.actors.state_dict())
     for mg in env.agent_ids:
         np.testing.assert_array_equal(model.select_actions(obs)[mg], other.select_actions(obs)[mg])
+
+
+def test_optional_context_hook_consumed_by_warmup_transition(case):
+    from experiments.training_pipeline import _capture_training_context
+    _, env, _, model, obs, state = case
+    _capture_training_context(model, env, obs, state, {'day': 'train'})
+    assert model.replay.pending_context.t == 0
+    actions = {mg: np.zeros(2, dtype=np.float32) for mg in env.agent_ids}
+    nxt, rewards, done, info = env.step(actions)
+    model.replay.add(obs, state, actions, rewards['mg1'], nxt, info['global_state_after'], done)
+    assert model.replay.pending_context is None
+    assert model.replay.labels[0].t == 0
+    _capture_training_context(object(), env, nxt, info['global_state_after'], {})
+
+
+def test_evaluation_diagnostic_phase_stops_on_exception(monkeypatch, tmp_path):
+    from evaluation.evaluate_matd3 import _evaluate_algorithm_policy
+    events = []
+    class WithHooks:
+        def configure_diagnostics(self, directory, metadata):
+            events.append(('configure', directory, metadata))
+        def set_diagnostic_phase(self, phase, metadata):
+            events.append(('phase', phase, metadata))
+        def select_actions(self, obs, noise_std=0):
+            return {}
+    def fail(*args, **kwargs):
+        assert events[-1][1] == 'formal_test'
+        raise RuntimeError('rollout failed')
+    monkeypatch.setattr('evaluation.evaluate_matd3.evaluate_policy_on_days', fail)
+    with pytest.raises(RuntimeError, match='rollout failed'):
+        _evaluate_algorithm_policy(WithHooks(), object(), ['day1','day2'], tmp_path, {}, seed=7)
+    assert events[1][2]['seeds'] == [7, 8]
+    assert events[-1][1] is None
+
+
+def test_no_hooks_evaluator_path_and_resume_rejection(case, monkeypatch):
+    from evaluation.evaluate_matd3 import _evaluate_algorithm_policy
+    from experiments.training_recovery import ensure_recoverable
+    _, env, _, model, obs, _ = case
+    expected = ('summary','daily','hourly')
+    monkeypatch.setattr('evaluation.evaluate_matd3.evaluate_policy_on_days', lambda *a, **kw: expected)
+    assert _evaluate_algorithm_policy(model, env, [], None, {}, seed=7) == expected
+    with pytest.raises(ValueError, match='does not support resumable training'):
+        ensure_recoverable(model)
+    assert model.teacher.solve_calls == 0
+    model.inspect_policy(obs)
+    assert model.teacher.solve_calls == 0

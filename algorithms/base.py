@@ -52,3 +52,20 @@ class RecoverableAlgorithmProtocol(Protocol):
     ) -> Mapping[str, Any]: ...
 
     def load_training_state(self, directory: Path) -> dict[str, Any]: ...
+
+
+@runtime_checkable
+class TrainingContextConsumerProtocol(Protocol):
+    """Optional pre-action context capture with an unchanged replay API."""
+
+    def capture_training_context(self, env: Any, observations: Mapping[str, np.ndarray],
+                                 global_state: np.ndarray, metadata: Mapping[str, Any]) -> None: ...
+
+
+@runtime_checkable
+class AlgorithmDiagnosticsProtocol(Protocol):
+    """Optional saved diagnostics for a named evaluation phase."""
+
+    def configure_diagnostics(self, directory: Path, metadata: Mapping[str, Any]) -> None: ...
+
+    def set_diagnostic_phase(self, phase: str | None, metadata: Mapping[str, Any]) -> None: ...

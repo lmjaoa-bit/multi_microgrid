@@ -11,6 +11,7 @@ import numpy as np
 import yaml
 
 from algorithms.registry import get_algorithm_spec
+from algorithms.base import AlgorithmDiagnosticsProtocol
 from envs.multi_microgrid_env import MultiMicrogridEnv
 from evaluation.coalition_evaluator import (
     CoalitionEvaluation,
@@ -611,6 +612,22 @@ def _build_joint_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _evaluate_algorithm_policy(algorithm, env, days, output_dir, metadata, *, seed,
+                               forecast_noise=False):
+    diagnostics = isinstance(algorithm, AlgorithmDiagnosticsProtocol) and output_dir is not None
+    if diagnostics:
+        algorithm.configure_diagnostics(Path(output_dir) / 'auxiliary_plan', metadata)
+        algorithm.set_diagnostic_phase('formal_test',
+            {'days': days, 'seeds': [int(seed) + i for i in range(len(days))]})
+    try:
+        return evaluate_policy_on_days(env, days,
+            lambda obs: algorithm.select_actions(obs, noise_std=0.0), seed=seed,
+            deterministic_environment=True, forecast_noise=forecast_noise, capture_hourly=True)
+    finally:
+        if diagnostics:
+            algorithm.set_diagnostic_phase(None, {'formal_test_complete': True})
+
+
 def evaluate(
     config: Path | str,
     algorithm_config: Path | str,
@@ -656,13 +673,13 @@ def evaluate(
     print(f"Selected from episode:\n{metadata.get('best_episode')}\n")
     print(f"Selection metric:\n{metadata.get('selection_metric', 'validation_team_profit_mean')}\n")
 
-    matd3_policy = lambda obs: algorithm.select_actions(obs, noise_std=0.0)
     evaluation_forecast_noise = bool(
         env_config.get("observation", {}).get("evaluation_forecast_noise", False)
     )
-    matd3_summary, matd3_daily, hourly_by_day = evaluate_policy_on_days(
-        env, days, matd3_policy, seed=test_seed, deterministic_environment=True,
-        forecast_noise=evaluation_forecast_noise, capture_hourly=True,
+    matd3_summary, matd3_daily, hourly_by_day = _evaluate_algorithm_policy(
+        algorithm, env, days, output_dir,
+        {'algorithm_slug': spec.slug, 'checkpoint': str(chk_path), **metadata}, seed=test_seed,
+        forecast_noise=evaluation_forecast_noise,
     )
     from evaluation.dr_reference import evaluate_and_save_dr_reference
     reference_summary, reference_daily, _ = evaluate_and_save_dr_reference(
