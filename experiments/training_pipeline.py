@@ -462,6 +462,14 @@ def train(args: argparse.Namespace) -> dict[str, object]:
 
     output_override = getattr(args, "output", None)
     resume_requested = getattr(args, "resume_run", None) is not None
+    # Check support before creating directories or changing saved run evidence.
+    env = MultiMicrogridEnv(env_config, split="train")
+    algorithm = spec.create(env, algorithm_cfg, device=args.device, seed=args.seed)
+    recoverable = None
+    if hasattr(algorithm, "save_training_state") and hasattr(algorithm, "load_training_state"):
+        recoverable = ensure_recoverable(algorithm)
+    if resume_requested and recoverable is None:
+        raise ValueError(f"Algorithm {spec.slug} does not support resumable training")
     if output_override is not None:
         expected_algorithm_root = Path(output_override).resolve()
     else:
@@ -577,8 +585,6 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     })
     write_run_status(run_dir, "RUNNING", completed_episode=0, resumed=resume_requested)
 
-    env = MultiMicrogridEnv(env_config, split="train")
-    algorithm = spec.create(env, algorithm_cfg, device=args.device, seed=args.seed)
     if isinstance(algorithm, AlgorithmDiagnosticsProtocol):
         algorithm.configure_diagnostics(run_dir / 'auxiliary_plan',
             {'algorithm_slug': spec.slug, 'training_seed': args.seed})
@@ -590,11 +596,6 @@ def train(args: argparse.Namespace) -> dict[str, object]:
     rng = np.random.default_rng(args.seed)
     ids = env.agent_ids
     recovery_cfg = dict(settings.get("training_recovery", {}))
-    recoverable = None
-    if hasattr(algorithm, "save_training_state") and hasattr(algorithm, "load_training_state"):
-        recoverable = ensure_recoverable(algorithm)
-    if resume_requested and recoverable is None:
-        raise ValueError(f"Algorithm {spec.slug} does not support resumable training")
     recovery_enabled = recoverable is not None and bool(recovery_cfg.get("enabled", True))
     recovery_interval = int(
         recovery_cfg.get("snapshot_interval_episodes", validation_interval)

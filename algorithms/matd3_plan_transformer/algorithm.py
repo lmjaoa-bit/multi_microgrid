@@ -58,6 +58,7 @@ class Matd3PlanTransformer(Matd3Dispatch):
         masks = 'forecast:t+k<24;plan:t+j<24;soc_after:t+j+1'
         peers = {mg: [p for p in self.agent_ids if p != mg] for mg in self.agent_ids}
         self.actor_contract = dict(version='now-cross-attention-plan-v1', network=network,
+            teacher_scenario_version='causal-forecast-local-weather-conditional-ev-v2',
             auxiliary_plan=auxiliary, observation_schemas=self.observation_schemas,
             normalizers=deepcopy(env.obs_builder.norm), batteries=self.battery_configs,
             renewable_capacities={mg: deepcopy(env.cfg_by_id[mg]['renewables']) for mg in self.agent_ids},

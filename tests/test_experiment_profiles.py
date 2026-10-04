@@ -53,6 +53,7 @@ def test_default_and_public_selectors_keep_matd3_default(catalog_root):
         "matd3_mlp_transformer_critic_q_guided",
         "matd3_mlp_transformer_critic_h24_q_guided",
         "matd3_mlp_dueling_critic_h24_q_guided",
+        "matd3_plan_transformer",
     }
     assert get_algorithm_spec("matd3").slug == "matd3_dispatch"
     assert set(catalog("action_designs")) == {"single_dispatch", "single_dispatch_dr"}

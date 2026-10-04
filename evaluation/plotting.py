@@ -764,6 +764,22 @@ def generate_plan_diagnostic_figures(run_dir: str | Path, formats=('png','pdf'))
     manifest = json.loads((root/'auxiliary_plan/manifest.json').read_text(encoding='utf-8'))
     rows = [json.loads(line) for line in source.read_text(encoding='utf-8').splitlines() if line]
     expected_days = manifest['formal_test']['days']
+    expected_seeds = manifest['formal_test']['seeds']
+    daily_path = root/'test_daily_metrics.csv'
+    if not daily_path.exists():
+        raise ValueError('Formal-test day/seed identity file is missing')
+    daily = pd.read_csv(daily_path)
+    actual_pairs = list(zip(daily['date'].astype(str), daily['test_seed'].astype(int)))
+    if actual_pairs != list(zip(expected_days,expected_seeds)):
+        raise ValueError('Plan diagnostic day/seed identity disagrees with saved formal test')
+    agents = tuple(manifest['actor_contract']['observation_schemas'])
+    expected_keys = {(day,mg,t) for day in expected_days for mg in agents for t in range(24)}
+    keys = [(r['day'],r['agent'],r['t']) for r in rows]
+    if len(keys) != len(expected_keys) or set(keys) != expected_keys:
+        raise ValueError('Incomplete or duplicate plan diagnostic coverage')
+    seed_by_day = dict(zip(expected_days,expected_seeds))
+    if any(r['seed'] != seed_by_day[r['day']] for r in rows):
+        raise ValueError('Plan diagnostic seed identity disagrees with saved formal test')
     checkpoint = manifest['metadata'].get('checkpoint')
     if any(r['day'] not in expected_days or r['checkpoint'] != checkpoint or
            r['checkpoint_sha256'] != manifest.get('checkpoint_sha256') for r in rows):
@@ -777,6 +793,19 @@ def generate_plan_diagnostic_figures(run_dir: str | Path, formats=('png','pdf'))
             raise ValueError('Plan diagnostics disagree with checkpoint hash')
         if 'test_days' in summary and summary['test_days'] != expected_days:
             raise ValueError('Plan diagnostics disagree with test days')
+        if 'test_days_count' in summary and summary['test_days_count'] != len(expected_days):
+            raise ValueError('Plan diagnostic day coverage disagrees with formal test count')
+    actual_by_day = {}
+    for day in expected_days:
+        trajectory_path = root/'test_hourly_trajectories'/f'{day}.csv'
+        if not trajectory_path.exists():
+            raise FileNotFoundError(f'Actual trajectory missing: {trajectory_path}')
+        actual = pd.read_csv(trajectory_path)
+        if len(actual)!=24 or set(actual['timestep'])!=set(range(24)):
+            raise ValueError('Actual formal-test trajectory coverage must contain 24 unique hours')
+        if 'date' in actual and set(actual['date'].astype(str))!={day}:
+            raise ValueError('Actual trajectory day identity mismatch')
+        actual_by_day[day] = actual.sort_values('timestep')
     directory = root/'figures/plan_diagnostics'
     directory.mkdir(parents=True, exist_ok=True)
     written = []
@@ -802,10 +831,7 @@ def generate_plan_diagnostic_figures(run_dir: str | Path, formats=('png','pdf'))
                 fig.colorbar(artist, ax=ax, shrink=.7)
         fig.suptitle(f'{mg.upper()} {day}: NOW cross-attention (masked cells blank)')
         written += _save(fig, directory, f'{day}_{mg}_attention', formats)
-        trajectory_path = root/'test_hourly_trajectories'/f'{day}.csv'
-        if not trajectory_path.exists():
-            raise FileNotFoundError(f'Actual trajectory missing: {trajectory_path}')
-        actual = pd.read_csv(trajectory_path)
+        actual = actual_by_day[day]
         fig, axes = plt.subplots(2,1,figsize=(11,7),sharex=True)
         for r in samples:
             valid = np.asarray(r['plan_mask'], dtype=bool)

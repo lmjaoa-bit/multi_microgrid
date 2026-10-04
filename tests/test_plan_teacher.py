@@ -93,6 +93,30 @@ def test_context_rejects_missing_valid_forecast(case):
         capture_planning_context(env, obs, state, {})
 
 
+def test_teacher_preserves_local_hvac_weather_separately_from_public_forecast(case):
+    from algorithms.matd3_plan_transformer.forecast_scenario import capture_planning_context, build_forecast_environment
+    env, obs, state = case
+    worker = build_forecast_environment(capture_planning_context(env, obs, state, {}))
+    dr = env.cfg_by_id['mg2']['dr']
+    for k in (6,12,18):
+        local, public = env.forecasts.local('mg2',0,k), env.forecasts.public(0,k)
+        row = worker.episode_df.iloc[k]
+        assert row[dr['ghi_column']] == pytest.approx(local['ghi_w_per_m2'])
+        assert row[dr['temperature_column']] == pytest.approx(local['temperature_c'])
+        assert row['ghi_w_per_m2'] == pytest.approx(public['ghi_w_per_m2'])
+
+
+def test_teacher_profile_queries_match_frozen_exogenous_arrays(case):
+    from algorithms.matd3_plan_transformer.forecast_scenario import capture_planning_context, build_forecast_environment
+    env, obs, state = case
+    worker = build_forecast_environment(capture_planning_context(env, obs, state, {}))
+    for k in (6,12,18):
+        for mg in env.agent_ids:
+            query = worker.profiles.exogenous(mg,worker.episode_df.iloc[k])
+            for field in ('load_kw','pv_kw','wind_kw','renewable_kw'):
+                assert query[field] == pytest.approx(worker._episode_exogenous[mg][field][k])
+
+
 def test_teacher_is_reproducible_cached_and_physically_attainable(case):
     from algorithms.matd3_plan_transformer.forecast_scenario import capture_planning_context, build_forecast_environment
     from algorithms.matd3_plan_transformer.plan_teacher import PlanTeacher

@@ -30,6 +30,8 @@ class PlanDiagnosticsRecorder:
     def __init__(self, directory, metadata, actor_contract):
         self.directory = Path(directory).resolve()
         self.directory.mkdir(parents=True, exist_ok=True)
+        if (self.directory/'formal_test_plan_attention.jsonl').exists():
+            raise ValueError('Formal test diagnostic file already exists')
         path = self.directory / 'manifest.json'
         contract = json.loads(json.dumps(actor_contract, default=json_value))
         manifest = dict(version='plan-attention-diagnostics-v1', algorithm_slug='matd3_plan_transformer',
@@ -38,7 +40,7 @@ class PlanDiagnosticsRecorder:
             previous = json.loads(path.read_text(encoding='utf-8'))
             if any(previous.get(k) != manifest[k] for k in ('version','algorithm_slug','source_run','actor_contract')):
                 raise ValueError('Diagnostic manifest identity conflict')
-            manifest['metadata'] = {**previous['metadata'], **manifest['metadata']}
+            manifest = {**previous, 'metadata': {**previous['metadata'], **manifest['metadata']}}
         checkpoint = manifest['metadata'].get('checkpoint')
         if checkpoint and Path(checkpoint).is_file():
             manifest['checkpoint_sha256'] = hashlib.sha256(Path(checkpoint).read_bytes()).hexdigest()
@@ -72,6 +74,9 @@ class PlanDiagnosticsRecorder:
             write_json(self.directory/'manifest.json', self.manifest)
             self.steps = 0
         elif self.phase is not None:
+            if metadata.get('formal_test_complete') and self.steps != 24*len(self.phase_metadata['days']):
+                self.phase = None
+                raise ValueError('Incomplete formal test diagnostic coverage')
             write_json(self.directory/'formal_test_diagnostics_summary.json',
                 dict(steps=self.steps, rows=self.steps*3, **metadata))
         self.phase = phase

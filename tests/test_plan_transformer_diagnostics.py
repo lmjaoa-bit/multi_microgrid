@@ -1,4 +1,5 @@
 import json
+import csv
 from pathlib import Path
 import numpy as np
 import pytest
@@ -48,18 +49,66 @@ def test_training_completion_rejects_empty_supervision(case, tmp_path):
     assert summary['valid_labels'] == 0
 
 
-def test_saved_plotter_replots_without_policy_or_environment(case, tmp_path, monkeypatch):
-    from evaluation.plotting import generate_plan_diagnostic_figures
-    _, env, _, model, obs, _ = case
+def test_rejected_diagnostic_reconfiguration_preserves_existing_evidence(case, tmp_path):
+    from scripts.probe_plan_transformer import fingerprints
+    _, _, _, model, obs, _ = case
     directory = tmp_path/'auxiliary_plan'
     model.configure_diagnostics(directory, {'checkpoint':'best_model.pt'})
     model.set_diagnostic_phase('formal_test', {'days':['2020-01-01'],'seeds':[17]})
     model.select_actions(obs)
     model.set_diagnostic_phase(None, {})
-    (tmp_path/'test_summary.json').write_text(json.dumps({'checkpoint_path':'best_model.pt','test_days':['2020-01-01']}))
+    before = fingerprints(directory)
+    with pytest.raises(ValueError, match='exists'):
+        model.configure_diagnostics(directory, {'checkpoint':'another_model.pt'})
+    assert fingerprints(directory) == before
+
+
+def test_rejected_resume_preserves_run_artifacts(tmp_path):
+    from experiments.training_pipeline import build_parser, train
+    from scripts.probe_plan_transformer import fingerprints
+    run = tmp_path/'matd3_plan_transformer/runs/existing'
+    run.mkdir(parents=True)
+    (run/'run_status.json').write_text('{"status":"COMPLETED"}')
+    (run/'run_metadata.json').write_text('{"sentinel":"preserve"}')
+    before = fingerprints(run)
+    args = build_parser().parse_args(['--algorithm','matd3_plan_transformer',
+        '--algorithm-config','configs/smoke/matd3_plan_transformer.yaml',
+        '--output-root',str(tmp_path),'--resume-run',str(run)])
+    with pytest.raises(ValueError, match='does not support resumable training'):
+        train(args)
+    assert fingerprints(run) == before
+
+
+def _saved_diagnostic_run(case, tmp_path):
+    _, env, _, model, obs, _ = case
+    directory = tmp_path/'auxiliary_plan'
+    model.configure_diagnostics(directory, {'checkpoint':'best_model.pt'})
+    model.set_diagnostic_phase('formal_test', {'days':['2020-01-01'],'seeds':[17]})
+    actual = []
+    for t in range(24):
+        actions = model.select_actions(obs)
+        obs, _, _, info = env.step(actions)
+        row = dict(timestep=t)
+        for mg in env.agent_ids:
+            row.update({f'{mg}_soc':info['devices'][mg]['soc'],
+                f'{mg}_battery_charge_kw':info['devices'][mg]['charge_kw'],
+                f'{mg}_battery_discharge_kw':info['devices'][mg]['discharge_kw']})
+        actual.append(row)
+    model.set_diagnostic_phase(None, {'formal_test_complete':True})
+    (tmp_path/'test_summary.json').write_text(json.dumps({'checkpoint_used':'best_model.pt','test_days_count':1}))
+    (tmp_path/'test_daily_metrics.csv').write_text('date,test_seed\n2020-01-01,17\n')
     trajectory = tmp_path/'test_hourly_trajectories'
     trajectory.mkdir()
-    (trajectory/'2020-01-01.csv').write_text('timestep,mg1_soc,mg1_battery_charge_kw,mg1_battery_discharge_kw,mg2_soc,mg2_battery_charge_kw,mg2_battery_discharge_kw,mg3_soc,mg3_battery_charge_kw,mg3_battery_discharge_kw\n0,.5,0,0,.5,0,0,.5,0,0\n')
+    with (trajectory/'2020-01-01.csv').open('w',newline='') as stream:
+        writer = csv.DictWriter(stream,fieldnames=list(actual[0]))
+        writer.writeheader()
+        writer.writerows(actual)
+    return env, model, directory
+
+
+def test_saved_plotter_replots_without_policy_or_environment(case, tmp_path, monkeypatch):
+    from evaluation.plotting import generate_plan_diagnostic_figures
+    env,model,directory = _saved_diagnostic_run(case,tmp_path)
     monkeypatch.setattr(env, 'step', lambda *a: pytest.fail('plotter ran env'))
     monkeypatch.setattr(model, 'inspect_policy', lambda *a: pytest.fail('plotter ran policy'))
     before = {p:p.read_bytes() for p in directory.glob('*')}
@@ -70,6 +119,25 @@ def test_saved_plotter_replots_without_policy_or_environment(case, tmp_path, mon
     assert all(p.stat().st_size > 1000 for p in first)
     assert all(p.parent == tmp_path/'figures/plan_diagnostics' for p in first)
     assert before == {p:p.read_bytes() for p in directory.glob('*')}
+
+
+@pytest.mark.parametrize('corruption',['day','seed','truncated','duplicate'])
+def test_plotter_rejects_day_seed_or_incomplete_evidence(case, tmp_path, corruption):
+    from evaluation.plotting import generate_plan_diagnostic_figures
+    _, _, directory = _saved_diagnostic_run(case,tmp_path)
+    source = directory/'formal_test_plan_attention.jsonl'
+    rows = [json.loads(x) for x in source.read_text().splitlines()]
+    if corruption=='day':
+        (tmp_path/'test_daily_metrics.csv').write_text('date,test_seed\n2020-01-02,17\n')
+    elif corruption=='seed':
+        rows[0]['seed'] = 999
+    elif corruption=='truncated':
+        rows.pop()
+    else:
+        rows[-1] = rows[0]
+    source.write_text('\n'.join(json.dumps(r) for r in rows)+'\n')
+    with pytest.raises(ValueError, match='identity|coverage'):
+        generate_plan_diagnostic_figures(tmp_path,formats=('png',))
 
 
 def test_probe_perturbations_only_change_declared_valid_forecasts(case):

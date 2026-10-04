@@ -119,8 +119,10 @@ def capture_planning_context(env, observations, global_state, metadata) -> Plann
         if env.forecasts.valid(t, k) < .5:
             raise PlanningContextRejected('Missing valid forecast before episode end')
         for mg in ids:
-            forecast = env.forecasts.combined(mg, t, k)
-            if not all(np.isfinite(v) for v in forecast.values()):
+            public = env.forecasts.public(t, k)
+            local = env.forecasts.local(mg, t, k)
+            forecast = {**public, **local}
+            if not all(np.isfinite(v) for v in [*local.values(), *public.values()]):
                 raise PlanningContextRejected('Nonfinite forecast')
             pos = t + k
             for name in ('load_kw', 'pv_kw', 'wind_kw'):
@@ -128,12 +130,15 @@ def capture_planning_context(env, observations, global_state, metadata) -> Plann
             exogenous[mg]['renewable_kw'][pos] = forecast['pv_kw'] + forecast['wind_kw']
             frame.loc[pos, buy_price_column(mg)] = forecast['grid_price_per_kwh']
             frame.loc[pos, sell_price_column(mg)] = forecast['grid_sell_price_per_kwh']
+            if 'grid_price_per_kwh' in public:
+                frame.loc[pos, 'buy_price_per_kwh'] = public['grid_price_per_kwh']
+                frame.loc[pos, 'sell_price_per_kwh'] = forecast['grid_sell_price_per_kwh']
             dr_cfg = env.cfg_by_id[mg]['dr']
             if dr_cfg['type'] == 'commercial_hvac':
                 frame.loc[pos, dr_cfg['temperature_column']] = forecast['temperature_c']
                 frame.loc[pos, dr_cfg['ghi_column']] = forecast['ghi_w_per_m2']
-            frame.loc[pos, 'ghi_w_per_m2'] = forecast['ghi_w_per_m2']
-            frame.loc[pos, 'wind_speed_mps'] = forecast['wind_speed_mps']
+            frame.loc[pos, 'ghi_w_per_m2'] = public['ghi_w_per_m2']
+            frame.loc[pos, 'wind_speed_mps'] = public['wind_speed_mps']
     # Current heterogeneous tariffs remain exact; padding never reads tomorrow.
     for mg in ids:
         buy, sell = prices_from_row(current, mg)
@@ -155,7 +160,9 @@ def capture_planning_context(env, observations, global_state, metadata) -> Plann
     profiles.config = worker.config
     profiles.mg_cfg = worker.cfg_by_id
     profiles.train_frame = pd.DataFrame()
-    profiles._exogenous_cache = {mg: {} for mg in ids}
+    profiles._exogenous_cache = {mg: {int(timestamp.value): tuple(float(exogenous[mg][key][i])
+        for key in ('load_kw','pv_kw','wind_kw','renewable_kw'))
+        for i,timestamp in enumerate(frame['timestamp'])} for mg in ids}
     worker.profiles = profiles
     worker.forecasts = SharedForecastProvider(worker.config, profiles, seed=0)
     worker.forecasts.begin_episode(frame, seed=0, deterministic=True, forecast_noise=False,
@@ -209,7 +216,7 @@ def capture_planning_context(env, observations, global_state, metadata) -> Plann
     worker._terminated = False
     forecast_hash = digest(dict(frame=frame.to_dict('list'), exogenous=exogenous))
     contract_hash = digest(dict(config=worker.config, normalizers=env.obs_builder.norm,
-                                rule='causal-forecast-conditional-ev-v1'))
+                                rule='causal-forecast-local-weather-conditional-ev-v2'))
     context_hash = digest(dict(t=t, state=state, obs=obs, forecast=forecast_hash,
         contract=contract_hash, devices=devices_payload, history=worker.history,
         peak=worker.daily_load_peak_kw))
