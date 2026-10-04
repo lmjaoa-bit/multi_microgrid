@@ -1,0 +1,57 @@
+# Canonical flat Actor for the MATD3 dispatch experiment.
+algorithm:
+  name: matd3_plan_transformer
+  hidden_dims:
+  - 128
+  - 128
+  actor_lr: 0.0002
+  actor_max_grad_norm: 1.0
+  critic_lr: 0.0003
+  gamma: 1.0
+  tau: 0.005
+  policy_delay: 2
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  batch_size: 128
+  replay_capacity: 200000
+  warmup_steps: 1000
+  exploration_noise: 0.15
+runtime:
+  cpu_threads: 1
+training:
+  episodes: 5000
+  test_episodes: 55
+learning_curve:
+  enabled: true
+  interval_steps: 600
+  eval_episodes: 10
+  deterministic_policy: true
+  fixed_scenarios: true
+  evaluate_initial_policy: true
+  seed: 424242
+validation:
+  enabled: true
+  interval: 100
+  deterministic_policy: true
+  fixed_scenarios: true
+  selection:
+    mode: physical_constrained_objective
+    objective: team_reward_mean
+    constraints:
+      physical_feasible_day_rate: {min: 1.0, atol: 1.0e-7}
+      power_balance_residual_max_kw: {max: 0.0, atol: 1.0e-7}
+      source_balance_residual_max_kw: {max: 0.0, atol: 1.0e-7}
+      p2p_balance_residual_max_kw: {max: 0.0, atol: 1.0e-7}
+      device_bound_violation_max: {max: 0.0, atol: 1.0e-7}
+      grid_export_max_kw: {max: 0.0, atol: 1.0e-7}
+      unmet_energy_mean_kwh: {max: 0.0, atol: 1.0e-7}
+logging:
+  diagnostic_interval: 20
+  incremental_history: true
+  history_snapshot_interval: 500
+  dashboard: true
+  dashboard_refresh_hz: 4
+  rolling_windows:
+  - 50
+  - 100
+  - 500
