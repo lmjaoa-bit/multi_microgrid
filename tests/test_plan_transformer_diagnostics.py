@@ -70,3 +70,35 @@ def test_saved_plotter_replots_without_policy_or_environment(case, tmp_path, mon
     assert all(p.stat().st_size > 1000 for p in first)
     assert all(p.parent == tmp_path/'figures/plan_diagnostics' for p in first)
     assert before == {p:p.read_bytes() for p in directory.glob('*')}
+
+
+def test_probe_perturbations_only_change_declared_valid_forecasts(case):
+    from diagnostics.plan_transformer_probe import perturb_forecasts, probe_forecast_sensitivity
+    _, env, _, model, obs, _ = case
+    before = {mg:x.copy() for mg,x in obs.items()}
+    cases = [{'name':'move_peak','kind':'swap_energy_hours','hours':[5,6]},
+             {'name':'move_price','kind':'swap_price_hours','hours':[5,6]},
+             {'name':'midday_surplus','kind':'surplus_pv','hours':[12],'agent':'mg1'}]
+    for case_ in cases:
+        changed, interventions = perturb_forecasts(obs, model.actor_contract, case_)
+        assert interventions
+        for mg in env.agent_ids:
+            schema = model.observation_schemas[mg]
+            for i,name in enumerate(schema):
+                if '_t+' not in name or 'forecast_valid' in name:
+                    assert changed[mg][i] == obs[mg][i]
+            assert np.isfinite(changed[mg]).all()
+    surplus, _ = perturb_forecasts(obs, model.actor_contract, cases[2])
+    idx = model.observation_schemas['mg1'].index('pv_t+12')
+    assert surplus['mg1'][idx] == pytest.approx(obs['mg1'][idx]+.1)
+    reports = probe_forecast_sensitivity(model, obs, cases)
+    assert len(reports) == 3
+    assert all(r['diagnostic_only'] for r in reports)
+    assert all('attention_delta' in r['responses']['mg1'] for r in reports)
+    assert model.teacher.solve_calls == 0
+    for mg in env.agent_ids:
+        np.testing.assert_array_equal(obs[mg], before[mg])
+    for _ in range(23):
+        obs, _, _, _ = env.step({mg:np.zeros(2) for mg in env.agent_ids})
+    with pytest.raises(ValueError, match='valid'):
+        perturb_forecasts(obs, model.actor_contract, cases[0])

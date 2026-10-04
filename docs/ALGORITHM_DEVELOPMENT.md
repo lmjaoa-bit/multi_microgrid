@@ -149,3 +149,42 @@ A formal run must produce exactly 15 PNG and 15 PDF files under `figures/`.
 Under Reward V2, the training plot labels the optimized quantity as
 `Generalized Return`; accounting profit is shown separately and is not
 relabeled as reward.
+
+## Plan-Transformer experiment
+
+Run the isolated H24 actor through the same experiment workflow:
+
+```powershell
+python scripts/run_experiment.py --algorithm matd3_plan_transformer
+python scripts/run_experiment.py --algorithm matd3_plan_transformer --algorithm-config configs/smoke/matd3_plan_transformer.yaml --validation-days 2
+python scripts/probe_plan_transformer.py --run <completed_working_run> --output <new_study_directory>
+```
+
+The current two ESS/DR intents execute through the existing physical projector.
+The auxiliary head predicts SOC after each step and actual ESS discharge minus
+charge; its 24 slots are supervision outputs. NOW cross-attends valid forecast
+slots and two peer summaries through two layers. Forecast slot k refers to t+k;
+plan slot j refers to dispatch t+j and resulting SOC at t+j+1.
+
+The CEM teacher uses current state and frozen currently available predictions in
+a sanitized copy of the environment. It runs the same physical dispatch and
+generalized-cost calculation, retaining the best feasible candidate found within
+its budget. This is approximate optimization without an optimality certificate.
+Future carbon persists at its observed value. Unrevealed EV sessions use the
+public cohort prior; realized future session samples and future episode rows
+never enter labels. Teacher sampling has a separate RNG and does not change the
+training environment. Inference and formal testing do not run the teacher.
+
+Version one supports inference checkpoints and explicitly rejects training
+resume: the teacher pool, cache, counters, and RNG are not recovery snapshots.
+Auxiliary evidence lives in each run's `auxiliary_plan/`; additional plots live
+in `figures/plan_diagnostics/`, alongside the unchanged 15 standard PNG/PDF pairs.
+These plots read saved files only. Missing supervision fails training acceptance.
+
+For the no-supervision ablation, copy this plugin's YAML to a temporary file and
+set `algorithm.auxiliary_plan.lambda_plan`, `lambda_dyn`, and `lambda_first` to
+zero. Keep the network, seed, environment and RL hyperparameters identical and
+use `--algorithm-config` with the same slug. This disables all teacher capture.
+Assess effects with paired multi-seed training/validation/test studies. A short
+smoke run verifies execution only; attention heatmaps and controlled forecast
+probes do not establish performance improvements or causal credit assignment.

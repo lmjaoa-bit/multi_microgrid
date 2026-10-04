@@ -60,6 +60,7 @@ class Matd3PlanTransformer(Matd3Dispatch):
         self.actor_contract = dict(version='now-cross-attention-plan-v1', network=network,
             auxiliary_plan=auxiliary, observation_schemas=self.observation_schemas,
             normalizers=deepcopy(env.obs_builder.norm), batteries=self.battery_configs,
+            renewable_capacities={mg: deepcopy(env.cfg_by_id[mg]['renewables']) for mg in self.agent_ids},
             peer_orders=peers, masks=masks, power_sign='positive_discharge_negative_charge', gamma=self.gamma)
         self.reward_v2_contract = build_reward_v2_contract(env.config, self.observation_schemas,
             self.state_schema, dict(by_microgrid=deepcopy(env.obs_builder.norm),
