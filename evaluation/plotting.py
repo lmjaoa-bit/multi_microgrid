@@ -823,7 +823,8 @@ def generate_plan_diagnostic_figures(run_dir: str | Path, formats=('png','pdf'))
                     matrix[r['t']] = np.where(valid, weights, np.nan)
                 ax = axes[layer,head]
                 artist = ax.imshow(np.ma.masked_invalid(matrix), cmap='viridis', vmin=0, vmax=np.nanmax(matrix), aspect='auto')
-                ax.set_xticks([0,5,11,17,23,24,25], ['+1','+6','+12','+18','+24',*samples[0]['peer_order']])
+                ax.set_xticks([0,5,11,17,23,24,25], ['+1','+6','+12','+18','+24',*samples[0]['peer_order']],
+                              rotation=60, ha='right', fontsize=8)
                 ax.set_yticks([0,6,12,18,23])
                 ax.set_xlabel('Forecast relative hour / peer')
                 ax.set_ylabel('Current hour t (forecast hour = t + k)')
