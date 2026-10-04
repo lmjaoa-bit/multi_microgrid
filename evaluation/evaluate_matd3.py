@@ -619,13 +619,16 @@ def _evaluate_algorithm_policy(algorithm, env, days, output_dir, metadata, *, se
         algorithm.configure_diagnostics(Path(output_dir) / 'auxiliary_plan', metadata)
         algorithm.set_diagnostic_phase('formal_test',
             {'days': days, 'seeds': [int(seed) + i for i in range(len(days))]})
+    completed = False
     try:
-        return evaluate_policy_on_days(env, days,
+        result = evaluate_policy_on_days(env, days,
             lambda obs: algorithm.select_actions(obs, noise_std=0.0), seed=seed,
             deterministic_environment=True, forecast_noise=forecast_noise, capture_hourly=True)
+        completed = True
+        return result
     finally:
         if diagnostics:
-            algorithm.set_diagnostic_phase(None, {'formal_test_complete': True})
+            algorithm.set_diagnostic_phase(None, {'formal_test_complete': completed})
 
 
 def evaluate(

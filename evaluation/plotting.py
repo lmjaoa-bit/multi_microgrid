@@ -750,4 +750,81 @@ def generate_figures(
     # Paper-specific representative-day figures remain available through
     # generate_paper_artifacts(), but are generated explicitly so a normal run
     # does not silently change its artifact contract.
+    written += generate_plan_diagnostic_figures(run_dir, formats=formats)
+    return written
+
+
+def generate_plan_diagnostic_figures(run_dir: str | Path, formats=('png','pdf')) -> list[Path]:
+    """Render auxiliary evidence exclusively from saved observations/trajectories."""
+    import matplotlib.pyplot as plt
+    root = Path(run_dir)
+    source = root/'auxiliary_plan/formal_test_plan_attention.jsonl'
+    if not source.exists():
+        return []
+    manifest = json.loads((root/'auxiliary_plan/manifest.json').read_text(encoding='utf-8'))
+    rows = [json.loads(line) for line in source.read_text(encoding='utf-8').splitlines() if line]
+    expected_days = manifest['formal_test']['days']
+    checkpoint = manifest['metadata'].get('checkpoint')
+    if any(r['day'] not in expected_days or r['checkpoint'] != checkpoint or
+           r['checkpoint_sha256'] != manifest.get('checkpoint_sha256') for r in rows):
+        raise ValueError('Saved plan diagnostic checkpoint/day mismatch')
+    summary_path = root/'test_summary.json'
+    if summary_path.exists():
+        summary = json.loads(summary_path.read_text(encoding='utf-8'))
+        if summary.get('checkpoint_used', summary.get('checkpoint_path', checkpoint)) != checkpoint:
+            raise ValueError('Plan diagnostics disagree with formal test checkpoint')
+        if 'checkpoint_sha256' in summary and summary['checkpoint_sha256'] != manifest.get('checkpoint_sha256'):
+            raise ValueError('Plan diagnostics disagree with checkpoint hash')
+        if 'test_days' in summary and summary['test_days'] != expected_days:
+            raise ValueError('Plan diagnostics disagree with test days')
+    directory = root/'figures/plan_diagnostics'
+    directory.mkdir(parents=True, exist_ok=True)
+    written = []
+    groups = sorted({(r['day'], r['agent']) for r in rows})
+    for day, mg in groups:
+        samples = sorted([r for r in rows if r['day']==day and r['agent']==mg], key=lambda r:r['t'])
+        heads = len(samples[0]['attention'][0])
+        fig, axes = plt.subplots(2, heads, figsize=(4*heads,7), squeeze=False, constrained_layout=True)
+        for layer in range(2):
+            for head in range(heads):
+                matrix = np.full((24,26), np.nan)
+                for r in samples:
+                    weights = np.asarray(r['attention'][layer][head], dtype=float)
+                    valid = np.r_[r['forecast_mask'], [True,True]]
+                    matrix[r['t']] = np.where(valid, weights, np.nan)
+                ax = axes[layer,head]
+                artist = ax.imshow(np.ma.masked_invalid(matrix), cmap='viridis', vmin=0, vmax=np.nanmax(matrix), aspect='auto')
+                ax.set_xticks([0,5,11,17,23,24,25], ['+1','+6','+12','+18','+24',*samples[0]['peer_order']])
+                ax.set_yticks([0,6,12,18,23])
+                ax.set_xlabel('Forecast relative hour / peer')
+                ax.set_ylabel('Current hour t (forecast hour = t + k)')
+                ax.set_title(f'Layer {layer+1}, head {head+1}')
+                fig.colorbar(artist, ax=ax, shrink=.7)
+        fig.suptitle(f'{mg.upper()} {day}: NOW cross-attention (masked cells blank)')
+        written += _save(fig, directory, f'{day}_{mg}_attention', formats)
+        trajectory_path = root/'test_hourly_trajectories'/f'{day}.csv'
+        if not trajectory_path.exists():
+            raise FileNotFoundError(f'Actual trajectory missing: {trajectory_path}')
+        actual = pd.read_csv(trajectory_path)
+        fig, axes = plt.subplots(2,1,figsize=(11,7),sharex=True)
+        for r in samples:
+            valid = np.asarray(r['plan_mask'], dtype=bool)
+            hours = r['t'] + np.arange(24)
+            axes[0].plot(hours[valid]+1, np.asarray(r['soc_after'])[valid], alpha=.22, color=BLUE)
+            axes[1].plot(hours[valid], np.asarray(r['ess_net_kw'])[valid], alpha=.22, color=BLUE)
+        first = samples[0]
+        valid = np.asarray(first['plan_mask'], dtype=bool)
+        axes[0].plot((first['t']+np.arange(24)+1)[valid], np.asarray(first['soc_after'])[valid], color=BLUE, label=f"Auxiliary plan at t={first['t']}", marker='.', markersize=3)
+        axes[1].plot((first['t']+np.arange(24))[valid], np.asarray(first['ess_net_kw'])[valid], color=BLUE, label='Auxiliary ESS plan', marker='.', markersize=3)
+        axes[0].plot(actual['timestep']+1, actual[f'{mg}_soc'], color=ORANGE, label='Actual SOC after dispatch', marker='.', markersize=3)
+        axes[1].plot(actual['timestep'], actual[f'{mg}_battery_discharge_kw']-actual[f'{mg}_battery_charge_kw'], color=ORANGE, label='Actual ESS discharge - charge', marker='.', markersize=3)
+        axes[0].set_ylabel('SOC at resulting boundary')
+        axes[1].set_ylabel('ESS net power (kW)')
+        axes[1].set_xlabel('Hour (SOC boundary t+1; ESS interval t)')
+        axes[0].set_title(f'{mg.upper()} {day}: auxiliary plans and actual dispatch')
+        for ax in axes:
+            ax.legend()
+            ax.grid(alpha=.25)
+        fig.tight_layout()
+        written += _save(fig,directory,f'{day}_{mg}_plans',formats)
     return written

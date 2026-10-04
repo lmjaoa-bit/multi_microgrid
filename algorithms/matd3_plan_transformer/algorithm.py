@@ -13,6 +13,7 @@ from .forecast_scenario import PlanningContextRejected, capture_planning_context
 from .plan_losses import plan_loss_terms
 from .plan_teacher import PlanTeacher
 from .replay_buffer import PlanReplayBuffer
+from .diagnostics import PlanDiagnosticsRecorder, write_json
 
 
 class Matd3PlanTransformer(Matd3Dispatch):
@@ -66,6 +67,24 @@ class Matd3PlanTransformer(Matd3Dispatch):
                 carbon_factor_scale=float(env.obs_builder.carbon_factor_scale)),
             algorithm_slug='matd3_plan_transformer', actor_forecast_context_version='causal-h24-plan-v1',
             peer_orders=peers, mask_semantics=masks, gamma=self.gamma, action_semantics=self.projector.semantics)
+
+    def configure_diagnostics(self, directory, metadata):
+        self.recorder = PlanDiagnosticsRecorder(directory, metadata, self.actor_contract)
+
+    def set_diagnostic_phase(self, phase, metadata):
+        if self.recorder is None:
+            raise ValueError('Configure diagnostics before setting a phase')
+        self.recorder.set_phase(phase, metadata)
+        if metadata.get('training_complete'):
+            summary = dict(enabled=self.auxiliary_enabled, teacher_solve_calls=self.teacher.solve_calls,
+                valid_labels=len(self.replay.labels), actor_auxiliary_update_count=self.actor_auxiliary_update_count,
+                context_rejections=self.context_rejection_count, rejection_reasons=self.rejection_reasons)
+            write_json(self.recorder.directory/'training_supervision_summary.json', summary)
+            if self.auxiliary_enabled and (not self.replay.labels or not self.actor_auxiliary_update_count):
+                raise RuntimeError('Enabled plan supervision did not produce labels and Actor updates')
+        if metadata.get('formal_test_complete'):
+            write_json(self.recorder.directory/'formal_test_teacher_summary.json',
+                       dict(teacher_solve_calls=self.teacher.solve_calls))
 
     def capture_training_context(self, env, observations, global_state, metadata):
         if (not self.auxiliary_enabled or env.split != 'train' or env.t not in self.capture_hours or
