@@ -1,0 +1,15 @@
+{
+  "checkpoint_sha256": "dbdcb3edcfc43745fd7869211209c5c54e90bce6aa86ade7573511d6df629cdc",
+  "episode": 4600,
+  "script_sha256": "677ad510fa7bc94e95b0b1c8558dea0c4003e292737db891267062ccfb0cff8c",
+  "parent_checkpoint_sha256": "b2e53e4f846189ae482210325d3219243f9ac7b1a57901abae8b25677a8c4f11",
+  "input_hashes": {
+    "reports\\hvac_audit_20261007\\counterfactual_probes.csv": "4b5055aae1a022295c193c48a4c869d9f1f55970fcaf59a73b1a2e62407c0a90",
+    "reports\\dr_critic_audit_20261007\\counterfactual_probes.csv": "f467b66415cd99a88132063fa1745386bcef9033edf4899d5226d4b6cafcbffe"
+  },
+  "extra_source_hashes": {
+    "core\\global_state.py": "a3a4184168551545edae2dcd7a6aae23b9156bdee2a9d08807e09bc13662de80",
+    "components\\ev_sessions.py": "70a7272aacbdbe8208ffdd430da3e18afa5e02e7515d963f6239fdeb2e41c26d"
+  },
+  "learning_updates": 0
+}

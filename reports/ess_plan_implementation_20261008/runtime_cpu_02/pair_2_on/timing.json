@@ -1,0 +1,21 @@
+{
+  "slug": "matd3_ess_plan_transformer",
+  "enabled": true,
+  "seed": 44,
+  "episodes": 12,
+  "seconds": 101.26991799997631,
+  "cold_warmup_seconds": 6.979234599974006,
+  "updates": 305,
+  "config_hash": "efc250366f172354a5c2ba41df947d7c33224c73c384b506f16bb60522d46bcb",
+  "device": "cpu",
+  "teacher_calls": 2,
+  "teacher_total_seconds": 0.545905299950391,
+  "valid_labels": 2,
+  "supervision_updates": 14,
+  "rejections": {},
+  "skipped": {},
+  "inference_uses_teacher": false,
+  "label_source_split": "train",
+  "overhead_target_fraction": 0.2,
+  "overhead_target_measured": false
+}

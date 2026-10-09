@@ -7,6 +7,7 @@ import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
+from experiments.layout import artifact_directory, run_root
 from typing import Any, Mapping
 
 
@@ -72,7 +73,7 @@ def capture_git_identity(project_root: str | Path) -> dict[str, Any]:
 
 
 def update_run_metadata_git_identity(run_dir: str | Path, identity: Mapping[str, Any]) -> None:
-    path = Path(run_dir) / "run_metadata.json"
+    path = artifact_directory(run_dir) / "run_metadata.json"
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -102,17 +103,18 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _inspect_run(run_dir: Path, *, require_directory_name: bool) -> dict[str, Any]:
-    run_dir = run_dir.resolve()
+    run_dir = run_root(run_dir)
+    artifacts = artifact_directory(run_dir)
     if not run_dir.is_dir():
         raise PromotionError(f"Run directory does not exist: {run_dir}")
     for relative in _REQUIRED_ARTIFACTS:
-        path = run_dir / relative
+        path = artifacts / relative
         if not path.exists():
             raise PromotionError(f"Missing required artifact: {relative}")
 
-    metadata = _read_json(run_dir / "run_metadata.json")
-    training_summary = _read_json(run_dir / "training_summary.json")
-    summary = _read_json(run_dir / "summary.json")
+    metadata = _read_json(artifacts / "run_metadata.json")
+    training_summary = _read_json(artifacts / "training_summary.json")
+    summary = _read_json(artifacts / "summary.json")
 
     run_id = metadata.get("run_id")
     if not isinstance(run_id, str) or not run_id:
@@ -134,10 +136,10 @@ def _inspect_run(run_dir: Path, *, require_directory_name: bool) -> dict[str, An
     if not isinstance(checkpoint_selection, dict):
         raise PromotionError("checkpoint_selection must be a JSON object")
     if checkpoint_selection.get("selection_metric") == "validation_team_profit_mean":
-        if not (run_dir / "validation_history.json").exists():
+        if not (artifacts / "validation_history.json").exists():
             raise PromotionError("Missing required artifact: validation_history.json")
 
-    if not ((run_dir / "test_summary.json").exists() or (run_dir / "test_evaluation.json").exists()):
+    if not ((artifacts / "test_summary.json").exists() or (artifacts / "test_evaluation.json").exists()):
         raise PromotionError("Missing formal test artifact: test_summary.json or test_evaluation.json")
     try:
         test_days_count = int(summary.get("test_days_count", 0))
@@ -207,7 +209,7 @@ def _repair_copied_json_paths(temp_dir: Path, source: Path, final_dir: Path) -> 
         "test_evaluation.json",
         "test_summary.json",
     ):
-        path = temp_dir / name
+        path = artifact_directory(temp_dir) / name
         if not path.exists():
             continue
         try:
@@ -274,7 +276,7 @@ def promote_run(
     allow_dirty: bool = False,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    source = Path(run_dir).resolve()
+    source = run_root(run_dir)
     releases_root = Path(releases_root).resolve()
     release_name = validate_release_name(release_name)
     info = inspect_run(source)

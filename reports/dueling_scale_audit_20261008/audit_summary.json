@@ -1,0 +1,323 @@
+{
+  "checkpoint_episode": 1900,
+  "checkpoint_sha256": "b2e53e4f846189ae482210325d3219243f9ac7b1a57901abae8b25677a8c4f11",
+  "days": 55,
+  "scale_stats": [
+    {
+      "agent": "mg1",
+      "branch": 1,
+      "hours": 1320,
+      "mean_abs_v": 4.549456957270476,
+      "mean_abs_adv": 0.17655362026257948,
+      "mean_abs_adv_over_mean_abs_v": 0.03880762515632323,
+      "median_abs_v": 3.0553202629089355,
+      "median_abs_adv": 0.13252073526382446,
+      "adv_std": 0.20097318017277552,
+      "q_std": 4.9541012239242335,
+      "adv_std_over_q_std": 0.040567031453099985,
+      "mc_q_rmse": 1.4626810252451683,
+      "dr_effective_action_gradient_rms": 0.1705861442102237
+    },
+    {
+      "agent": "mg1",
+      "branch": 2,
+      "hours": 1320,
+      "mean_abs_v": 4.550266913155263,
+      "mean_abs_adv": 0.1666073190556331,
+      "mean_abs_adv_over_mean_abs_v": 0.03661484529049388,
+      "median_abs_v": 2.949523687362671,
+      "median_abs_adv": 0.13037022948265076,
+      "adv_std": 0.18975441648420832,
+      "q_std": 5.196009542819066,
+      "adv_std_over_q_std": 0.03651925865810826,
+      "mc_q_rmse": 1.2253398819118948,
+      "dr_effective_action_gradient_rms": null
+    },
+    {
+      "agent": "mg2",
+      "branch": 1,
+      "hours": 1320,
+      "mean_abs_v": 4.716887650164691,
+      "mean_abs_adv": 0.1811626349208933,
+      "mean_abs_adv_over_mean_abs_v": 0.03840723976424751,
+      "median_abs_v": 3.0894834995269775,
+      "median_abs_adv": 0.13259997963905334,
+      "adv_std": 0.20386833260281434,
+      "q_std": 5.215379225663953,
+      "adv_std_over_q_std": 0.039089838683180424,
+      "mc_q_rmse": 1.321774554159208,
+      "dr_effective_action_gradient_rms": 0.20525644405356552
+    },
+    {
+      "agent": "mg2",
+      "branch": 2,
+      "hours": 1320,
+      "mean_abs_v": 4.670168770758689,
+      "mean_abs_adv": 0.15850872754711998,
+      "mean_abs_adv_over_mean_abs_v": 0.03394068508607014,
+      "median_abs_v": 3.058557868003845,
+      "median_abs_adv": 0.11150729656219482,
+      "adv_std": 0.20182945848088238,
+      "q_std": 5.367047880937823,
+      "adv_std_over_q_std": 0.03760530238564134,
+      "mc_q_rmse": 1.346598702908322,
+      "dr_effective_action_gradient_rms": null
+    },
+    {
+      "agent": "mg3",
+      "branch": 1,
+      "hours": 1320,
+      "mean_abs_v": 4.650570151280386,
+      "mean_abs_adv": 0.16303613324734298,
+      "mean_abs_adv_over_mean_abs_v": 0.035057235552603414,
+      "median_abs_v": 2.936726212501526,
+      "median_abs_adv": 0.1184188723564148,
+      "adv_std": 0.19495761747824986,
+      "q_std": 5.327336559590574,
+      "adv_std_over_q_std": 0.03659570130354841,
+      "mc_q_rmse": 1.4352764118666452,
+      "dr_effective_action_gradient_rms": 0.5840763431655965
+    },
+    {
+      "agent": "mg3",
+      "branch": 2,
+      "hours": 1320,
+      "mean_abs_v": 4.748300580240109,
+      "mean_abs_adv": 0.1973533251068809,
+      "mean_abs_adv_over_mean_abs_v": 0.04156293852334455,
+      "median_abs_v": 3.0432116985321045,
+      "median_abs_adv": 0.147308349609375,
+      "adv_std": 0.22223562901543986,
+      "q_std": 5.373960752466624,
+      "adv_std_over_q_std": 0.041354159297392466,
+      "mc_q_rmse": 1.308055374438151,
+      "dr_effective_action_gradient_rms": null
+    }
+  ],
+  "local_delta_stats": [
+    {
+      "agent": "mg1",
+      "branch": 1,
+      "local_pairs": 50,
+      "meaningful_pairs": 26,
+      "median_abs_actual_delta": 0.0013179647946543502,
+      "median_abs_predicted_delta": 0.004028916358947754,
+      "median_abs_prediction_error": 0.003640390967105899,
+      "predicted_under_actual_fraction": 0.28,
+      "meaningful_sign_wrong": 6,
+      "meaningful_predicted_near_zero": 0,
+      "prediction_worse_than_zero_in_local_mse": true,
+      "local_prediction_mse": 4.0218057768445016e-05,
+      "zero_prediction_mse": 1.7477505535032427e-05
+    },
+    {
+      "agent": "mg1",
+      "branch": 2,
+      "local_pairs": 50,
+      "meaningful_pairs": 26,
+      "median_abs_actual_delta": 0.0013179647946543502,
+      "median_abs_predicted_delta": 0.004247903823852539,
+      "median_abs_prediction_error": 0.004090249413389631,
+      "predicted_under_actual_fraction": 0.34,
+      "meaningful_sign_wrong": 4,
+      "meaningful_predicted_near_zero": 0,
+      "prediction_worse_than_zero_in_local_mse": true,
+      "local_prediction_mse": 3.33257963697224e-05,
+      "zero_prediction_mse": 1.7477505535032427e-05
+    },
+    {
+      "agent": "mg2",
+      "branch": 1,
+      "local_pairs": 95,
+      "meaningful_pairs": 51,
+      "median_abs_actual_delta": 0.0012369501821853,
+      "median_abs_predicted_delta": 0.0029600858688354492,
+      "median_abs_prediction_error": 0.003358503341433166,
+      "predicted_under_actual_fraction": 0.42105263157894735,
+      "meaningful_sign_wrong": 16,
+      "meaningful_predicted_near_zero": 0,
+      "prediction_worse_than_zero_in_local_mse": true,
+      "local_prediction_mse": 7.986018295015921e-05,
+      "zero_prediction_mse": 6.43316357637658e-05
+    },
+    {
+      "agent": "mg2",
+      "branch": 2,
+      "local_pairs": 95,
+      "meaningful_pairs": 51,
+      "median_abs_actual_delta": 0.0012369501821853,
+      "median_abs_predicted_delta": 0.0024666786193847656,
+      "median_abs_prediction_error": 0.003598079575079639,
+      "predicted_under_actual_fraction": 0.3894736842105263,
+      "meaningful_sign_wrong": 22,
+      "meaningful_predicted_near_zero": 0,
+      "prediction_worse_than_zero_in_local_mse": true,
+      "local_prediction_mse": 6.439607820783066e-05,
+      "zero_prediction_mse": 6.43316357637658e-05
+    },
+    {
+      "agent": "mg3",
+      "branch": 1,
+      "local_pairs": 48,
+      "meaningful_pairs": 15,
+      "median_abs_actual_delta": 0.00026200172237354996,
+      "median_abs_predicted_delta": 0.004709362983703613,
+      "median_abs_prediction_error": 0.0049750444442129066,
+      "predicted_under_actual_fraction": 0.14583333333333334,
+      "meaningful_sign_wrong": 8,
+      "meaningful_predicted_near_zero": 0,
+      "prediction_worse_than_zero_in_local_mse": true,
+      "local_prediction_mse": 8.5971042366416e-05,
+      "zero_prediction_mse": 3.1642686519879505e-05
+    },
+    {
+      "agent": "mg3",
+      "branch": 2,
+      "local_pairs": 48,
+      "meaningful_pairs": 15,
+      "median_abs_actual_delta": 0.00026200172237354996,
+      "median_abs_predicted_delta": 0.0037088394165039062,
+      "median_abs_prediction_error": 0.00525667137799547,
+      "predicted_under_actual_fraction": 0.14583333333333334,
+      "meaningful_sign_wrong": 11,
+      "meaningful_predicted_near_zero": 0,
+      "prediction_worse_than_zero_in_local_mse": true,
+      "local_prediction_mse": 6.80848035305395e-05,
+      "zero_prediction_mse": 3.1642686519879505e-05
+    }
+  ],
+  "training_trend": [
+    {
+      "episode_range": [
+        1,
+        100
+      ],
+      "agent": "mg1",
+      "diagnostic_episodes": 58,
+      "median_adv_abs_mean": 0.24523964524269104,
+      "median_abs_v_mean": 2.1599624156951904,
+      "median_adv_share": 0.15590935945510864,
+      "median_dr_action_gradient_rms": 0.17804771661758423,
+      "median_actor_dr_saturation_rate": 0.984375
+    },
+    {
+      "episode_range": [
+        1,
+        100
+      ],
+      "agent": "mg2",
+      "diagnostic_episodes": 58,
+      "median_adv_abs_mean": 0.23876755684614182,
+      "median_abs_v_mean": 2.270537495613098,
+      "median_adv_share": 0.15075089037418365,
+      "median_dr_action_gradient_rms": 0.17141136527061462,
+      "median_actor_dr_saturation_rate": 0.23828125
+    },
+    {
+      "episode_range": [
+        1,
+        100
+      ],
+      "agent": "mg3",
+      "diagnostic_episodes": 58,
+      "median_adv_abs_mean": 0.20037029683589935,
+      "median_abs_v_mean": 1.9475436806678772,
+      "median_adv_share": 0.16649088263511658,
+      "median_dr_action_gradient_rms": 0.46996189653873444,
+      "median_actor_dr_saturation_rate": 0.74609375
+    },
+    {
+      "episode_range": [
+        1600,
+        1900
+      ],
+      "agent": "mg1",
+      "diagnostic_episodes": 301,
+      "median_adv_abs_mean": 0.21479777991771698,
+      "median_abs_v_mean": 4.233197212219238,
+      "median_adv_share": 0.051346249878406525,
+      "median_dr_action_gradient_rms": 0.1857849359512329,
+      "median_actor_dr_saturation_rate": 0.8515625
+    },
+    {
+      "episode_range": [
+        1600,
+        1900
+      ],
+      "agent": "mg2",
+      "diagnostic_episodes": 301,
+      "median_adv_abs_mean": 0.22489941120147705,
+      "median_abs_v_mean": 4.210119247436523,
+      "median_adv_share": 0.05108504742383957,
+      "median_dr_action_gradient_rms": 0.1981883943080902,
+      "median_actor_dr_saturation_rate": 0.015625
+    },
+    {
+      "episode_range": [
+        1600,
+        1900
+      ],
+      "agent": "mg3",
+      "diagnostic_episodes": 301,
+      "median_adv_abs_mean": 0.20689721405506134,
+      "median_abs_v_mean": 4.25955057144165,
+      "median_adv_share": 0.0483241006731987,
+      "median_dr_action_gradient_rms": 0.6309503316879272,
+      "median_actor_dr_saturation_rate": 0.984375
+    },
+    {
+      "episode_range": [
+        4700,
+        5000
+      ],
+      "agent": "mg1",
+      "diagnostic_episodes": 301,
+      "median_adv_abs_mean": 0.18089622259140015,
+      "median_abs_v_mean": 3.922428607940674,
+      "median_adv_share": 0.043520763516426086,
+      "median_dr_action_gradient_rms": 0.13581505417823792,
+      "median_actor_dr_saturation_rate": 0.890625
+    },
+    {
+      "episode_range": [
+        4700,
+        5000
+      ],
+      "agent": "mg2",
+      "diagnostic_episodes": 301,
+      "median_adv_abs_mean": 0.17066238075494766,
+      "median_abs_v_mean": 3.902996301651001,
+      "median_adv_share": 0.040036968886852264,
+      "median_dr_action_gradient_rms": 0.13566024601459503,
+      "median_actor_dr_saturation_rate": 0.0234375
+    },
+    {
+      "episode_range": [
+        4700,
+        5000
+      ],
+      "agent": "mg3",
+      "diagnostic_episodes": 301,
+      "median_adv_abs_mean": 0.16896983981132507,
+      "median_abs_v_mean": 3.928335666656494,
+      "median_adv_share": 0.039824485778808594,
+      "median_dr_action_gradient_rms": 0.4754374921321869,
+      "median_actor_dr_saturation_rate": 0.9921875
+    }
+  ],
+  "last_training_episode": 5000,
+  "checks": {
+    "candidate_v_spread_max": 5.7220458984375e-06,
+    "candidate_q_match_max": 7.62939453125e-06,
+    "candidate_dq_minus_dadv_max": 4.76837158203125e-06,
+    "action_gradient_q_minus_adv_max": 0.0
+  },
+  "caveats": [
+    "Frozen episode-1900 model; late training rows are historical diagnostics of evolving models, not this snapshot.",
+    "V is Q at the zero EFFECTIVE joint action, not necessarily a feasible or policy-average baseline.",
+    "Advantage is centred relative to the joint zero reference, includes all agents/devices, and depends on reference choice.",
+    "Candidate state sample is stratified, not random. Local true gain is deterministic online-policy return difference; training target is smoothed.",
+    "Training diagnostic episode averages are recorded sample statistics, not all updates. No saved replay/optimizer/gradient trajectory is available.",
+    "No retraining or ablation performed; scale observations do not establish that V dominance caused advantage errors."
+  ]
+}

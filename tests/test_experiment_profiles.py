@@ -42,19 +42,7 @@ def command(*argv):
 def test_default_and_public_selectors_keep_matd3_default(catalog_root):
     assert default_profile(catalog_root) == "matd3"
     assert resolve_training_args(command(), catalog_root).algorithm == "matd3_dispatch"
-    assert set(available_algorithm_names()) == {
-        "matd3_dispatch",
-        "matd3_dispatch_exploration",
-        "matd3_dispatch_q_guided",
-        "matd3_forecast_context",
-        "matd3_hierarchical_transformer",
-            "matd3_hierarchical_transformer_q_guided",
-        "matd3_hierarchical_transformer_q_readout",
-        "matd3_mlp_transformer_critic_q_guided",
-        "matd3_mlp_transformer_critic_h24_q_guided",
-        "matd3_mlp_dueling_critic_h24_q_guided",
-        "matd3_plan_transformer",
-    }
+    assert {"matd3_dispatch", "matd3_hierarchical_transformer"} <= set(available_algorithm_names())
     assert get_algorithm_spec("matd3").slug == "matd3_dispatch"
     assert set(catalog("action_designs")) == {"single_dispatch", "single_dispatch_dr"}
     assert set(catalog("experiment_profiles")) == {"matd3", "ordinary_t"}

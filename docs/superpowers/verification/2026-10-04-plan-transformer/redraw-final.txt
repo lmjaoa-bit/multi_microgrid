@@ -1,1 +1,0 @@
-Saved-only redraw verified; 54 figures; checkpoint/JSON/CSV unchanged

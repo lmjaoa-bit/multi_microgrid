@@ -297,14 +297,17 @@ def solve_dispatch(
                     dr_power[(mg,t)] = heat + cool
                     t_out, q_solar, q_internal = device._exogenous(t)
                     air, mass = dr[(mg,"air",t)], dr[(mg,"mass",t)]
+                    a, b = device.thermal_state_matrix, device.thermal_input_matrix
+                    air_input = (t_out / device.r_oa + q_internal +
+                                 device.solar_air_fraction * q_solar +
+                                 device.cop_heat * heat - device.cop_cool * cool)
+                    mass_input = (1.0 - device.solar_air_fraction) * q_solar
                     model.addConstr(dr[(mg,"air",t+1)] ==
-                        air + dt / device.c_air * ((t_out-air)/device.r_oa +
-                        (mass-air)/device.r_am + q_internal +
-                        device.solar_air_fraction*q_solar +
-                        device.cop_heat*heat - device.cop_cool*cool))
+                        a[0, 0] * air + a[0, 1] * mass +
+                        b[0, 0] * air_input + b[0, 1] * mass_input)
                     model.addConstr(dr[(mg,"mass",t+1)] ==
-                        mass + dt/device.c_mass * ((air-mass)/device.r_am +
-                        (1.0-device.solar_air_fraction)*q_solar))
+                        a[1, 0] * air + a[1, 1] * mass +
+                        b[1, 0] * air_input + b[1, 1] * mass_input)
                     low, high = device._state_comfort_bounds(t+1)
                     if generalized:
                         low_slack = dvar(
@@ -1063,6 +1066,9 @@ def solve_dispatch(
                               "cooperative_effective": cooperative,
                               "objective_kind": objective_kind,
                               "hvac_comfort_semantics": hvac_comfort_semantics,
+                              "hvac_thermal_discretization": {
+                                  mg: dr_devices[mg].thermal_discretization for mg in hvac_ids
+                              },
                               "solver_objective_value": solver_objective_value,
                               "solver_objective_bound": solver_bound,
                               "solver_mip_gap": solver_gap,

@@ -19,6 +19,7 @@ import torch
 import yaml
 
 from algorithms.registry import get_algorithm_spec
+from algorithms.base import TrainingContextConsumerProtocol
 from envs.multi_microgrid_env import MultiMicrogridEnv
 from utils.runtime_benchmark import (
     apply_runtime_recommendation,
@@ -118,14 +119,22 @@ def _random_actions(env, rng: np.random.Generator):
     }
 
 
-def _prefill_replay(env, algorithm, batch_size: int, seed: int) -> None:
+def _capture_context(algorithm, env, observations, state, episode, total_steps, day):
+    if isinstance(algorithm, TrainingContextConsumerProtocol):
+        algorithm.capture_training_context(env, observations, state,
+            {"episode_index": episode, "total_steps": total_steps, "day": str(day)})
+
+
+def _prefill_replay(env, algorithm, batch_size: int, seed: int, *, learning_starts: int = 0) -> None:
     rng = np.random.default_rng(seed + 900_000)
+    threshold = max(batch_size, learning_starts)
     episode = 0
-    while len(algorithm.replay) < batch_size:
+    while len(algorithm.replay) < threshold:
         observations, info = env.reset(seed=seed + 800_000 + episode)
         state = info["global_state"]
         done = False
-        while not done and len(algorithm.replay) < batch_size:
+        while not done and len(algorithm.replay) < threshold:
+            _capture_context(algorithm, env, observations, state, episode, len(algorithm.replay), info["day"])
             actions = _random_actions(env, rng)
             next_observations, rewards, done, step_info = env.step(actions)
             algorithm.replay.add(
@@ -161,7 +170,8 @@ def _worker(args: argparse.Namespace) -> dict[str, object]:
         _maybe_compile_actors(algorithm)
     compile_setup_seconds = time.perf_counter() - compile_started
 
-    _prefill_replay(env, algorithm, batch_size, args.seed)
+    learning_starts = int(settings.get("learning_starts", 0))
+    _prefill_replay(env, algorithm, batch_size, args.seed, learning_starts=learning_starts)
     for _ in range(max(0, int(args.warmup_updates))):
         algorithm.update(batch_size)
     _sync(args.device)
@@ -175,6 +185,9 @@ def _worker(args: argparse.Namespace) -> dict[str, object]:
     update_seconds = 0.0
     update_count = 0
     step_count = 0
+    context_seconds = 0.0
+    prefill_steps = len(algorithm.replay)
+    updates_before = getattr(algorithm, "update_steps", None)
 
     total_started = time.perf_counter()
     for episode in range(int(args.episodes)):
@@ -182,6 +195,9 @@ def _worker(args: argparse.Namespace) -> dict[str, object]:
         state = reset_info["global_state"]
         done = False
         while not done:
+            started = time.perf_counter()
+            _capture_context(algorithm, env, observations, state, episode, prefill_steps + step_count, reset_info["day"])
+            context_seconds += time.perf_counter() - started
             _sync(args.device)
             started = time.perf_counter()
             actions = algorithm.select_actions(observations, exploration)
@@ -216,6 +232,9 @@ def _worker(args: argparse.Namespace) -> dict[str, object]:
 
     _sync(args.device)
     total_seconds = time.perf_counter() - total_started
+    actual_updates = (algorithm.update_steps - updates_before) if updates_before is not None else None
+    if actual_updates is not None and actual_updates != update_count:
+        raise RuntimeError(f"Benchmark measured {actual_updates} actual updates for {update_count} attempts")
 
     _sync(args.device)
     sample_started = time.perf_counter()
@@ -236,9 +255,14 @@ def _worker(args: argparse.Namespace) -> dict[str, object]:
         "episodes": int(args.episodes),
         "steps": step_count,
         "updates": update_count,
+        "successful_updates": actual_updates,
+        "replay_prefill_steps": prefill_steps,
+        "learning_starts": learning_starts,
+        "context_protocol_enabled": isinstance(algorithm, TrainingContextConsumerProtocol),
         "total_seconds": total_seconds,
         "seconds_per_episode": seconds_per_episode,
         "rollout_ms_per_step": 1000.0 * rollout_seconds / max(1, step_count),
+        "context_ms_per_step": 1000.0 * context_seconds / max(1, step_count),
         "environment_ms_per_step": 1000.0 * environment_seconds / max(1, step_count),
         "replay_add_ms_per_step": 1000.0 * replay_add_seconds / max(1, step_count),
         "update_ms_per_step": 1000.0 * update_seconds / max(1, update_count),
@@ -475,7 +499,8 @@ def _comparison_worker(args: argparse.Namespace) -> dict[str, object]:
     algorithm = spec.create(env, algorithm_cfg, device=args.device, seed=args.seed)
     settings = algorithm_cfg["algorithm"]
     batch_size = int(settings.get("batch_size", 128))
-    _prefill_replay(env, algorithm, batch_size, args.seed)
+    _prefill_replay(env, algorithm, batch_size, args.seed,
+                    learning_starts=int(settings.get("learning_starts", 0)))
     for _ in range(max(8, int(args.warmup_updates))):
         algorithm.update(batch_size)
     if args.compare_active_step:
@@ -528,6 +553,7 @@ def _comparison_worker(args: argparse.Namespace) -> dict[str, object]:
         state = info["global_state"]
         done = False
         while not done:
+            _capture_context(algorithm, env, observations, state, ep, len(algorithm.replay), info["day"])
             actions = algorithm.select_actions(
                 observations, noise_std=float(settings.get("exploration_noise", 0.15)))
             next_obs, rewards, done, step_info = env.step(actions)

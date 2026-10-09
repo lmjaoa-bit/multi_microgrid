@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 from typing import Any, Mapping
 
+
 import numpy as np
 import pandas as pd
 import yaml
@@ -15,6 +16,8 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+from experiments.layout import artifact_directory
 
 from algorithms.registry import get_algorithm_spec
 from core.reward_v2 import resolve_carbon_factors, resolve_reward_v2_config
@@ -34,7 +37,7 @@ def _select_days(env: MultiMicrogridEnv, count: int) -> list[str]:
 
 
 def _finite_training_diagnostics(run_dir: Path, gamma: float) -> dict[str, Any]:
-    history_path = run_dir / "training_history.json"
+    history_path = artifact_directory(run_dir) / "training_history.json"
     history = json.loads(history_path.read_text(encoding="utf-8"))
     fields = (
         "critic_loss",
@@ -184,7 +187,7 @@ def main(argv: list[str] | None = None) -> int:
     if str(resolved["calibration_status"]) != "diagnostic":
         raise ValueError("Calibration bundle requires calibration_status=diagnostic")
 
-    run_dir = args.run_dir.resolve()
+    run_dir = artifact_directory(args.run_dir)
     diagnostics_dir = run_dir / "diagnostics"
     if not diagnostics_dir.is_dir():
         raise FileNotFoundError(

@@ -1,0 +1,177 @@
+{
+  "days": 55,
+  "policy_cost_mean": 1201.2598812833703,
+  "reference_cost_mean": 1049.377976095186,
+  "gap_mean": 151.8819051881842,
+  "components": [
+    {
+      "component": "cost_grid",
+      "policy": 759.3288354591517,
+      "reference": 648.2444060924361,
+      "gap": 111.08442936671578
+    },
+    {
+      "component": "cost_battery",
+      "policy": 11.4960503127452,
+      "reference": 12.410122720029245,
+      "gap": -0.9140724072840422
+    },
+    {
+      "component": "cost_curtail",
+      "policy": 66.99969617070103,
+      "reference": 62.090754426477005,
+      "gap": 4.908941744224038
+    },
+    {
+      "component": "cost_carbon",
+      "policy": 84.46465877747418,
+      "reference": 77.65394947786612,
+      "gap": 6.810709299608077
+    },
+    {
+      "component": "cost_peak",
+      "policy": 273.16041198534265,
+      "reference": 248.60320659263158,
+      "gap": 24.55720539271104
+    },
+    {
+      "component": "cost_mill",
+      "policy": 0.0,
+      "reference": 0.0,
+      "gap": 0.0
+    },
+    {
+      "component": "cost_comfort",
+      "policy": 5.81022857795048,
+      "reference": 0.37553678574620425,
+      "gap": 5.434691792204276
+    },
+    {
+      "component": "cost_ev",
+      "policy": 4.989502770223478e-12,
+      "reference": 0.0,
+      "gap": 4.989502770223478e-12
+    },
+    {
+      "component": "cost_unmet",
+      "policy": 0.0,
+      "reference": 0.0,
+      "gap": 0.0
+    }
+  ],
+  "operations_by_microgrid": [
+    {
+      "microgrid": "mg1",
+      "policy_charge_kwh": 234.405348256207,
+      "reference_charge_kwh": 257.99320324663347,
+      "policy_discharge_kwh": 175.5196996385092,
+      "reference_discharge_kwh": 184.78835552998365,
+      "policy_grid_import_kwh": 339.2565224950353,
+      "reference_grid_import_kwh": 397.11282397329677,
+      "policy_curtail_kwh": 570.8716627474353,
+      "reference_curtail_kwh": 570.9056793514958,
+      "policy_dr_energy_kwh": 433.79094521391056,
+      "reference_dr_energy_kwh": 404.55888191620807,
+      "policy_terminal_energy_kwh": 37.92750227654487,
+      "reference_terminal_energy_kwh": 50.57948463168744,
+      "policy_grid_to_battery_kwh": 93.81219838023382,
+      "reference_grid_to_battery_kwh": 112.36633517035655
+    },
+    {
+      "microgrid": "mg2",
+      "policy_charge_kwh": 323.2791591637817,
+      "reference_charge_kwh": 353.01846666253874,
+      "policy_discharge_kwh": 229.23340621764794,
+      "reference_discharge_kwh": 237.19102319932747,
+      "policy_grid_import_kwh": 496.13402923176153,
+      "reference_grid_import_kwh": 441.7423046252652,
+      "policy_curtail_kwh": 721.9105646070863,
+      "reference_curtail_kwh": 629.7583144475615,
+      "policy_dr_energy_kwh": 262.1580485767838,
+      "reference_dr_energy_kwh": 249.1283601743027,
+      "policy_terminal_energy_kwh": 65.81687887122631,
+      "reference_terminal_energy_kwh": 85.69278206696275,
+      "policy_grid_to_battery_kwh": 141.63150813485177,
+      "reference_grid_to_battery_kwh": 145.8410451877419
+    },
+    {
+      "microgrid": "mg3",
+      "policy_charge_kwh": 110.67373033979595,
+      "reference_charge_kwh": 121.02734429006824,
+      "policy_discharge_kwh": 76.4936876585786,
+      "reference_discharge_kwh": 86.99387907437287,
+      "policy_grid_import_kwh": 721.7309586214914,
+      "reference_grid_import_kwh": 613.7801073155675,
+      "policy_curtail_kwh": 47.21169605949913,
+      "reference_curtail_kwh": 41.15109473048254,
+      "policy_dr_energy_kwh": 252.57426667762414,
+      "reference_dr_energy_kwh": 252.57426667762428,
+      "policy_terminal_energy_kwh": 24.620372603249745,
+      "reference_terminal_energy_kwh": 23.403472786751298,
+      "policy_grid_to_battery_kwh": 48.410925633525004,
+      "reference_grid_to_battery_kwh": 59.450558920289936
+    }
+  ],
+  "worst_days": [
+    {
+      "date": "2018-12-30",
+      "gap": 321.93146499152016,
+      "gap_cost_grid": 215.5576005490109,
+      "gap_cost_peak": 68.24977160479563,
+      "gap_cost_comfort": 8.123927814807335
+    },
+    {
+      "date": "2018-01-30",
+      "gap": 319.728737068182,
+      "gap_cost_grid": 217.40532544997268,
+      "gap_cost_peak": 33.99054468591862,
+      "gap_cost_comfort": 70.37853807028101
+    },
+    {
+      "date": "2018-11-26",
+      "gap": 278.9060078660509,
+      "gap_cost_grid": 245.01989155015326,
+      "gap_cost_peak": 11.930560822128427,
+      "gap_cost_comfort": 0.53236257223702
+    },
+    {
+      "date": "2018-04-26",
+      "gap": 250.73463579135,
+      "gap_cost_grid": 188.8415042334342,
+      "gap_cost_peak": 12.500850900525734,
+      "gap_cost_comfort": 31.428760210714408
+    },
+    {
+      "date": "2018-01-31",
+      "gap": 244.68378730661698,
+      "gap_cost_grid": 170.2092813853492,
+      "gap_cost_peak": 28.418450426412562,
+      "gap_cost_comfort": 45.97390331138168
+    },
+    {
+      "date": "2018-05-29",
+      "gap": 238.57529345779517,
+      "gap_cost_grid": 198.50259191777877,
+      "gap_cost_peak": 21.58014958860059,
+      "gap_cost_comfort": 7.862811959408802
+    },
+    {
+      "date": "2018-11-27",
+      "gap": 238.37263704553243,
+      "gap_cost_grid": 217.27757296990876,
+      "gap_cost_peak": 11.228524505755786,
+      "gap_cost_comfort": 4.518126788935675
+    },
+    {
+      "date": "2018-12-31",
+      "gap": 236.57539990955138,
+      "gap_cost_grid": 192.42958067766438,
+      "gap_cost_peak": 29.066212129740165,
+      "gap_cost_comfort": 6.538670228432988
+    }
+  ],
+  "verification": {
+    "component_identity_max": 1.8758328224066645e-12,
+    "matched_exogenous_days": 55
+  }
+}

@@ -1,0 +1,482 @@
+{
+  "run_id": "DUELINGCRITICT-QH24_2026-10-07_22-11-08_seed42",
+  "experiment_contract": {
+    "schema_version": 2,
+    "service_metrics_schema_version": "service_metrics_v2",
+    "metrics_schema_version": "service_metrics_v2",
+    "dispatch_priority_mode": "renewable_load_first",
+    "dispatch_semantics": "renewable_load_first_v2_no_grid_export",
+    "reward_semantics_version": "generalized_system_cost_v2",
+    "reward_calibration_status": "locked",
+    "reward_calibration_report_sha256": "9d1461793ae112719dedccb2204b17814006f4b700ee1b67c009e2a68c7a562b",
+    "dr_projection_semantics": "instantaneous_physical_only_v2",
+    "hvac_control_semantics": "soft_comfort_penalty_v2",
+    "ev_control_semantics": "no_deadline_min_projection_v2",
+    "observation_semantics_version": "reward_v2_public_state_v1",
+    "reward_discount_semantics": "finite_day_undiscounted_v1",
+    "comfort_metric_semantics": "boundary_sampled_degree_hours",
+    "carbon_information_semantics": "current_observed_no_future_v1",
+    "settlement_value_semantics": "accounting_profit_v2",
+    "hvac_safety_mode": "soft_comfort",
+    "oracle_allocation_mode": "source_priority_free_allocation",
+    "full_information_oracle": true,
+    "action_semantics": "single_dispatch_dr_v4_instantaneous_physical",
+    "experiment_profile": null,
+    "algorithm_slug": "matd3_mlp_dueling_critic_h24_q_guided",
+    "policy": "unregistered",
+    "action_design": {
+      "id": "single_dispatch_dr",
+      "version": "single_dispatch_dr_v3",
+      "raw_actions": [
+        "signed_dispatch_intent",
+        "dr_intent"
+      ],
+      "description": "Renewable-load-first dispatch with executed ESS flow semantics plus one heterogeneous controllable-load intent per microgrid.",
+      "control_mode": "single_dispatch",
+      "raw_action_dim": 2
+    },
+    "observation_mode": "peer_energy_summary",
+    "offer_projection": "peer_demand_cap",
+    "environment_profile": "cooperative_standard",
+    "environment_config": "C:\\daima\\multi_microgrid_rl_standalone\\configs\\cooperative.yaml",
+    "environment_overrides": {
+      "ess_sharing": {
+        "observation_mode": "peer_energy_summary"
+      }
+    },
+    "resolved_environment_hash": "7811249dbb386e14fda3cada95cee6b502c2cf1ff97e08875df4cf3a21101e5f",
+    "physical_config_hash": "332f7bd6090875605bee381cc84c528f978705d9505f9bff256f2c1cf55d5c95",
+    "physical_settings": {
+      "env": {
+        "name": "MultiMicrogridEnv",
+        "seed": 42,
+        "mode": "cooperative"
+      },
+      "dispatch": {
+        "priority_mode": "renewable_load_first"
+      },
+      "p2p": {
+        "enabled": true,
+        "mode": "cooperative_energy_pool",
+        "loss_rate": 0.0,
+        "pair_capacity_kw": null,
+        "allow_ess_to_ess": false,
+        "allow_grid_resale": false
+      },
+      "terminal_soc": {
+        "mode": "none",
+        "tolerance": 0.03,
+        "penalty_per_kwh": 1.5
+      },
+      "cost": {
+        "unmet_load_cost_per_kwh": 20.0,
+        "renewable_curtailment_cost_per_kwh": 0.05,
+        "curtailment_price_per_kwh": 0.05,
+        "carbon_price_per_kg": 0.1,
+        "peak_price_per_kw": 1.0,
+        "mill_unserved_price_per_t": 100.0,
+        "comfort_price_per_degree_hour": 10.0,
+        "ev_shortfall_price_per_kwh": 3.0,
+        "reward_scale": 100.0
+      },
+      "time": {
+        "delta_t": 1.0,
+        "episode_length": 24,
+        "episode_sampling": "natural_day"
+      },
+      "data": {
+        "train_path": "data/spatial_market_2018_train.csv",
+        "val_path": "data/spatial_market_2018_val.csv",
+        "test_path": "data/spatial_market_2018_test.csv",
+        "timestamp_col": "timestamp",
+        "allow_temperature_fallback": true
+      },
+      "price": {
+        "sell_ratio": 0.5,
+        "override_buy_price_with_tou": false
+      },
+      "microgrids": [
+        {
+          "id": "mg1",
+          "type": "industrial_pv_raw_mill",
+          "load_profile": {
+            "target_mean_kw": 48.6,
+            "weekend_multiplier": 0.78,
+            "variability_clip": [
+              0.65,
+              1.45
+            ],
+            "hourly_shape": [
+              0.58,
+              0.56,
+              0.55,
+              0.54,
+              0.55,
+              0.62,
+              0.78,
+              0.92,
+              1.1,
+              1.22,
+              1.28,
+              1.3,
+              1.3,
+              1.28,
+              1.24,
+              1.2,
+              1.12,
+              0.98,
+              0.86,
+              0.78,
+              0.72,
+              0.66,
+              0.62,
+              0.6
+            ]
+          },
+          "renewables": {
+            "pv_capacity_kw": 520.0,
+            "wind_capacity_kw": 0.0,
+            "ghi_column": "mg1_ghi_w_per_m2",
+            "wind_speed_column": "mg1_wind_speed_mps"
+          },
+          "battery": {
+            "capacity_kwh": 210.0,
+            "max_charge_kw": 65.0,
+            "max_discharge_kw": 65.0,
+            "eta_charge": 0.95,
+            "eta_discharge": 0.95,
+            "soc_min": 0.1,
+            "soc_max": 0.9,
+            "initial_soc": 0.1,
+            "degradation_cost_per_kwh": 0.01
+          },
+          "grid": {
+            "import_limit_kw": null,
+            "export_limit_kw": 0.0
+          },
+          "dr": {
+            "type": "industrial_mill",
+            "terminal_mode": "none",
+            "rated_power_kw": 28.5,
+            "rated_production_tph": 1.186,
+            "downstream_consumption_tph": 0.975,
+            "silo_capacity_t": 17.55,
+            "silo_min_t": 3.51,
+            "silo_max_t": 15.8,
+            "silo_initial_t": 10.53,
+            "terminal_tolerance_t": 0.2
+          }
+        },
+        {
+          "id": "mg2",
+          "type": "commercial_wind_hvac",
+          "load_profile": {
+            "target_mean_kw": 71.87,
+            "weekend_multiplier": 0.57,
+            "variability_clip": [
+              0.65,
+              1.45
+            ],
+            "hourly_shape": [
+              0.9,
+              0.89,
+              0.88,
+              0.88,
+              0.9,
+              0.94,
+              0.98,
+              1.02,
+              1.06,
+              1.1,
+              1.12,
+              1.13,
+              1.13,
+              1.12,
+              1.1,
+              1.08,
+              1.06,
+              1.05,
+              1.05,
+              1.04,
+              1.02,
+              0.98,
+              0.95,
+              0.92
+            ]
+          },
+          "renewables": {
+            "pv_capacity_kw": 0.0,
+            "wind_capacity_kw": 900.0,
+            "ghi_column": "mg2_ghi_w_per_m2",
+            "wind_speed_column": "mg2_wind_speed_mps"
+          },
+          "battery": {
+            "capacity_kwh": 290.0,
+            "max_charge_kw": 80.0,
+            "max_discharge_kw": 80.0,
+            "eta_charge": 0.95,
+            "eta_discharge": 0.95,
+            "soc_min": 0.1,
+            "soc_max": 0.9,
+            "initial_soc": 0.1,
+            "degradation_cost_per_kwh": 0.01
+          },
+          "grid": {
+            "import_limit_kw": null,
+            "export_limit_kw": 0.0
+          },
+          "dr": {
+            "type": "commercial_hvac",
+            "thermal_discretization": "exact_zoh",
+            "terminal_mode": "none",
+            "forecast_viability": false,
+            "control_semantics": "soft_comfort",
+            "r_out_air_c_per_kw": 0.22,
+            "r_air_mass_c_per_kw": 0.08,
+            "c_air_kwh_per_c": 15.0,
+            "c_mass_kwh_per_c": 250.0,
+            "heating_max_kw": 35.0,
+            "cooling_max_kw": 35.0,
+            "cop_heat": 3.3,
+            "cop_cool": 3.2,
+            "temperature_column": "mg2_temperature_c",
+            "ghi_column": "mg2_ghi_w_per_m2",
+            "occupied_hours": [
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18
+            ],
+            "occupied_comfort_c": [
+              21.0,
+              25.0
+            ],
+            "unoccupied_comfort_c": [
+              16.0,
+              30.0
+            ],
+            "terminal_air_tolerance_c": 1.0,
+            "terminal_mass_tolerance_c": 0.3,
+            "solar_gain_kw_per_wm2": 0.025,
+            "solar_air_fraction": 0.2,
+            "internal_gain_occupied_fraction": 0.5,
+            "internal_gain_unoccupied_fraction": 0.2
+          }
+        },
+        {
+          "id": "mg3",
+          "type": "residential_pv_ev",
+          "load_profile": {
+            "target_mean_kw": 57.52,
+            "weekend_multiplier": 1.05,
+            "variability_clip": [
+              0.65,
+              1.45
+            ],
+            "hourly_shape": [
+              1.4,
+              1.57,
+              1.69,
+              1.77,
+              1.8,
+              1.77,
+              1.69,
+              1.57,
+              1.4,
+              1.21,
+              1.0,
+              0.79,
+              0.6,
+              0.43,
+              0.31,
+              0.23,
+              0.2,
+              0.23,
+              0.31,
+              0.43,
+              0.6,
+              0.79,
+              1.0,
+              1.21
+            ]
+          },
+          "renewables": {
+            "pv_capacity_kw": 100.0,
+            "wind_capacity_kw": 0.0,
+            "ghi_column": "mg3_ghi_w_per_m2",
+            "wind_speed_column": "mg3_wind_speed_mps"
+          },
+          "battery": {
+            "capacity_kwh": 95.0,
+            "max_charge_kw": 34.0,
+            "max_discharge_kw": 34.0,
+            "eta_charge": 0.95,
+            "eta_discharge": 0.95,
+            "soc_min": 0.1,
+            "soc_max": 0.9,
+            "initial_soc": 0.1,
+            "degradation_cost_per_kwh": 0.01
+          },
+          "grid": {
+            "import_limit_kw": null,
+            "export_limit_kw": 0.0
+          },
+          "dr": {
+            "type": "ev_charging",
+            "scenario_seed": 42,
+            "departure_penalty_per_kwh": 3.0,
+            "control_semantics": "no_deadline_minimum",
+            "fleet_capacity_kwh": 780.0,
+            "initial_soc": 0.5,
+            "target_soc": 0.8,
+            "max_soc": 0.8,
+            "max_charge_kw": 93.6,
+            "eta_charge": 0.93,
+            "available_start_hour": 0,
+            "departure_hour": 7,
+            "cohorts": [
+              {
+                "group_id": "G1",
+                "count": 6,
+                "capacity_per_vehicle_kwh": 60.0,
+                "max_charge_per_vehicle_kw": 7.2,
+                "arrival_hours": [
+                  0
+                ],
+                "arrival_probabilities": [
+                  1.0
+                ],
+                "departure_hours": [
+                  6,
+                  7,
+                  8
+                ],
+                "departure_probabilities": [
+                  0.2,
+                  0.6,
+                  0.2
+                ],
+                "need_per_vehicle_kwh": [
+                  14.0,
+                  22.0
+                ]
+              },
+              {
+                "group_id": "G2",
+                "count": 4,
+                "capacity_per_vehicle_kwh": 60.0,
+                "max_charge_per_vehicle_kw": 7.2,
+                "arrival_hours": [
+                  0
+                ],
+                "arrival_probabilities": [
+                  1.0
+                ],
+                "departure_hours": [
+                  9,
+                  10,
+                  11
+                ],
+                "departure_probabilities": [
+                  0.2,
+                  0.6,
+                  0.2
+                ],
+                "need_per_vehicle_kwh": [
+                  14.0,
+                  22.0
+                ]
+              },
+              {
+                "group_id": "G3",
+                "count": 3,
+                "capacity_per_vehicle_kwh": 60.0,
+                "max_charge_per_vehicle_kw": 7.2,
+                "arrival_hours": [
+                  9,
+                  10,
+                  11,
+                  12
+                ],
+                "arrival_probabilities": [
+                  0.2,
+                  0.4,
+                  0.3,
+                  0.1
+                ],
+                "dwell_hours": [
+                  4,
+                  5,
+                  6
+                ],
+                "dwell_probabilities": [
+                  0.25,
+                  0.5,
+                  0.25
+                ],
+                "need_per_vehicle_kwh": [
+                  14.0,
+                  22.0
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "ess_p2p_enabled": true
+  },
+  "algorithm": "Dueling Critic T-Q H24",
+  "algorithm_slug": "matd3_mlp_dueling_critic_h24_q_guided",
+  "algorithm_display_name": "Dueling Critic T-Q H24",
+  "seed": 42,
+  "start_time": "2026-10-07T22:11:08.771431+08:00",
+  "end_time": null,
+  "config_path": "C:\\daima\\multi_microgrid_rl_standalone\\configs\\cooperative.yaml",
+  "algorithm_config_path": "C:\\daima\\multi_microgrid_rl_standalone\\configs\\algorithms\\matd3_mlp_dueling_critic_h24_q_guided.yaml",
+  "environment_overrides": {
+    "ess_sharing": {
+      "observation_mode": "peer_energy_summary"
+    }
+  },
+  "ess_sharing_control_mode": "single_dispatch",
+  "ess_sharing_observation_mode": "peer_energy_summary",
+  "ess_p2p_enabled": true,
+  "ess_offer_projection": "peer_demand_cap",
+  "mpc_forecast_horizon": null,
+  "forecast_horizon_hours": 24,
+  "evaluation_forecast_noise": true,
+  "config_hash": "30fa829f0cfd8750eaf4938f1d4b2664a2f17ee0b072dff92955929c6c840e98",
+  "device": "cuda",
+  "python_version": "3.13.9",
+  "train_episodes": 5000,
+  "test_episodes": 55,
+  "git_commit": "46885d6a671fc8de5a9caa658746780ef7d6b3f6",
+  "learning_curve_evaluation": {
+    "enabled": true,
+    "interval_steps": 600,
+    "eval_episodes": 10,
+    "deterministic_policy": true,
+    "fixed_scenarios": true,
+    "evaluation_seed": 424242,
+    "evaluate_initial_policy": true,
+    "x_axis": "environment_steps",
+    "y_axis": "average_episode_return"
+  },
+  "runtime": {
+    "cpu_threads": 4,
+    "interop_threads": 2
+  },
+  "run_purpose": "formal_training",
+  "formal_test_completed": false,
+  "reward_semantics_version": "generalized_system_cost_v2",
+  "reward_calibration_status": "locked"
+}

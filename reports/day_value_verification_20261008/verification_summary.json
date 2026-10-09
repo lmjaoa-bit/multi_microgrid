@@ -1,0 +1,204 @@
+{
+  "checkpoint_episode": 4600,
+  "checkpoint_sha256": "dbdcb3edcfc43745fd7869211209c5c54e90bce6aa86ade7573511d6df629cdc",
+  "training_episodes": 5000,
+  "formal_days": 55,
+  "baseline_replay_max_cost_error": 2.7456884140519833e-05,
+  "learning_updates": 0,
+  "saved_action_replay_max_cost_error": 4.547473508864641e-13,
+  "ess_sample_dates": [
+    "2018-01-30",
+    "2018-02-26",
+    "2018-03-30",
+    "2018-04-28",
+    "2018-05-30",
+    "2018-06-28",
+    "2018-07-30",
+    "2018-08-30",
+    "2018-09-28",
+    "2018-10-29",
+    "2018-11-28",
+    "2018-12-29"
+  ],
+  "ess_hours": [
+    0,
+    6,
+    12,
+    18
+  ],
+  "ess_candidates": "raw +/-0.25 and 0, clipped and physical duplicates excluded",
+  "ess_pairs": 271,
+  "ess_meaningful_pairs": 158,
+  "ess_q1_wrong": 68,
+  "ess_q2_wrong": 62,
+  "ess_missed_beneficial_pairs": 42,
+  "ess_days_with_missed_benefit": 10,
+  "ess_one_correction_per_sampled_day_mean": 4.588729286075284,
+  "ess_one_correction_per_day": [
+    [
+      "2018-01-30",
+      3.0330432684959305
+    ],
+    [
+      "2018-02-26",
+      1.9807937629880144
+    ],
+    [
+      "2018-03-30",
+      2.25867146183964
+    ],
+    [
+      "2018-04-28",
+      0.8518685846344738
+    ],
+    [
+      "2018-05-30",
+      4.906695627530496
+    ],
+    [
+      "2018-06-28",
+      0.9347610316516466
+    ],
+    [
+      "2018-07-30",
+      4.828446871646975
+    ],
+    [
+      "2018-08-30",
+      0.0
+    ],
+    [
+      "2018-09-28",
+      2.387840190165889
+    ],
+    [
+      "2018-10-29",
+      0.8486086302552422
+    ],
+    [
+      "2018-11-28",
+      33.0340220036951
+    ],
+    [
+      "2018-12-29",
+      0.0
+    ]
+  ],
+  "ess_one_correction_no_extra_mill_ev_unmet_penalty_mean": 4.588729286075284,
+  "reproduced_dr_cases": [
+    {
+      "agent": "mg1",
+      "date": "2018-01-29",
+      "hour": 5,
+      "reference_kw": 28.499905720353127,
+      "candidate_kw": 27.49990613758564,
+      "cost_reduction": 0.5335197545849724,
+      "predicted_cost_reduction_q1": -0.53558349609375,
+      "immediate_cost_reduction": 0.349999853968626,
+      "later_cost_reduction": 0.18351990061634638
+    },
+    {
+      "agent": "mg3",
+      "date": "2018-01-30",
+      "hour": 9,
+      "reference_kw": 21.6,
+      "candidate_kw": 20.599999952316285,
+      "cost_reduction": 1.2942619740600776,
+      "predicted_cost_reduction_q1": -0.90789794921875,
+      "immediate_cost_reduction": 1.6766240799476861,
+      "later_cost_reduction": -0.38236210588760855
+    },
+    {
+      "agent": "mg3",
+      "date": "2018-03-31",
+      "hour": 1,
+      "reference_kw": 72.0,
+      "candidate_kw": 54.0,
+      "cost_reduction": 6.374134865229507,
+      "predicted_cost_reduction_q1": -5.295991897583008,
+      "immediate_cost_reduction": 12.662707730230608,
+      "later_cost_reduction": -6.2885728650011
+    },
+    {
+      "agent": "mg2",
+      "date": "2018-09-27",
+      "hour": 23,
+      "reference_kw": 1.510036177933216,
+      "candidate_kw": 0.5100361723452806,
+      "cost_reduction": 0.6915340038642483,
+      "predicted_cost_reduction_q1": -0.18529891967773438,
+      "immediate_cost_reduction": 0.6915340038642483,
+      "later_cost_reduction": 0.0
+    },
+    {
+      "agent": "mg2",
+      "date": "2018-11-26",
+      "hour": 8,
+      "reference_kw": 3.5231053456664085,
+      "candidate_kw": 2.5231054052710533,
+      "cost_reduction": 0.7292441860206509,
+      "predicted_cost_reduction_q1": -0.6988525390625,
+      "immediate_cost_reduction": 0.009999999403953908,
+      "later_cost_reduction": 0.719244186616697
+    }
+  ],
+  "formal_cost_mean": 1201.2598812833703,
+  "generalized_reference_mean": 1049.377976095186,
+  "frozen_curve_reoptimization": [
+    {
+      "mode": "all_fixed",
+      "days": 55,
+      "mean_cost": 1201.2598870604609,
+      "mean_saving": -5.777090340914025e-06
+    },
+    {
+      "mode": "all_free",
+      "days": 55,
+      "mean_cost": 1057.8259413988549,
+      "mean_saving": 143.4339398845156
+    },
+    {
+      "mode": "dr_free",
+      "days": 55,
+      "mean_cost": 1112.5311656466668,
+      "mean_saving": 88.7287156367038
+    },
+    {
+      "mode": "ess_free",
+      "days": 55,
+      "mean_cost": 1148.4333540870014,
+      "mean_saving": 52.826527196369
+    },
+    {
+      "mode": "ev_free",
+      "days": 55,
+      "mean_cost": 1171.5033656747921,
+      "mean_saving": 29.756515608578294
+    },
+    {
+      "mode": "hvac_free",
+      "days": 55,
+      "mean_cost": 1154.550531279933,
+      "mean_saving": 46.70935000343745
+    },
+    {
+      "mode": "mill_free",
+      "days": 55,
+      "mean_cost": 1176.5912936489694,
+      "mean_saving": 24.66858763440099
+    },
+    {
+      "mode": "policy",
+      "days": 55,
+      "mean_cost": 1201.2598812833703,
+      "mean_saving": 4.0307151555845684e-14
+    }
+  ],
+  "caveats": [
+    "ESS sample is 12 preselected monthly dates, four hours per day, not all states or a random population estimate.",
+    "One-correction saving uses hindsight to pick the best of tested Q1-misranked candidates; it is measured diagnostic opportunity, not retrained-policy performance.",
+    "Critic ranking errors do not identify optimization, replay coverage, representation or long-horizon planning as a unique cause.",
+    "Full-information fixed-curve reoptimization gaps must not be summed or attributed entirely to critic error.",
+    "Ordinary MATD3 is still running; this diagnosis establishes the phenomenon in the completed Dueling run."
+  ]
+}

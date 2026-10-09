@@ -50,14 +50,6 @@ runtime:
 training:
   episodes: 3
   test_episodes: 2
-learning_curve:
-  enabled: true
-  interval_steps: 600
-  eval_episodes: 10
-  deterministic_policy: true
-  fixed_scenarios: true
-  evaluate_initial_policy: true
-  seed: 424242
 validation:
   enabled: true
   interval: 1

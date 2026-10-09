@@ -4,6 +4,7 @@ import csv
 import json
 import re
 from pathlib import Path
+from experiments.layout import artifact_directory, figure_directory, run_root
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -374,7 +375,7 @@ def _plot_constraint_reliability(run_dir: Path, daily_rows: Sequence[Mapping[str
         fontsize=8,
     )
     fig.tight_layout()
-    figure_dir = run_dir / "figures"
+    figure_dir = figure_directory(run_dir)
     figure_dir.mkdir(parents=True, exist_ok=True)
     for extension in ("png", "pdf"):
         fig.savefig(figure_dir / f"12_constraint_feasibility.{extension}", dpi=180, bbox_inches="tight")
@@ -393,7 +394,7 @@ def augment_run_outputs(
     recomputed by the shared service_metrics_v2 implementation; historical runs
     without sufficient embedded evidence remain explicitly incomplete.
     """
-    root = Path(run_dir).resolve()
+    root = artifact_directory(run_dir)
     daily_path = root / "test_daily_metrics.csv"
     hourly_dir = root / "test_hourly_trajectories"
     if not daily_path.exists():

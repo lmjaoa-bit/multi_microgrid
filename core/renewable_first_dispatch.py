@@ -24,6 +24,22 @@ def proportional_cross_flow(supply_kw: Tensor, demand_kw: Tensor) -> Tensor:
         raise ValueError("supply_kw and demand_kw must have the same shape")
     if torch.any((supply > 1e-7) & (demand > 1e-7)):
         raise ValueError("a node cannot be simultaneous supplier and demander")
+    return _proportional_cross_flow_kernel(supply, demand)
+
+
+def _proportional_cross_flow_validated(supply: Tensor, demand: Tensor) -> Tensor:
+    """Clear already validated nonnegative, disjoint supply/demand tensors.
+
+    The three internal dispatch stages construct these invariants by subtracting
+    a local minimum and clamping residuals. Public inputs still pass through the
+    checked entry points; repeating their checks here adds CUDA synchronizations.
+    """
+    # Keep the original clamp nodes: removing them changes autograd accumulation
+    # order by a few ulps even though all physical forward values are identical.
+    return _proportional_cross_flow_kernel(supply.clamp_min(0.0), demand.clamp_min(0.0))
+
+
+def _proportional_cross_flow_kernel(supply: Tensor, demand: Tensor) -> Tensor:
     total_supply = supply.sum(dim=1, keepdim=True)
     total_demand = demand.sum(dim=1, keepdim=True)
     denominator = torch.maximum(total_supply, total_demand).clamp_min(
@@ -66,7 +82,7 @@ def clear_renewable_first(
     load_after_local_res = (load - res_local_load).clamp_min(0.0)
 
     res_peer_load = (
-        proportional_cross_flow(res_after_local_load, load_after_local_res)
+        _proportional_cross_flow_validated(res_after_local_load, load_after_local_res)
         if p2p_enabled else zero_flow
     )
     res_after_load = (
@@ -102,7 +118,7 @@ def clear_renewable_first(
         ess_offer_uncapped - ess_offer
     ).clamp_min(0.0)
     ess_peer_load = (
-        proportional_cross_flow(ess_offer, load_after_local_ess)
+        _proportional_cross_flow_validated(ess_offer, load_after_local_ess)
         if p2p_enabled else zero_flow
     )
     ess_peer_out = ess_peer_load.sum(dim=2)
@@ -119,7 +135,7 @@ def clear_renewable_first(
         charge_request - res_local_charge
     ).clamp_min(0.0)
     res_peer_charge = (
-        proportional_cross_flow(res_after_local_charge, charge_after_local_res)
+        _proportional_cross_flow_validated(res_after_local_charge, charge_after_local_res)
         if p2p_enabled else zero_flow
     )
     renewable_surplus = (

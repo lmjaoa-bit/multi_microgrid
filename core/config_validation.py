@@ -5,6 +5,7 @@ from typing import Any, Mapping
 import numpy as np
 
 from core.reward_v2 import resolve_reward_v2_config
+from components.hvac_thermal import thermal_discretization
 
 
 def _number(value: Any, name: str, minimum: float | None = None) -> float:
@@ -46,6 +47,7 @@ def _validate_dr(mg_id: str, dr: Mapping[str, Any]) -> None:
         return
 
     if kind == "commercial_hvac":
+        thermal_discretization(dr)
         for key in (
             "r_out_air_c_per_kw", "r_air_mass_c_per_kw", "c_air_kwh_per_c",
             "c_mass_kwh_per_c", "heating_max_kw", "cooling_max_kw",

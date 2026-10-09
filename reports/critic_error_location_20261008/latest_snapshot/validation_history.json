@@ -1,0 +1,1502 @@
+[
+  {
+    "episode": 100,
+    "team_profit_mean": -1494.5331403890916,
+    "team_profit_std": 524.3572879399264,
+    "team_profit_median": -1407.9457497326707,
+    "profit_by_microgrid_mean": {
+      "mg1": -273.98244985175154,
+      "mg2": -25.680681167843215,
+      "mg3": -1194.8700093694968
+    },
+    "renewable_utilization_rate": 0.7099030122259224,
+    "p2p_total_energy_kwh": 1270.6172401720207,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -18.34539185050457,
+    "generalized_system_cost_mean": 1834.5391850504573,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 200,
+    "team_profit_mean": -794.9737802497783,
+    "team_profit_std": 535.7980623554736,
+    "team_profit_median": -660.8178569253548,
+    "profit_by_microgrid_mean": {
+      "mg1": -219.20167857615678,
+      "mg2": 3.403260485057742,
+      "mg3": -579.1753621586793
+    },
+    "renewable_utilization_rate": 0.7655122317161049,
+    "p2p_total_energy_kwh": 1526.337890651549,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -11.520193679789415,
+    "generalized_system_cost_mean": 1152.0193679789415,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 300,
+    "team_profit_mean": -784.7385430134278,
+    "team_profit_std": 500.28516267418183,
+    "team_profit_median": -677.5901629937082,
+    "profit_by_microgrid_mean": {
+      "mg1": -234.8644597537711,
+      "mg2": 27.75219845705733,
+      "mg3": -577.6262817167142
+    },
+    "renewable_utilization_rate": 0.7555457631264189,
+    "p2p_total_energy_kwh": 1513.580365591619,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -11.538718389874854,
+    "generalized_system_cost_mean": 1153.8718389874853,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 400,
+    "team_profit_mean": -752.2496705605469,
+    "team_profit_std": 504.21031694934874,
+    "team_profit_median": -628.6015465347009,
+    "profit_by_microgrid_mean": {
+      "mg1": -194.05889738847253,
+      "mg2": 23.168820177648648,
+      "mg3": -581.3595933497232
+    },
+    "renewable_utilization_rate": 0.7785538203617177,
+    "p2p_total_energy_kwh": 1543.6520533513665,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -11.088993768733529,
+    "generalized_system_cost_mean": 1108.8993768733526,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 500,
+    "team_profit_mean": -756.293605144251,
+    "team_profit_std": 504.5491419353623,
+    "team_profit_median": -622.529661391065,
+    "profit_by_microgrid_mean": {
+      "mg1": -214.14722486691878,
+      "mg2": 39.25751597743268,
+      "mg3": -581.403896254765
+    },
+    "renewable_utilization_rate": 0.7729716873832283,
+    "p2p_total_energy_kwh": 1564.2294189709996,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -11.286157298128426,
+    "generalized_system_cost_mean": 1128.6157298128426,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 600,
+    "team_profit_mean": -747.2006545758525,
+    "team_profit_std": 497.8847558440123,
+    "team_profit_median": -651.6842902004872,
+    "profit_by_microgrid_mean": {
+      "mg1": -216.57633227495032,
+      "mg2": 48.78916741486803,
+      "mg3": -579.41348971577
+    },
+    "renewable_utilization_rate": 0.7725650119939909,
+    "p2p_total_energy_kwh": 1534.2417204561157,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -11.199832933963814,
+    "generalized_system_cost_mean": 1119.9832933963814,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 700,
+    "team_profit_mean": -743.7637496060954,
+    "team_profit_std": 514.0189767652399,
+    "team_profit_median": -627.7662160156569,
+    "profit_by_microgrid_mean": {
+      "mg1": -182.38496289683548,
+      "mg2": 26.416364959890473,
+      "mg3": -587.7951516691502
+    },
+    "renewable_utilization_rate": 0.7795629380833108,
+    "p2p_total_energy_kwh": 1512.824592015778,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.993000802704108,
+    "generalized_system_cost_mean": 1099.300080270411,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 800,
+    "team_profit_mean": -740.2286729114766,
+    "team_profit_std": 503.69045846827777,
+    "team_profit_median": -633.850200687176,
+    "profit_by_microgrid_mean": {
+      "mg1": -186.9764607264843,
+      "mg2": 30.146693830948333,
+      "mg3": -583.3989060159407
+    },
+    "renewable_utilization_rate": 0.7800701117003335,
+    "p2p_total_energy_kwh": 1535.5432984508045,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -11.018050655978083,
+    "generalized_system_cost_mean": 1101.8050655978082,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 900,
+    "team_profit_mean": -739.232434292712,
+    "team_profit_std": 509.3703553591433,
+    "team_profit_median": -608.1907774367571,
+    "profit_by_microgrid_mean": {
+      "mg1": -186.69471285467344,
+      "mg2": 30.783813899583897,
+      "mg3": -583.3215353376225
+    },
+    "renewable_utilization_rate": 0.7816098537676354,
+    "p2p_total_energy_kwh": 1542.813628888034,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.922978969031702,
+    "generalized_system_cost_mean": 1092.2978969031703,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 1000,
+    "team_profit_mean": -720.7849383273613,
+    "team_profit_std": 490.39747141957065,
+    "team_profit_median": -603.7764047723851,
+    "profit_by_microgrid_mean": {
+      "mg1": -174.47003198001266,
+      "mg2": 35.748767767729476,
+      "mg3": -582.0636741150784
+    },
+    "renewable_utilization_rate": 0.7818162201064829,
+    "p2p_total_energy_kwh": 1543.141789985472,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.811187284143246,
+    "generalized_system_cost_mean": 1081.118728414325,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 1100,
+    "team_profit_mean": -721.9700160259,
+    "team_profit_std": 502.3829095974681,
+    "team_profit_median": -601.0295374595082,
+    "profit_by_microgrid_mean": {
+      "mg1": -170.22954328270967,
+      "mg2": 31.12982689419766,
+      "mg3": -582.8702996373879
+    },
+    "renewable_utilization_rate": 0.7844359050745798,
+    "p2p_total_energy_kwh": 1549.1960663701825,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.728382075506445,
+    "generalized_system_cost_mean": 1072.8382075506443,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 1200,
+    "team_profit_mean": -718.9556554577737,
+    "team_profit_std": 501.258494510053,
+    "team_profit_median": -606.0687688705716,
+    "profit_by_microgrid_mean": {
+      "mg1": -173.26376293076075,
+      "mg2": 40.814639643719055,
+      "mg3": -586.506532170732
+    },
+    "renewable_utilization_rate": 0.7814877158892927,
+    "p2p_total_energy_kwh": 1500.7494641807727,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.678769264072576,
+    "generalized_system_cost_mean": 1067.876926407258,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 1300,
+    "team_profit_mean": -724.3019469692155,
+    "team_profit_std": 508.6052471919167,
+    "team_profit_median": -608.5646765149595,
+    "profit_by_microgrid_mean": {
+      "mg1": -164.15590246160144,
+      "mg2": 25.61662015273931,
+      "mg3": -585.7626646603533
+    },
+    "renewable_utilization_rate": 0.7854471530453034,
+    "p2p_total_energy_kwh": 1509.0452145473107,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.750772037744806,
+    "generalized_system_cost_mean": 1075.0772037744805,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 1400,
+    "team_profit_mean": -719.039428211295,
+    "team_profit_std": 500.0746477094299,
+    "team_profit_median": -604.9879264963039,
+    "profit_by_microgrid_mean": {
+      "mg1": -169.24974847461652,
+      "mg2": 34.13844332742278,
+      "mg3": -583.9281230641012
+    },
+    "renewable_utilization_rate": 0.7856964035001903,
+    "p2p_total_energy_kwh": 1520.1460050400406,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.643313764135451,
+    "generalized_system_cost_mean": 1064.3313764135453,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 1500,
+    "team_profit_mean": -719.8941286317444,
+    "team_profit_std": 491.7145607634756,
+    "team_profit_median": -606.9478299317672,
+    "profit_by_microgrid_mean": {
+      "mg1": -179.7290929660814,
+      "mg2": 41.86353772276015,
+      "mg3": -582.0285733884231
+    },
+    "renewable_utilization_rate": 0.7843590258374686,
+    "p2p_total_energy_kwh": 1540.756373304233,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.67425500760437,
+    "generalized_system_cost_mean": 1067.425500760437,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 1600,
+    "team_profit_mean": -721.0550072818485,
+    "team_profit_std": 507.16118201767495,
+    "team_profit_median": -603.0556577228344,
+    "profit_by_microgrid_mean": {
+      "mg1": -167.8503341393257,
+      "mg2": 35.255894650753326,
+      "mg3": -588.4605677932759
+    },
+    "renewable_utilization_rate": 0.7843603853533381,
+    "p2p_total_energy_kwh": 1503.8151842464395,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.677124233317521,
+    "generalized_system_cost_mean": 1067.712423331752,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 1700,
+    "team_profit_mean": -709.3403325956458,
+    "team_profit_std": 491.97784154562083,
+    "team_profit_median": -603.8065397573336,
+    "profit_by_microgrid_mean": {
+      "mg1": -170.39636177199804,
+      "mg2": 45.70257457412609,
+      "mg3": -584.6465453977737
+    },
+    "renewable_utilization_rate": 0.7818429314292954,
+    "p2p_total_energy_kwh": 1493.9746003417051,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.512351406920834,
+    "generalized_system_cost_mean": 1051.2351406920832,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 1800,
+    "team_profit_mean": -710.1660722338636,
+    "team_profit_std": 493.5475436909335,
+    "team_profit_median": -610.0167155268958,
+    "profit_by_microgrid_mean": {
+      "mg1": -173.55133385066304,
+      "mg2": 46.71517737015762,
+      "mg3": -583.3299157533581
+    },
+    "renewable_utilization_rate": 0.7843629362172228,
+    "p2p_total_energy_kwh": 1491.7510436122163,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.540458102772867,
+    "generalized_system_cost_mean": 1054.0458102772866,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 1900,
+    "team_profit_mean": -704.3962088584321,
+    "team_profit_std": 489.8960257090224,
+    "team_profit_median": -610.5316017196899,
+    "profit_by_microgrid_mean": {
+      "mg1": -172.86213063109977,
+      "mg2": 49.788062344265064,
+      "mg3": -581.3221405715976
+    },
+    "renewable_utilization_rate": 0.7834244969111233,
+    "p2p_total_energy_kwh": 1515.0152922180923,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.465721744333846,
+    "generalized_system_cost_mean": 1046.5721744333846,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 2000,
+    "team_profit_mean": -708.9784003290217,
+    "team_profit_std": 491.32959558647667,
+    "team_profit_median": -609.3581217280873,
+    "profit_by_microgrid_mean": {
+      "mg1": -174.87382086846065,
+      "mg2": 46.50054228930009,
+      "mg3": -580.6051217498612
+    },
+    "renewable_utilization_rate": 0.7792633384077294,
+    "p2p_total_energy_kwh": 1468.0943796809543,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.531927458258526,
+    "generalized_system_cost_mean": 1053.1927458258522,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 2100,
+    "team_profit_mean": -701.076291962366,
+    "team_profit_std": 485.98156430190073,
+    "team_profit_median": -600.2560048143135,
+    "profit_by_microgrid_mean": {
+      "mg1": -165.58787642289556,
+      "mg2": 47.09725497280789,
+      "mg3": -582.5856705122783
+    },
+    "renewable_utilization_rate": 0.7819529682132371,
+    "p2p_total_energy_kwh": 1500.754650704024,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.522511298402767,
+    "generalized_system_cost_mean": 1052.2511298402765,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 2200,
+    "team_profit_mean": -705.6789463280231,
+    "team_profit_std": 480.2416583632599,
+    "team_profit_median": -608.0945439747879,
+    "profit_by_microgrid_mean": {
+      "mg1": -169.7849265473573,
+      "mg2": 46.337481102658074,
+      "mg3": -582.231500883324
+    },
+    "renewable_utilization_rate": 0.7809630579544933,
+    "p2p_total_energy_kwh": 1481.916208355748,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.488069022772187,
+    "generalized_system_cost_mean": 1048.806902277219,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 2300,
+    "team_profit_mean": -704.3369085058149,
+    "team_profit_std": 486.30483220128815,
+    "team_profit_median": -604.9131930057102,
+    "profit_by_microgrid_mean": {
+      "mg1": -167.49693590486433,
+      "mg2": 44.527568265556,
+      "mg3": -581.3675408665066
+    },
+    "renewable_utilization_rate": 0.7818224559246026,
+    "p2p_total_energy_kwh": 1509.0570194773718,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.471832776238605,
+    "generalized_system_cost_mean": 1047.1832776238607,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 2400,
+    "team_profit_mean": -696.0080816638622,
+    "team_profit_std": 476.2996581637506,
+    "team_profit_median": -603.7615796399632,
+    "profit_by_microgrid_mean": {
+      "mg1": -165.29094572053828,
+      "mg2": 49.624622955632184,
+      "mg3": -580.3417588989561
+    },
+    "renewable_utilization_rate": 0.7828538064922106,
+    "p2p_total_energy_kwh": 1515.078407554553,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.425185903426227,
+    "generalized_system_cost_mean": 1042.5185903426227,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 2500,
+    "team_profit_mean": -700.9452261570839,
+    "team_profit_std": 480.0384918111106,
+    "team_profit_median": -603.6930474540943,
+    "profit_by_microgrid_mean": {
+      "mg1": -169.56344372083456,
+      "mg2": 51.51118238415631,
+      "mg3": -582.8929648204057
+    },
+    "renewable_utilization_rate": 0.7785272022183699,
+    "p2p_total_energy_kwh": 1493.9224289977276,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.401748484316924,
+    "generalized_system_cost_mean": 1040.174848431692,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 2600,
+    "team_profit_mean": -693.4094442517398,
+    "team_profit_std": 475.53498992008684,
+    "team_profit_median": -605.0051322792696,
+    "profit_by_microgrid_mean": {
+      "mg1": -163.7582504187125,
+      "mg2": 51.53809626790861,
+      "mg3": -581.1892901009361
+    },
+    "renewable_utilization_rate": 0.7815304369603282,
+    "p2p_total_energy_kwh": 1510.1136212074764,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.358061600433505,
+    "generalized_system_cost_mean": 1035.8061600433505,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 2700,
+    "team_profit_mean": -697.6143565457705,
+    "team_profit_std": 479.4195075107931,
+    "team_profit_median": -607.6038124683143,
+    "profit_by_microgrid_mean": {
+      "mg1": -168.73803125712033,
+      "mg2": 52.63351049186531,
+      "mg3": -581.5098357805155
+    },
+    "renewable_utilization_rate": 0.7812841067372784,
+    "p2p_total_energy_kwh": 1485.9308163449084,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.38707062652734,
+    "generalized_system_cost_mean": 1038.7070626527343,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 2800,
+    "team_profit_mean": -697.9685395565944,
+    "team_profit_std": 483.074269573017,
+    "team_profit_median": -610.2639365991179,
+    "profit_by_microgrid_mean": {
+      "mg1": -165.0590334927779,
+      "mg2": 51.22850817069675,
+      "mg3": -584.1380142345133
+    },
+    "renewable_utilization_rate": 0.7812277633847882,
+    "p2p_total_energy_kwh": 1487.8594127505642,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.413215010262522,
+    "generalized_system_cost_mean": 1041.321501026252,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 2900,
+    "team_profit_mean": -701.3569297410172,
+    "team_profit_std": 493.9287872538813,
+    "team_profit_median": -610.0682469008033,
+    "profit_by_microgrid_mean": {
+      "mg1": -166.2681166946858,
+      "mg2": 50.862520188174415,
+      "mg3": -585.9513332345058
+    },
+    "renewable_utilization_rate": 0.7816858925571052,
+    "p2p_total_energy_kwh": 1514.5405954030698,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.419611899371784,
+    "generalized_system_cost_mean": 1041.9611899371787,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 3000,
+    "team_profit_mean": -695.6397286611785,
+    "team_profit_std": 484.3853300184713,
+    "team_profit_median": -600.9329462143475,
+    "profit_by_microgrid_mean": {
+      "mg1": -169.0699057439208,
+      "mg2": 54.08004575765716,
+      "mg3": -580.6498686749152
+    },
+    "renewable_utilization_rate": 0.7805582651064344,
+    "p2p_total_energy_kwh": 1512.058278709344,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.405943029712047,
+    "generalized_system_cost_mean": 1040.594302971205,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 3100,
+    "team_profit_mean": -694.8371897601696,
+    "team_profit_std": 478.8569112410928,
+    "team_profit_median": -592.9430887963588,
+    "profit_by_microgrid_mean": {
+      "mg1": -167.68924656227352,
+      "mg2": 52.84485112540354,
+      "mg3": -579.9927943232996
+    },
+    "renewable_utilization_rate": 0.7812852764634446,
+    "p2p_total_energy_kwh": 1502.4037233354807,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.429261340106535,
+    "generalized_system_cost_mean": 1042.9261340106536,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 3200,
+    "team_profit_mean": -688.7400956048668,
+    "team_profit_std": 478.23003493381003,
+    "team_profit_median": -595.5004567078696,
+    "profit_by_microgrid_mean": {
+      "mg1": -172.83193452414534,
+      "mg2": 58.11491214533119,
+      "mg3": -574.0230732260527
+    },
+    "renewable_utilization_rate": 0.7788120232323381,
+    "p2p_total_energy_kwh": 1511.755763439746,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.35912867318178,
+    "generalized_system_cost_mean": 1035.912867318178,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 3300,
+    "team_profit_mean": -696.6225351619934,
+    "team_profit_std": 486.13140844832526,
+    "team_profit_median": -604.5286517167267,
+    "profit_by_microgrid_mean": {
+      "mg1": -171.94545463104623,
+      "mg2": 52.85046564757139,
+      "mg3": -577.5275461785185
+    },
+    "renewable_utilization_rate": 0.7803263137625142,
+    "p2p_total_energy_kwh": 1495.3739839684247,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.360612741229787,
+    "generalized_system_cost_mean": 1036.0612741229786,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 3400,
+    "team_profit_mean": -693.2119236970775,
+    "team_profit_std": 479.71267058124386,
+    "team_profit_median": -608.6999633300775,
+    "profit_by_microgrid_mean": {
+      "mg1": -162.162683764848,
+      "mg2": 53.6168445787574,
+      "mg3": -584.666084510987
+    },
+    "renewable_utilization_rate": 0.7849514004739999,
+    "p2p_total_energy_kwh": 1533.0242987231968,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.319435185619254,
+    "generalized_system_cost_mean": 1031.9435185619252,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 3500,
+    "team_profit_mean": -697.8576007784528,
+    "team_profit_std": 487.61349040051755,
+    "team_profit_median": -601.2540901071163,
+    "profit_by_microgrid_mean": {
+      "mg1": -174.33723074139877,
+      "mg2": 53.624256147073986,
+      "mg3": -577.144626184128
+    },
+    "renewable_utilization_rate": 0.78111428156133,
+    "p2p_total_energy_kwh": 1506.0923580623257,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.363340691739738,
+    "generalized_system_cost_mean": 1036.3340691739738,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 3600,
+    "team_profit_mean": -692.0643660322828,
+    "team_profit_std": 480.77249338511433,
+    "team_profit_median": -593.1712113603924,
+    "profit_by_microgrid_mean": {
+      "mg1": -169.77054172878508,
+      "mg2": 56.72925727707721,
+      "mg3": -579.0230815805746
+    },
+    "renewable_utilization_rate": 0.7815054565240389,
+    "p2p_total_energy_kwh": 1514.6848773278214,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.294824986655739,
+    "generalized_system_cost_mean": 1029.482498665574,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 3700,
+    "team_profit_mean": -692.4053005423934,
+    "team_profit_std": 474.13759060139273,
+    "team_profit_median": -602.1205100577228,
+    "profit_by_microgrid_mean": {
+      "mg1": -163.02528200249944,
+      "mg2": 50.42287304330922,
+      "mg3": -579.8028915832034
+    },
+    "renewable_utilization_rate": 0.7851018564292505,
+    "p2p_total_energy_kwh": 1543.6103752525494,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.321600569899408,
+    "generalized_system_cost_mean": 1032.160056989941,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 3800,
+    "team_profit_mean": -693.1629509272931,
+    "team_profit_std": 476.649832964936,
+    "team_profit_median": -606.899875080361,
+    "profit_by_microgrid_mean": {
+      "mg1": -168.12752803375722,
+      "mg2": 55.2267584143244,
+      "mg3": -580.2621813078604
+    },
+    "renewable_utilization_rate": 0.7825400164870628,
+    "p2p_total_energy_kwh": 1524.6149354984113,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.311505240722092,
+    "generalized_system_cost_mean": 1031.150524072209,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 3900,
+    "team_profit_mean": -686.4654120123064,
+    "team_profit_std": 472.84594573093835,
+    "team_profit_median": -602.1646080186723,
+    "profit_by_microgrid_mean": {
+      "mg1": -169.8111425923341,
+      "mg2": 62.005671240609544,
+      "mg3": -578.6599406605819
+    },
+    "renewable_utilization_rate": 0.7812850349503079,
+    "p2p_total_energy_kwh": 1531.7774104588766,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.265351124915819,
+    "generalized_system_cost_mean": 1026.535112491582,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 4000,
+    "team_profit_mean": -687.2975544737018,
+    "team_profit_std": 478.4194603432445,
+    "team_profit_median": -600.7330934102971,
+    "profit_by_microgrid_mean": {
+      "mg1": -166.1223863439871,
+      "mg2": 61.07965182886029,
+      "mg3": -582.2548199585749
+    },
+    "renewable_utilization_rate": 0.7830542251762573,
+    "p2p_total_energy_kwh": 1539.7338725181132,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.309816373298915,
+    "generalized_system_cost_mean": 1030.9816373298913,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 4100,
+    "team_profit_mean": -680.5462747648617,
+    "team_profit_std": 469.5933981717574,
+    "team_profit_median": -587.4559333595628,
+    "profit_by_microgrid_mean": {
+      "mg1": -166.23873023224726,
+      "mg2": 62.65887288302509,
+      "mg3": -576.9664174156394
+    },
+    "renewable_utilization_rate": 0.7829232833753835,
+    "p2p_total_energy_kwh": 1540.394065678644,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.221860957709408,
+    "generalized_system_cost_mean": 1022.1860957709409,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 4200,
+    "team_profit_mean": -681.7274671614908,
+    "team_profit_std": 467.6125543756181,
+    "team_profit_median": -599.7140502365037,
+    "profit_by_microgrid_mean": {
+      "mg1": -163.4927331379559,
+      "mg2": 61.3795233513455,
+      "mg3": -579.6142573748806
+    },
+    "renewable_utilization_rate": 0.7833033169500815,
+    "p2p_total_energy_kwh": 1547.0182906046593,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.21055079673079,
+    "generalized_system_cost_mean": 1021.0550796730789,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 4300,
+    "team_profit_mean": -687.9359269368089,
+    "team_profit_std": 468.2823219848799,
+    "team_profit_median": -602.313461038351,
+    "profit_by_microgrid_mean": {
+      "mg1": -164.43806661019218,
+      "mg2": 59.230562189849415,
+      "mg3": -582.7284225164663
+    },
+    "renewable_utilization_rate": 0.7836851226556479,
+    "p2p_total_energy_kwh": 1546.4640881824791,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.252654934227813,
+    "generalized_system_cost_mean": 1025.2654934227812,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 4400,
+    "team_profit_mean": -687.0918649838037,
+    "team_profit_std": 470.1226971191885,
+    "team_profit_median": -594.4637880664244,
+    "profit_by_microgrid_mean": {
+      "mg1": -168.67688426907628,
+      "mg2": 59.19383382409504,
+      "mg3": -577.6088145388225
+    },
+    "renewable_utilization_rate": 0.7799942685612835,
+    "p2p_total_energy_kwh": 1513.6634493449274,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.283325814815983,
+    "generalized_system_cost_mean": 1028.3325814815983,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 4500,
+    "team_profit_mean": -682.3373193831252,
+    "team_profit_std": 471.2437626052674,
+    "team_profit_median": -599.6636617587104,
+    "profit_by_microgrid_mean": {
+      "mg1": -165.89354374420546,
+      "mg2": 61.2631667190097,
+      "mg3": -577.706942357929
+    },
+    "renewable_utilization_rate": 0.7831329212359457,
+    "p2p_total_energy_kwh": 1517.4276155976556,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.224840547901488,
+    "generalized_system_cost_mean": 1022.4840547901488,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 4600,
+    "team_profit_mean": -674.8293058888214,
+    "team_profit_std": 461.1733755724251,
+    "team_profit_median": -612.2085582871742,
+    "profit_by_microgrid_mean": {
+      "mg1": -166.19429049736993,
+      "mg2": 67.22021246509448,
+      "mg3": -575.8552278565459
+    },
+    "renewable_utilization_rate": 0.7830928896063412,
+    "p2p_total_energy_kwh": 1535.5848322643787,
+    "feasible_rate": 1.0,
+    "is_best": true,
+    "team_reward_mean": -10.13340238811535,
+    "generalized_system_cost_mean": 1013.3402388115348,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 4700,
+    "team_profit_mean": -678.7153625223516,
+    "team_profit_std": 459.1572954760466,
+    "team_profit_median": -607.3142891097166,
+    "profit_by_microgrid_mean": {
+      "mg1": -168.76091241609038,
+      "mg2": 63.43221707656561,
+      "mg3": -573.3866671828267
+    },
+    "renewable_utilization_rate": 0.7822131977258825,
+    "p2p_total_energy_kwh": 1539.1674061344984,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.165559142585177,
+    "generalized_system_cost_mean": 1016.5559142585175,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 5.684341886080802e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 4800,
+    "team_profit_mean": -677.2128547325486,
+    "team_profit_std": 459.81895565567476,
+    "team_profit_median": -609.4283395212582,
+    "profit_by_microgrid_mean": {
+      "mg1": -166.25352113854228,
+      "mg2": 62.73142549695613,
+      "mg3": -573.6907590909624
+    },
+    "renewable_utilization_rate": 0.7831643334140188,
+    "p2p_total_energy_kwh": 1539.6170484731374,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.164216089887688,
+    "generalized_system_cost_mean": 1016.421608988769,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 1.1368683772161603e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 4900,
+    "team_profit_mean": -677.8405451865636,
+    "team_profit_std": 461.96629139773063,
+    "team_profit_median": -595.9345674867803,
+    "profit_by_microgrid_mean": {
+      "mg1": -160.98842477619385,
+      "mg2": 59.00879863249013,
+      "mg3": -575.86091904286
+    },
+    "renewable_utilization_rate": 0.7841001168705499,
+    "p2p_total_energy_kwh": 1530.339473309745,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.156163877804955,
+    "generalized_system_cost_mean": 1015.616387780495,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  },
+  {
+    "episode": 5000,
+    "team_profit_mean": -679.124477638006,
+    "team_profit_std": 468.0859016340062,
+    "team_profit_median": -597.7746311746723,
+    "profit_by_microgrid_mean": {
+      "mg1": -163.28191888184645,
+      "mg2": 60.25069079620187,
+      "mg3": -576.0932495523616
+    },
+    "renewable_utilization_rate": 0.7837074526733022,
+    "p2p_total_energy_kwh": 1522.8407677924665,
+    "feasible_rate": 1.0,
+    "is_best": false,
+    "team_reward_mean": -10.16480306962692,
+    "generalized_system_cost_mean": 1016.4803069626919,
+    "selection_mode": "physical_constrained_objective",
+    "constraint_eligible": true,
+    "constraint_violation_total": 0.0,
+    "constraint_values": {
+      "physical_feasible_day_rate": 1.0,
+      "power_balance_residual_max_kw": 0.0,
+      "source_balance_residual_max_kw": 2.2737367544323206e-13,
+      "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+      "device_bound_violation_max": 2.530422848148505e-17,
+      "grid_export_max_kw": 0.0,
+      "unmet_energy_mean_kwh": 0.0
+    },
+    "constraint_failures": []
+  }
+]

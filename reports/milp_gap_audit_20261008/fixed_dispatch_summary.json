@@ -1,0 +1,25 @@
+{
+  "days": 55,
+  "mean_costs": {
+    "all_fixed": 1201.2598788939752,
+    "all_free": 1049.3725558192994,
+    "dr_free": 1102.9800948740253,
+    "ess_free": 1148.4333474583193,
+    "ev_free": 1165.3891114953244,
+    "hvac_free": 1154.5505203507405,
+    "mill_free": 1176.5912846970357
+  },
+  "single_group_release_gains": {
+    "ess": 52.826531435656236,
+    "mill": 24.668594196939726,
+    "hvac": 46.709358543235375,
+    "ev": 35.8707673986506
+  },
+  "ess_plus_all_dr_interaction": 0.781007619069571,
+  "caveats": [
+    "Full-information optimization with free source/use allocation.",
+    "Single-group release gains interact and must not be added.",
+    "EV aggregate power is fixed; cohort assignment remains a solver variable.",
+    "These are diagnostic reoptimizations, not trained-policy gains."
+  ]
+}

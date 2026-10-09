@@ -9,24 +9,26 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from experiments.layout import artifact_directory, figure_directory, run_root
+
 from evaluation.plotting import generate_figures
 from evaluation.service_reliability import augment_run_outputs
 
 
 def generate_results(run_dir: str | Path) -> Path:
     """Regenerate saved-result reports without executing environment or models."""
-    run_dir = Path(run_dir).resolve()
+    run_dir = artifact_directory(run_dir)
     result_dir = run_dir / "results"
     result_dir.mkdir(exist_ok=True)
 
     # Both consumers operate only on already persisted JSON/CSV artifacts.
     # Missing required evidence is an error; PLOTTING_PENDING is not a valid
-    # substitute for the canonical 15-figure contract.
+    # substitute for the saved-result figure contract.
     augment_run_outputs(run_dir, generate_plot=False)
     paths = generate_figures(run_dir)
     manifest = result_dir / "generated_figures.txt"
     manifest.write_text(
-        "\n".join(str(path.relative_to(run_dir)) for path in paths) + "\n",
+        "\n".join(str(path.relative_to(run_root(run_dir))) for path in paths) + "\n",
         encoding="utf-8",
     )
     return result_dir

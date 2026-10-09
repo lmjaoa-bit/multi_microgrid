@@ -4,6 +4,8 @@ import csv
 import hashlib
 import json
 from pathlib import Path
+import subprocess
+import sys
 
 import pytest
 import yaml
@@ -86,3 +88,8 @@ def test_audit_rejects_releases_tree(tmp_path):
     run=_fixture(tmp_path)
     with pytest.raises(ValueError):
         audit_saved_run(run,tmp_path/"outputs"/"releases"/"audit")
+def test_audit_cli_imports_from_repository_root():
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run([sys.executable, "scripts/audit_saved_service_metrics.py", "--help"],
+                            cwd=root, capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr

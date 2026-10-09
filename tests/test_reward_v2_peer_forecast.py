@@ -7,9 +7,6 @@ import numpy as np
 import torch
 import yaml
 
-from algorithms.matd3_forecast_context.actor import (
-    ForecastContextActor,
-)
 from algorithms.matd3_hierarchical_transformer.actor import (
     HierarchicalTransformerActor,
 )
@@ -60,36 +57,37 @@ def _actor(env, mg="mg1"):
     ).eval()
 
 
-def test_v2_forecast_contract_matches_b_feature_order():
+def test_v2_forecast_contract_preserves_physical_feature_order():
     env = MultiMicrogridEnv(_env_cfg(), split="train")
     mg = "mg1"
-    actor = _actor(env, mg)
-    norms = {
-        key: float(env.obs_builder.norm[mg][key])
-        for key in ("load", "pv", "wind", "power")
-    }
-    study_b = ForecastContextActor(
+    actor = HierarchicalTransformerActor(
         env.obs_builder.schema(mg),
         env.agent_ids,
         mg,
         env.cfg_by_id[mg],
-        power_normalizers=norms,
+        power_normalizers={"load": 100.0, "pv": 200.0, "wind": 300.0, "power": 100.0},
         forecast_horizon=8,
         include_peer_forecast=True,
         peer_forecast_features=("energy_balance",),
     ).eval()
-    obs, _ = env.reset(seed=42, deterministic=True, forecast_noise=False)
-    x = torch.as_tensor(obs[mg], dtype=torch.float32).unsqueeze(0)
+    x = torch.zeros(1, len(actor.schema))
+    x[:, actor.schema.index("hour_cos")] = 1.0
+    for name, value in {
+        "load_t+1": 0.6, "pv_t+1": 0.2, "wind_t+1": 0.1,
+        "price_t+1": 0.7, "forecast_valid_t+1": 1.0,
+        f"{actor.peers[0]}_energy_balance_t+1": 0.25,
+        f"{actor.peers[1]}_energy_balance_t+1": -0.4,
+    }.items():
+        x[:, actor.schema.index(name)] = value
     assert actor.forecast_horizon == 8
     assert actor.forecast_feature_dim == 8
     assert actor.total_tokens == 14
     assert actor.peers == tuple(p for p in env.agent_ids if p != mg)
-    torch.testing.assert_close(
-        actor._build_forecast_features(x),
-        study_b._build_forecast_features(x),
-        rtol=0.0,
-        atol=1e-7,
-    )
+    features = actor._build_forecast_features(x)
+    # (60 kW load - 40 kW PV - 30 kW wind) / 100 kW = -0.1.
+    expected = torch.tensor([-0.1, 0.7, 0.0, 1.0, 0.2588190451, 0.9659258263, 0.25, -0.4])
+    torch.testing.assert_close(features[0, 0], expected, rtol=0.0, atol=1e-7)
+    torch.testing.assert_close(features[:, 1:], torch.zeros(1, 7, 8), rtol=0.0, atol=0.0)
 
 
 def test_invalid_forecasts_cannot_change_action():

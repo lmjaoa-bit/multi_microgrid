@@ -1,0 +1,68 @@
+{
+  "checkpoint_episode": 4600,
+  "days": 55,
+  "generalized_cost_mean": 1201.2598812833703,
+  "generalized_reference_mean": 1049.377976095186,
+  "broader_reference_gap": 151.8819051881842,
+  "broader_reference_gap_pct": 12.6435509546794,
+  "single_action_opportunities": [
+    {
+      "device": "Mill",
+      "pairs": 50,
+      "missed_positive": 3,
+      "median_cost_reduction": 0.23636503112847151,
+      "min_cost_reduction": 0.14652132654626726,
+      "max_cost_reduction": 0.5335197545850434
+    },
+    {
+      "device": "HVAC",
+      "pairs": 94,
+      "missed_positive": 13,
+      "median_cost_reduction": 0.510470775664329,
+      "min_cost_reduction": 0.227562044281715,
+      "max_cost_reduction": 0.8969139147070537
+    },
+    {
+      "device": "EV",
+      "pairs": 48,
+      "missed_positive": 8,
+      "median_cost_reduction": 0.9992610996735041,
+      "min_cost_reduction": 0.21367698058583073,
+      "max_cost_reduction": 1.2942619740600847
+    }
+  ],
+  "scenarios": [
+    {
+      "gap_recovery_fraction": 0.1,
+      "daily_cost_reduction": 15.18819051881842,
+      "cost_reduction_pct": 1.26435509546794
+    },
+    {
+      "gap_recovery_fraction": 0.25,
+      "daily_cost_reduction": 37.97047629704605,
+      "cost_reduction_pct": 3.16088773866985
+    },
+    {
+      "gap_recovery_fraction": 0.5,
+      "daily_cost_reduction": 75.9409525940921,
+      "cost_reduction_pct": 6.3217754773397
+    }
+  ],
+  "source_sha256": {
+    "pair_decomposition.csv": "f9bd48cd59de7f423d374e1c2cf3505d1fb6313d4bf0d80f8a73b7c091e4d9dd",
+    "test_daily_metrics.csv": "e049290f4cde55e029676222c0be26611e212a24a0fca7a99afacea9e2c955ce"
+  },
+  "checks": [
+    "55 unique dates",
+    "Daily means reconcile to formal summary",
+    "Every daily reward reconciles to cost / 100",
+    "Every paired reward gain reconciles to saved cost components"
+  ],
+  "caveats": [
+    "Scenarios are assumptions, not forecasts or confidence intervals.",
+    "Reference allocation differs from online clearing; the gap is not an achievable Critic-only bound.",
+    "Single-action counterfactual gains overlap and must not be summed over a day.",
+    "Generalized cost contains noncash penalties and is not accounting profit.",
+    "No retrained policy has been evaluated."
+  ]
+}

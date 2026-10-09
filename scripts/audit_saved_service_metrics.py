@@ -6,9 +6,16 @@ import hashlib
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+import sys
 from typing import Any, Mapping
 
 import yaml
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from experiments.layout import artifact_directory, run_root
 
 from evaluation.service_metrics import (
     SERVICE_METRICS_SCHEMA_VERSION,
@@ -73,10 +80,10 @@ def _validate_output(run: Path, output: Path) -> None:
 def _source_paths(run: Path) -> list[Path]:
     paths=[]
     for name in SOURCE_FILES:
-        path=run/name
+        path=artifact_directory(run)/name
         if path.is_file():
             paths.append(path)
-    hourly=run/"test_hourly_trajectories"
+    hourly=artifact_directory(run)/"test_hourly_trajectories"
     if hourly.is_dir():
         paths.extend(sorted(hourly.glob("*.csv")))
     return paths
@@ -86,7 +93,7 @@ def _configuration_source(run: Path, summary: Mapping[str, Any]) -> str | None:
     physical = summary.get("experiment_contract", {}).get("physical_settings")
     if isinstance(physical, Mapping) and physical.get("microgrids"):
         return "test_summary.json:experiment_contract.physical_settings"
-    snapshot = run / "config_snapshot.yaml"
+    snapshot = artifact_directory(run) / "config_snapshot.yaml"
     if snapshot.is_file():
         document = yaml.safe_load(snapshot.read_text(encoding="utf-8")) or {}
         env = document.get("environment")
@@ -113,7 +120,7 @@ def _load_config(run: Path, summary: Mapping[str,Any]) -> dict[str,Any] | None:
     physical=summary.get("experiment_contract",{}).get("physical_settings")
     if isinstance(physical,Mapping) and physical.get("microgrids"):
         return dict(physical)
-    snapshot=run/"config_snapshot.yaml"
+    snapshot=artifact_directory(run)/"config_snapshot.yaml"
     if snapshot.is_file():
         document=yaml.safe_load(snapshot.read_text(encoding="utf-8")) or {}
         env=document.get("environment")
@@ -123,14 +130,15 @@ def _load_config(run: Path, summary: Mapping[str,Any]) -> dict[str,Any] | None:
 
 
 def audit_saved_run(run: str|Path, output: str|Path) -> dict[str,Any]:
-    source=Path(run).resolve()
+    source=run_root(run)
+    data=artifact_directory(source)
     destination=Path(output).resolve()
     if not source.is_dir():
         raise FileNotFoundError(f"Run directory does not exist: {source}")
     _validate_output(source,destination)
 
     source_paths=_source_paths(source)
-    required={source/"test_summary.json",source/"test_daily_metrics.csv"}
+    required={data/"test_summary.json",data/"test_daily_metrics.csv"}
     if not required.issubset(set(source_paths)):
         missing=sorted(str(p.name) for p in required if p not in source_paths)
         raise FileNotFoundError(f"Missing saved run evidence: {missing}")
@@ -139,10 +147,10 @@ def audit_saved_run(run: str|Path, output: str|Path) -> dict[str,Any]:
         name: item["sha256"] for name, item in source_files_before.items()
     }
 
-    summary=_read_json(source/"test_summary.json")
+    summary=_read_json(data/"test_summary.json")
     config=_load_config(source,summary)
     config_source = _configuration_source(source, summary)
-    daily=_read_csv(source/"test_daily_metrics.csv")
+    daily=_read_csv(data/"test_daily_metrics.csv")
     schema=str(
         summary.get("experiment_contract",{}).get(
             "service_metrics_schema_version","legacy_unknown"
@@ -153,7 +161,7 @@ def audit_saved_run(run: str|Path, output: str|Path) -> dict[str,Any]:
     audited_nested=[]
     for row in daily:
         date=str(row.get("date","")).strip()
-        hourly_path=source/"test_hourly_trajectories"/f"{date}.csv"
+        hourly_path=data/"test_hourly_trajectories"/f"{date}.csv"
         if not hourly_path.is_file():
             metrics={
                 "metrics_schema_version":schema,

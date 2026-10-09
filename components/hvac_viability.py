@@ -6,6 +6,8 @@ from typing import Any, Mapping
 import highspy
 import numpy as np
 
+from components.hvac_thermal import thermal_transition
+
 
 @dataclass(frozen=True)
 class HVACForecastSnapshot:
@@ -56,23 +58,8 @@ class HVACViabilitySolverError(RuntimeError):
 def thermal_linear_coefficients(
     config: Mapping[str, Any], delta_t: float
 ) -> tuple[np.ndarray, np.ndarray, float]:
-    dt = float(delta_t)
-    r_oa = float(config["r_out_air_c_per_kw"])
-    r_am = float(config["r_air_mass_c_per_kw"])
-    c_air = float(config["c_air_kwh_per_c"])
-    c_mass = float(config["c_mass_kwh_per_c"])
-    a = np.asarray([
-        [
-            1.0 - dt / c_air * (1.0 / r_oa + 1.0 / r_am),
-            dt / (c_air * r_am),
-        ],
-        [
-            dt / (c_mass * r_am),
-            1.0 - dt / (c_mass * r_am),
-        ],
-    ], dtype=np.float64)
-    b = np.asarray([dt / c_air, 0.0], dtype=np.float64)
-    return a, b, dt
+    a, inputs = thermal_transition(config, delta_t)
+    return a, inputs[:, 0].copy(), float(delta_t)
 
 
 def _electric_from_q(q: float, config: Mapping[str, Any]) -> float:
@@ -117,13 +104,12 @@ def _build_model(
         [model.addVariable(lb=0.0, ub=inf, name=f"slack_{k}") for k in range(h_count)]
         if relaxed else None
     )
-    a, bq, dt = thermal_linear_coefficients(config, delta_t)
+    a, inputs = thermal_transition(config, delta_t)
+    bq = inputs[:, 0]
     solar_gain = float(config.get("solar_gain_kw_per_wm2", 0.025))
     solar_air_fraction = float(config.get("solar_air_fraction", 0.20))
     occ_fraction = float(config.get("internal_gain_occupied_fraction", 0.50))
     unocc_fraction = float(config.get("internal_gain_unoccupied_fraction", 0.20))
-    c_air = float(config["c_air_kwh_per_c"])
-    c_mass = float(config["c_mass_kwh_per_c"])
     r_oa = float(config["r_out_air_c_per_kw"])
 
     for k in range(h_count):
@@ -133,11 +119,10 @@ def _build_model(
         q_internal = float(snapshot.base_load_kw[k]) * (
             occ_fraction if bool(snapshot.interval_occupied[k]) else unocc_fraction
         )
-        b_air = dt / c_air * (
-            float(snapshot.outside_temperature_c[k]) / r_oa
-            + q_internal + q_air
-        )
-        b_mass = dt / c_mass * q_mass
+        b_air, b_mass = inputs @ np.asarray([
+            float(snapshot.outside_temperature_c[k]) / r_oa + q_internal + q_air,
+            q_mass,
+        ])
         model.addConstr(
             air[k + 1]
             == a[0, 0] * air[k] + a[0, 1] * mass[k]
@@ -145,7 +130,7 @@ def _build_model(
         )
         model.addConstr(
             mass[k + 1]
-            == a[1, 0] * air[k] + a[1, 1] * mass[k] + b_mass
+            == a[1, 0] * air[k] + a[1, 1] * mass[k] + bq[1] * q[k] + b_mass
         )
         low = float(snapshot.comfort_low_c[k])
         high = float(snapshot.comfort_high_c[k])

@@ -5,6 +5,8 @@ from typing import Any, Mapping
 import numpy as np
 import pandas as pd
 
+from components.hvac_thermal import thermal_discretization, thermal_transition
+
 from components.hvac_viability import (
     HVACForecastSnapshot,
     HVACViabilityResult,
@@ -55,6 +57,9 @@ class CommercialHVACDR:
             self.cop_cool,
         ) <= 0.0:
             raise ValueError("HVAC thermal and device parameters must be positive")
+        state_matrix, input_matrix = thermal_transition(config, self.delta_t)
+        if thermal_discretization(config) == "exact_zoh":
+            self._thermal_state_matrix, self._thermal_input_matrix = state_matrix, input_matrix
         self._frame: pd.DataFrame | None = None
         self._base_load_kw: np.ndarray | None = None
         self.t_air = 23.0
@@ -74,6 +79,22 @@ class CommercialHVACDR:
             self.forecast_viability = False
         self._viability_result: HVACViabilityResult | None = None
         self._viability_t: int | None = None
+
+    @property
+    def thermal_discretization(self) -> str:
+        return thermal_discretization(self.config)
+
+    @property
+    def thermal_state_matrix(self) -> np.ndarray:
+        if self.thermal_discretization == "legacy_euler":
+            return thermal_transition(self.config, self.delta_t)[0]
+        return self._thermal_state_matrix
+
+    @property
+    def thermal_input_matrix(self) -> np.ndarray:
+        if self.thermal_discretization == "legacy_euler":
+            return thermal_transition(self.config, self.delta_t)[1]
+        return self._thermal_input_matrix
 
     @property
     def q_min_kw(self) -> float:
@@ -98,7 +119,7 @@ class CommercialHVACDR:
         self._base_load_kw = np.asarray(base_load_kw, dtype=np.float64)
         if self._base_load_kw.shape[0] < self.episode_length:
             raise ValueError("HVAC reset requires one base-load value per episode hour")
-        t_out_0 = float(self._frame.iloc[0][self.temperature_column])
+        t_out_0 = float(self._frame[self.temperature_column].iat[0])
         self.initial_t_air = float(np.clip(23.0 + 0.20 * (t_out_0 - 23.0), 18.0, 28.0))
         self.initial_t_mass = float(np.clip(23.0 + 0.10 * (t_out_0 - 23.0), 18.0, 28.0))
         self.t_air = self.initial_t_air
@@ -111,7 +132,8 @@ class CommercialHVACDR:
     def _timestamp(self, t: int) -> pd.Timestamp:
         if self._frame is None:
             raise RuntimeError("HVAC must be reset before use")
-        return pd.Timestamp(self._frame.iloc[int(t)]["timestamp"])
+        # Read one typed column instead of allocating a mixed-type pandas row.
+        return pd.Timestamp(self._frame["timestamp"].iat[int(t)])
 
     def _occupied(self, t: int) -> bool:
         ts = self._timestamp(t)
@@ -136,9 +158,9 @@ class CommercialHVACDR:
     def _exogenous(self, t: int) -> tuple[float, float, float]:
         if self._frame is None or self._base_load_kw is None:
             raise RuntimeError("HVAC must be reset before use")
-        row = self._frame.iloc[int(t)]
-        t_out = float(row[self.temperature_column])
-        ghi = max(0.0, float(row[self.ghi_column]))
+        index = int(t)
+        t_out = float(self._frame[self.temperature_column].iat[index])
+        ghi = max(0.0, float(self._frame[self.ghi_column].iat[index]))
         q_solar = self.solar_gain * ghi
         q_internal = float(self._base_load_kw[int(t)]) * (
             self.internal_occ_fraction if self._occupied(t) else self.internal_unocc_fraction
@@ -149,21 +171,15 @@ class CommercialHVACDR:
         t_out, q_solar, q_internal = self._exogenous(t)
         q_air = self.solar_air_fraction * q_solar
         q_mass = (1.0 - self.solar_air_fraction) * q_solar
-        air_rate = (
-            (t_out - t_air) / self.r_oa
-            + (t_mass - t_air) / self.r_am
-            + q_internal
-            + q_air
-            + q_hvac_kw
-        ) / self.c_air
-        mass_rate = (
-            (t_air - t_mass) / self.r_am
-            + q_mass
-        ) / self.c_mass
-        return (
-            float(t_air + self.delta_t * air_rate),
-            float(t_mass + self.delta_t * mass_rate),
-        )
+        if self.thermal_discretization == "legacy_euler":
+            # Preserve arithmetic and latent-state fingerprints of saved probes.
+            air_rate = ((t_out - t_air) / self.r_oa + (t_mass - t_air) / self.r_am
+                        + q_internal + q_air + q_hvac_kw) / self.c_air
+            mass_rate = ((t_air - t_mass) / self.r_am + q_mass) / self.c_mass
+            return float(t_air + self.delta_t * air_rate), float(t_mass + self.delta_t * mass_rate)
+        inputs = np.asarray([t_out / self.r_oa + q_internal + q_air + q_hvac_kw, q_mass])
+        state = self.thermal_state_matrix @ np.asarray([t_air, t_mass]) + self.thermal_input_matrix @ inputs
+        return float(state[0]), float(state[1])
 
     def _q_to_signed_electric(self, q_hvac_kw: float) -> float:
         if q_hvac_kw >= 0.0:
@@ -176,8 +192,13 @@ class CommercialHVACDR:
     def _one_step_bounds_q(self, t: int) -> tuple[float, float]:
         base_air, _ = self._next_state(self.t_air, self.t_mass, 0.0, t)
         comfort_low, comfort_high = self._state_comfort_bounds(int(t) + 1)
-        q_required_low = (comfort_low - base_air) * self.c_air / self.delta_t
-        q_required_high = (comfort_high - base_air) * self.c_air / self.delta_t
+        if self.thermal_discretization == "legacy_euler":
+            q_required_low = (comfort_low - base_air) * self.c_air / self.delta_t
+            q_required_high = (comfort_high - base_air) * self.c_air / self.delta_t
+        else:
+            air_response_per_thermal_kw = float(self.thermal_input_matrix[0, 0])
+            q_required_low = (comfort_low - base_air) / air_response_per_thermal_kw
+            q_required_high = (comfort_high - base_air) / air_response_per_thermal_kw
         low = max(self.q_min_kw, q_required_low)
         high = min(self.q_max_kw, q_required_high)
         if low <= high + 1e-9:

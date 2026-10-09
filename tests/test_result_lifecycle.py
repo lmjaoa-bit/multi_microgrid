@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from experiments.layout import DEFAULT_WORKING_OUTPUT_ROOT
+from experiments.layout import organize_run_artifacts
 from experiments.result_lifecycle import (
     PromotionError,
     _run_git,
@@ -23,6 +24,22 @@ from scripts.run_experiment import build_managed_parser
 def _write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def test_promote_two_folder_run_preserves_source_and_repairs_copied_paths(tmp_path: Path):
+    source = _make_complete_run(tmp_path / "working")
+    payload = json.loads((source / "summary.json").read_text(encoding="utf-8"))
+    payload["run_directory"] = str(source)
+    payload["best_checkpoint"] = str(source / "checkpoints/best_model.pt")
+    _write_json(source / "summary.json", payload)
+    organize_run_artifacts(source)
+    manifest = promote_run(source, tmp_path / "releases", "accepted")
+    final_dir = Path(manifest["release_run_directory"])
+    assert (source / "artifacts/checkpoints/best_model.pt").read_bytes() == b"checkpoint"
+    assert (final_dir / "artifacts/checkpoints/best_model.pt").read_bytes() == b"checkpoint"
+    copied = json.loads((final_dir / "artifacts/summary.json").read_text(encoding="utf-8"))
+    assert copied["run_directory"] == str(final_dir.resolve())
+    assert copied["best_checkpoint"] == str(final_dir.resolve() / "artifacts/checkpoints/best_model.pt")
 
 
 def _make_complete_run(root: Path, *, run_id: str = "PNN-TRANSFORMER_test_seed42", dirty=False) -> Path:

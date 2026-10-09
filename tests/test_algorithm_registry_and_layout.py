@@ -28,19 +28,14 @@ def test_matd3_plugin_is_discoverable_and_satisfies_pipeline_contract() -> None:
 
 def test_retained_plugins_keep_isolated_configs():
     names = available_algorithm_names()
-    assert set(names) == {
+    # Experimental plugins are discoverable and removable independently.
+    assert {
         "matd3_dispatch",
-        "matd3_dispatch_exploration",
         "matd3_dispatch_q_guided",
-        "matd3_forecast_context",
         "matd3_hierarchical_transformer",
-        "matd3_hierarchical_transformer_q_guided",
-        "matd3_hierarchical_transformer_q_readout",
-        "matd3_mlp_transformer_critic_q_guided",
-        "matd3_mlp_transformer_critic_h24_q_guided",
         "matd3_mlp_dueling_critic_h24_q_guided",
-        "matd3_plan_transformer",
-    }
+        "matd3_dr_counterfactual",
+    } <= set(names)
 
     # Every retained plugin owns a matching algorithm config.
     for slug in names:
@@ -66,22 +61,6 @@ def test_matd3_and_ordinary_t_receive_same_peer_energy_summary():
             assert f"{peer}_soc" not in schema
 
 
-def test_explicit_forecast_context_plugin_is_registered_for_new_runs():
-    assert set(available_algorithm_names()) == {
-        "matd3_dispatch",
-        "matd3_dispatch_exploration",
-        "matd3_dispatch_q_guided",
-        "matd3_forecast_context",
-        "matd3_hierarchical_transformer",
-        "matd3_hierarchical_transformer_q_guided",
-        "matd3_hierarchical_transformer_q_readout",
-        "matd3_mlp_transformer_critic_q_guided",
-        "matd3_mlp_transformer_critic_h24_q_guided",
-        "matd3_mlp_dueling_critic_h24_q_guided",
-        "matd3_plan_transformer",
-    }
-
-
 def test_experiment_layout_isolates_algorithms_and_runs(tmp_path: Path) -> None:
     first = ExperimentLayout.create(tmp_path, "matd3", "MATD3", 42)
     second = ExperimentLayout.create(tmp_path, "candidate", "Candidate", 42)
@@ -91,6 +70,8 @@ def test_experiment_layout_isolates_algorithms_and_runs(tmp_path: Path) -> None:
     assert second.run_dir.parent.name == "runs"
     assert first.run_dir != second.run_dir
     assert first.checkpoints_dir.exists()
+    assert {path.name for path in first.run_dir.iterdir()} == {"figures", "artifacts"}
+    assert first.checkpoints_dir == first.run_dir / "artifacts" / "checkpoints"
 
 
 def test_variant_scaffold_owns_separate_code_and_config(tmp_path: Path) -> None:

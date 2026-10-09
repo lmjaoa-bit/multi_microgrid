@@ -1,0 +1,14 @@
+{
+  "status": "RUNNING",
+  "timestamp": "2026-10-07T22:11:08.830639+08:00",
+  "completed_episode": 0,
+  "resumed": false,
+  "history": [
+    {
+      "status": "RUNNING",
+      "timestamp": "2026-10-07T22:11:08.830639+08:00",
+      "completed_episode": 0,
+      "resumed": false
+    }
+  ]
+}

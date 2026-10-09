@@ -1,0 +1,42 @@
+{
+  "source_run": "C:\\daima\\multi_microgrid_rl_standalone\\outputs\\working_runs\\matd3_mlp_dueling_critic_h24_q_guided\\runs\\DUELINGCRITICT-QH24_2026-10-07_22-11-08_seed42",
+  "checkpoint_sha256": "b2e53e4f846189ae482210325d3219243f9ac7b1a57901abae8b25677a8c4f11",
+  "checkpoint_update_steps": 44601,
+  "best_validation_episode": 1900,
+  "last_validation_episode": 2100,
+  "status_at_capture": "RUNNING",
+  "seed": 42,
+  "policy_noise_std": 0.0,
+  "split": "test",
+  "training_started_by_audit": false,
+  "source_hashes": {
+    "algorithms\\matd3\\actor.py": "05d7292d4ec191ac35898dcd2aa111b98985d4787a707e98eb5873873c5f1890",
+    "algorithms\\matd3\\critic.py": "1bb19eef78dcecead5ad047b0b84aa6b4b22475f18f45dc68c077aa8815ab2ad",
+    "algorithms\\matd3\\matd3.py": "1efb31e0da9e52c78b49cb6b7b3620792a9b303a325189b08879fd8ac3189533",
+    "algorithms\\matd3\\plugin.py": "a13be7c11812f60dd0e9a6fd2bcfa5da23ce86b60a7ae8b01f6e1bfeca16df62",
+    "algorithms\\matd3\\replay_buffer.py": "5ae786e59058234c1dce347187a838878937409b7a87c99d0cd518a0313e9e15",
+    "algorithms\\matd3\\__init__.py": "8172e8f316662a701fff5f6871b8862f083a5305868c32e257ee412c36fd9771",
+    "algorithms\\matd3_mlp_dueling_critic_h24_q_guided\\actor.py": "880a08c6c2b119969f445773bb99fed950f5f5e3747ba11dd178835ad6f927d4",
+    "algorithms\\matd3_mlp_dueling_critic_h24_q_guided\\algorithm.py": "a2260f64646eb296f8f9ef6b93a4153bfe8fbc9ebdcb9cc395a37b1c56bd68b4",
+    "algorithms\\matd3_mlp_dueling_critic_h24_q_guided\\critic.py": "59c900d61cede73f8940bfcc8447c6a58989bfab0340d26068484cf5e570e443",
+    "algorithms\\matd3_mlp_dueling_critic_h24_q_guided\\plugin.py": "5e5699f6cfa5a2cb0374ccf51a16e2e276c96dd538a0954b959cc821e1c57a49",
+    "algorithms\\matd3_mlp_dueling_critic_h24_q_guided\\__init__.py": "6f029e0c5f5ca9864a971246a92a2f1c5f2664fb11377b3cab421811bac28df3",
+    "algorithms\\diagnostic_sampling.py": "b9a06939664c3a2f59ac985994355c877fb68d926cbc0babf32cfb1010361b75",
+    "components\\commercial_hvac.py": "3b9833189a22f1c7e45dcf34cdbd83353a133a89f500ad774bc51aa3f1fddb0b",
+    "components\\hvac_thermal.py": "c6efa6f389069571f0cbc6ea4e4977dda6b152ee6c291c401ef5f26bc256aae5",
+    "core\\reward_v2.py": "e2c286582bb88887505e41ea3e440c4009541f1cd38c1deef21f72590540575a",
+    "core\\joint_action_projection.py": "86bbf888b029bdba54dac15608bd2571d629f0741bded9d6a802a4ba44aa5b78",
+    "envs\\multi_microgrid_env.py": "3bdf63656f61abfeaadd49df300ea24725c98ca4805df319cca6b0f1fd9ba084",
+    "data\\spatial_market_2018_train.csv": "6210e5dff83961324b723bc2439056364eb11170c8379a739b335833be272e6f",
+    "data\\spatial_market_2018_val.csv": "3a0da41ecc37c855394ed77937c5ee57614567b06bec6d61ad7beb79d1d74ee2",
+    "data\\spatial_market_2018_test.csv": "34de61e08736a297018c60c1ee09fb05e89e8ee6d2027b6a2181de56018e0579"
+  },
+  "snapshot_hashes": {
+    "best_model.pt": "b2e53e4f846189ae482210325d3219243f9ac7b1a57901abae8b25677a8c4f11",
+    "config_snapshot.yaml": "2a75e6d88dfff40aeccfac1478a4362825aca7c83e945ff19da39548c5352300",
+    "run_metadata.json": "6246244cedcc7139c89f26acc6ce1821cd06f8ee6e9cbfec18d284330b580076",
+    "run_status.json": "f8442b87c7f89368479ca331c41b00843381719db55933555fb02b971a1bea71",
+    "validation_history.json": "5ebf362c3dfc6f5a58756e14d236e8662bc8705ce733d942bb1cc4c01cf1b419"
+  },
+  "note": "Frozen intermediate best model from active training; audit evaluation is not formal test. Historical plot refers to removed feasible-actor version."
+}

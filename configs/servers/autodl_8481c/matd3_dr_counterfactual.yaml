@@ -1,0 +1,79 @@
+algorithm:
+  name: matd3_dr_counterfactual
+  hidden_dims:
+  - 128
+  - 128
+  actor_lr: 0.0002
+  actor_max_grad_norm: 1.0
+  critic_lr: 0.0003
+  gamma: 1.0
+  tau: 0.005
+  policy_delay: 2
+  target_policy_noise: 0.2
+  target_noise_clip: 0.5
+  batch_size: 128
+  replay_capacity: 200000
+  warmup_steps: 1000
+  learning_starts: 1000
+  exploration_noise: 0.15
+  dispatch_random_action_prob: 0.1
+  dispatch_q_guidance_weight: 0.01
+  dispatch_q_guidance_margin: 0.01
+  dr_counterfactual:
+    capture_probability: 0.025
+    terminal_capture_probability: 1.0
+    capacity: 512
+    batch_size: 16
+    max_age_steps: 2400
+    update_interval: 2
+    critic_weight: 0.5
+    actor_weight: 0.01
+    terminal_anchor_weight: 0.1
+    minimum_gain: 0.001
+runtime:
+  device: cpu
+  cpu_threads: 1
+  interop_threads: 1
+training:
+  episodes: 5000
+  test_episodes: 55
+validation:
+  enabled: true
+  interval: 100
+  deterministic_policy: true
+  fixed_scenarios: true
+  selection:
+    mode: physical_constrained_objective
+    objective: team_reward_mean
+    constraints:
+      physical_feasible_day_rate:
+        min: 1.0
+        atol: 1.0e-07
+      power_balance_residual_max_kw:
+        max: 0.0
+        atol: 1.0e-07
+      source_balance_residual_max_kw:
+        max: 0.0
+        atol: 1.0e-07
+      p2p_balance_residual_max_kw:
+        max: 0.0
+        atol: 1.0e-07
+      device_bound_violation_max:
+        max: 0.0
+        atol: 1.0e-07
+      grid_export_max_kw:
+        max: 0.0
+        atol: 1.0e-07
+      unmet_energy_mean_kwh:
+        max: 0.0
+        atol: 1.0e-07
+logging:
+  diagnostic_interval: 20
+  incremental_history: true
+  history_snapshot_interval: 500
+  dashboard: true
+  dashboard_refresh_hz: 4
+  rolling_windows:
+  - 50
+  - 100
+  - 500

@@ -317,33 +317,25 @@ def test_comparison_markdown_does_not_require_optional_tabulate(
     assert "Total operating cost" in (output / "performance_comparison.md").read_text(encoding="utf-8")
 
 
-def test_standard_figure_generation_keeps_canonical_fifteen_slots(tmp_path: Path) -> None:
+def test_standard_figures_omit_evaluation_curve_and_keep_available_seasons(tmp_path: Path) -> None:
     run_dir = tmp_path / "run"
     _write_run_fixture(run_dir, display_name="MATD3", cost=100.0)
+    # Historical evaluation evidence must not recreate the retired figure.
+    (run_dir / "learning_curve_history.json").write_text("[]", encoding="utf-8")
+    figure_dir = run_dir / "figures"
+    figure_dir.mkdir(exist_ok=True)
+    for suffix in ("png", "pdf"):
+        (figure_dir / f"01b_evaluation_learning_curve.{suffix}").write_bytes(b"old figure")
 
     paths = generate_figures(run_dir, formats=("png",))
 
-    assert len(paths) == 15
+    assert len(paths) == 3
     assert {path.stem for path in paths} == {
-        f"{index:02d}_" + {
-            0: "experiment_summary",
-            1: "training_convergence",
-            2: "joint_team_profit",
-            3: "cooperation_surplus",
-            4: "cooperation_gain_pct",
-            5: "microgrid_profit_settlement",
-            6: "res_utilization",
-            7: "curtailment_comparison",
-            8: "grid_interaction",
-            9: "individual_rationality",
-            10: "p2p_trading_matrix",
-            11: "ess_performance",
-            12: "constraint_feasibility",
-            13: "equal_vs_shapley_surplus_allocation",
-            14: "transfer_payments",
-        }[index]
-        for index in range(15)
+        "00_experiment_summary", "01_training_convergence",
+        "02_dispatch_overview_winter_2018-01-01",
     }
+    assert not list(figure_dir.glob("01b_evaluation_learning_curve.*"))
+    assert (run_dir / "learning_curve_history.json").exists()
     assert not (run_dir / "figures" / "22_representative_dr_service.png").exists()
 
 

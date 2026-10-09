@@ -11,6 +11,8 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from experiments.layout import artifact_directory, figure_directory, run_root
+
 from evaluation.dr_reference import evaluate_and_save_dr_reference
 from evaluation.plotting import generate_figures
 
@@ -18,7 +20,7 @@ from evaluation.plotting import generate_figures
 def build_reference(run_dir: str | Path, *, regenerate_figures: bool = True) -> list[Path]:
     """Backfill the deterministic DR reference for an existing completed run."""
 
-    root = Path(run_dir).resolve()
+    root = artifact_directory(run_dir)
     snapshot_path = root / "config_snapshot.yaml"
     daily_path = root / "test_daily_metrics.csv"
     if not snapshot_path.exists() or not daily_path.exists():

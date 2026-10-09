@@ -1,0 +1,266 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "action-value-errors",
+      "title": "实际跨时段成本变化与 Critic 动作排序不一致",
+      "queries": [
+        {
+          "id": "ess-paired-rollouts",
+          "source": {
+            "label": "冻结最优模型的储能反事实回放",
+            "files": [
+              {
+                "label": "day_value_verification_20261008/ess_action_pairs.csv"
+              },
+              {
+                "label": "day_value_verification_20261008/verify.py"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "动作排序错误",
+                "definition": "全天成本差绝对值大于 0.1，且 Q1 动作差与实际累计奖励差符号相反。"
+              }
+            ],
+            "filters": [
+              "Dueling 完整训练 5000 轮；正式最优模型来自第 4600 轮",
+              "广义成本包含非现金惩罚；普通 MATD3 尚未完成",
+              "每月预选一个测试日期，共 12 日；检查 0、6、12、18 时"
+            ],
+            "caveats": [
+              "抽样动作对比例不是所有动作的错误概率；误判不确定唯一训练根因。"
+            ],
+            "evidenceFlow": [
+              {
+                "kind": "source",
+                "title": "原结果一致性",
+                "detail": "55 天保存动作重放成本最大误差 4.55e-13，冻结与正式检查点哈希一致。"
+              }
+            ]
+          },
+          "rows": [
+            {
+              "comparison": "ESS meaningful pairs",
+              "count": 158
+            },
+            {
+              "comparison": "Q1 wrong",
+              "count": 68
+            },
+            {
+              "comparison": "current-versus-day sign reversal",
+              "count": 56
+            },
+            {
+              "comparison": "Q1 wrong among reversals",
+              "count": 34
+            }
+          ],
+          "methods": [
+            {
+              "language": "calculation",
+              "code": "2018-05-30 06:00: current cost +9.725; later cost -14.631696; whole-day cost -4.906696.\nOne current action changed; all later actions follow the same frozen policy."
+            }
+          ],
+          "columns": [
+            "comparison",
+            "count"
+          ]
+        },
+        {
+          "id": "dr-reproduction",
+          "source": {
+            "label": "五个 DR 案例重新回放",
+            "files": [
+              {
+                "label": "day_value_verification_20261008/reproduced_dr_cases.csv"
+              }
+            ],
+            "filters": [
+              "Dueling 完整训练 5000 轮；正式最优模型来自第 4600 轮",
+              "广义成本包含非现金惩罚；普通 MATD3 尚未完成"
+            ],
+            "caveats": [
+              "案例刻意选取以验证现象，不能用于总体误判率估计。"
+            ]
+          },
+          "rows": [
+            {
+              "agent": "mg1",
+              "date": "2018-01-29",
+              "hour": 5,
+              "reference_kw": 28.499905720353127,
+              "candidate_kw": 27.49990613758564,
+              "cost_reduction": 0.5335197545849724,
+              "predicted_cost_reduction_q1": -0.53558349609375,
+              "immediate_cost_reduction": 0.349999853968626,
+              "later_cost_reduction": 0.18351990061634638
+            },
+            {
+              "agent": "mg3",
+              "date": "2018-01-30",
+              "hour": 9,
+              "reference_kw": 21.6,
+              "candidate_kw": 20.599999952316285,
+              "cost_reduction": 1.2942619740600776,
+              "predicted_cost_reduction_q1": -0.90789794921875,
+              "immediate_cost_reduction": 1.6766240799476861,
+              "later_cost_reduction": -0.38236210588760855
+            },
+            {
+              "agent": "mg3",
+              "date": "2018-03-31",
+              "hour": 1,
+              "reference_kw": 72.0,
+              "candidate_kw": 54.0,
+              "cost_reduction": 6.374134865229507,
+              "predicted_cost_reduction_q1": -5.295991897583008,
+              "immediate_cost_reduction": 12.662707730230608,
+              "later_cost_reduction": -6.2885728650011
+            },
+            {
+              "agent": "mg2",
+              "date": "2018-09-27",
+              "hour": 23,
+              "reference_kw": 1.510036177933216,
+              "candidate_kw": 0.5100361723452806,
+              "cost_reduction": 0.6915340038642483,
+              "predicted_cost_reduction_q1": -0.18529891967773438,
+              "immediate_cost_reduction": 0.6915340038642483,
+              "later_cost_reduction": 0.0
+            },
+            {
+              "agent": "mg2",
+              "date": "2018-11-26",
+              "hour": 8,
+              "reference_kw": 3.5231053456664085,
+              "candidate_kw": 2.5231054052710533,
+              "cost_reduction": 0.7292441860206509,
+              "predicted_cost_reduction_q1": -0.6988525390625,
+              "immediate_cost_reduction": 0.009999999403953908,
+              "later_cost_reduction": 0.719244186616697
+            }
+          ],
+          "columns": [
+            "agent",
+            "date",
+            "hour",
+            "reference_kw",
+            "candidate_kw",
+            "cost_reduction",
+            "predicted_cost_reduction_q1",
+            "immediate_cost_reduction",
+            "later_cost_reduction"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "cost-opportunities",
+      "title": "误判动作有实际成本机会，整体调度仍有更大空间",
+      "queries": [
+        {
+          "id": "one-action",
+          "source": {
+            "label": "12 个预选日期的单次 ESS 修正",
+            "files": [
+              {
+                "label": "day_value_verification_20261008/verification_summary.json"
+              },
+              {
+                "label": "day_value_verification_20261008/independent_checks.json"
+              }
+            ],
+            "filters": [
+              "Dueling 完整训练 5000 轮；正式最优模型来自第 4600 轮",
+              "广义成本包含非现金惩罚；普通 MATD3 尚未完成",
+              "每日期至多一次被 Q1 误判的省钱动作"
+            ],
+            "caveats": [
+              "使用未来回放挑选候选，是诊断机会，不是重新训练收益；均值受一个 33.034 日期影响。"
+            ]
+          },
+          "rows": [
+            {
+              "measure": "12-day mean",
+              "saving": 4.588729286075284
+            },
+            {
+              "measure": "12-day median",
+              "saving": 2.119732612413827
+            },
+            {
+              "measure": "mean without any extra service cost",
+              "saving": 1.6358149981217889
+            }
+          ],
+          "methods": [
+            {
+              "language": "calculation",
+              "code": "Per date: max(cost reduction among tested positive-saving, negative-Q1-change candidates), or 0 if none.\nMean/median over all 12 preselected dates; candidates from one date are never added."
+            }
+          ],
+          "columns": [
+            "measure",
+            "saving"
+          ]
+        },
+        {
+          "id": "full-day-space",
+          "source": {
+            "label": "55 日固定其他功率曲线的全日重排",
+            "files": [
+              {
+                "label": "milp_gap_audit_20261008/environment_replay_results.csv"
+              },
+              {
+                "label": "test_daily_metrics.csv"
+              }
+            ],
+            "filters": [
+              "Dueling 完整训练 5000 轮；正式最优模型来自第 4600 轮",
+              "广义成本包含非现金惩罚；普通 MATD3 尚未完成",
+              "同一组 55 个正式测试日期"
+            ],
+            "caveats": [
+              "优化使用完整未来信息，不能全归因于 Critic；各模块改善有交互，不能相加。"
+            ]
+          },
+          "rows": [
+            {
+              "module": "储能",
+              "daily_cost_reduction": 52.826527196369
+            },
+            {
+              "module": "EV",
+              "daily_cost_reduction": 29.756515608578294
+            },
+            {
+              "module": "空调",
+              "daily_cost_reduction": 46.70935000343745
+            },
+            {
+              "module": "磨机",
+              "daily_cost_reduction": 24.66858763440099
+            },
+            {
+              "module": "full-information saved-reference gap",
+              "daily_cost_reduction": 151.8819051881842
+            }
+          ],
+          "methods": [
+            {
+              "language": "calculation",
+              "code": "Mean policy cost 1201.259881283 - mean generalized reference 1049.377976095 = 151.881905188.\nEach module saving is the mean of policy cost minus unchanged-environment replay cost over the same 55 dates."
+            }
+          ],
+          "columns": [
+            "module",
+            "daily_cost_reduction"
+          ]
+        }
+      ]
+    }
+  ]
+}

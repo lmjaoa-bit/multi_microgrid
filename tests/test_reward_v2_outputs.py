@@ -141,8 +141,12 @@ def _write_v2_saved_run(root: Path) -> None:
             "date": "2018-01-01",
             "hour": hour,
             "timestamp": f"2018-01-01T{hour:02d}:00:00",
+            "mg2_t_out_c": 10.0,
+            "p2p_price": 0.5,
         }
         for mg in ("mg1", "mg2", "mg3"):
+            row[f"{mg}_base_load_kw"] = 10.0
+            row[f"{mg}_renewable_available_kw"] = 5.0
             row[f"{mg}_unmet_load_kw"] = 0.0
             row[f"{mg}_dr_supply_infeasible"] = 0
         hourly.append(row)
@@ -197,8 +201,8 @@ def test_saved_v2_figures_do_not_execute_models(tmp_path: Path, monkeypatch):
     paths = generate_figures(run, formats=("png", "pdf"))
     png = [path for path in paths if path.suffix == ".png"]
     pdf = [path for path in paths if path.suffix == ".pdf"]
-    assert len(png) == 15
-    assert len(pdf) == 15
+    assert len(png) == 3  # One saved season; the other three must not be fabricated.
+    assert len(pdf) == 3
     assert all(path.exists() and path.stat().st_size > 0 for path in paths)
 
 

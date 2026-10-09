@@ -1,0 +1,146 @@
+{
+  "checkpoint_sha256": "dbdcb3edcfc43745fd7869211209c5c54e90bce6aa86ade7573511d6df629cdc",
+  "episode": 4600,
+  "checkpoint_label": "latest",
+  "days": 55,
+  "noise_draws": 128,
+  "pair_records": 326,
+  "trajectory_rows": 4421,
+  "stats": [
+    {
+      "sample": "local_stratified",
+      "agent": "mg1",
+      "pairs": 50,
+      "meaningful": 26,
+      "wrong": 4,
+      "q_error_median": 0.0014152526855495395,
+      "target_det_wrong": 7,
+      "target_smooth_wrong": 7,
+      "matched_online_target_wrong": 8,
+      "direct_larger_than_later": 1,
+      "wrong_pair_component_median_abs": {
+        "component_fit": 0.009004652500152588,
+        "component_smoothing": 2.4976095174267243e-05,
+        "component_actor_lag": 6.389617919921875e-05,
+        "component_critic_lag": 0.0004966259002685547,
+        "component_min": 4.6253204345703125e-05,
+        "component_future": 0.006330437196135463
+      },
+      "wrong_pair_median_abs_total_error": 0.004556824900556311,
+      "wrong_pair_median_abs_direct": 0.0052685284402116395,
+      "wrong_pair_median_abs_later": 0.006330675614714343,
+      "smoothing_small_vs_error_count": 4
+    },
+    {
+      "sample": "local_stratified",
+      "agent": "mg2",
+      "pairs": 94,
+      "meaningful": 48,
+      "wrong": 29,
+      "q_error_median": 0.0031246011391859035,
+      "target_det_wrong": 1,
+      "target_smooth_wrong": 1,
+      "matched_online_target_wrong": 4,
+      "direct_larger_than_later": 26,
+      "wrong_pair_component_median_abs": {
+        "component_fit": 0.009376762585759035,
+        "component_smoothing": 0.00011515074968349026,
+        "component_actor_lag": 0.00011134147644042969,
+        "component_critic_lag": 0.0005149543285369873,
+        "component_min": 0.00019371509552001953,
+        "component_future": 0.0003892649233279144
+      },
+      "wrong_pair_median_abs_total_error": 0.009376762585759035,
+      "wrong_pair_median_abs_direct": 0.007814660178643296,
+      "wrong_pair_median_abs_later": 0.00038831124900995384,
+      "smoothing_small_vs_error_count": 29
+    },
+    {
+      "sample": "local_stratified",
+      "agent": "mg3",
+      "pairs": 48,
+      "meaningful": 18,
+      "wrong": 10,
+      "q_error_median": 0.005124752313379055,
+      "target_det_wrong": 9,
+      "target_smooth_wrong": 8,
+      "matched_online_target_wrong": 9,
+      "direct_larger_than_later": 6,
+      "wrong_pair_component_median_abs": {
+        "component_fit": 0.009623019024729729,
+        "component_smoothing": 0.00033321765354887845,
+        "component_actor_lag": 6.127357482910156e-05,
+        "component_critic_lag": 0.001543283462524414,
+        "component_min": 0.0005978941917419434,
+        "component_future": 0.006047450625368711
+      },
+      "wrong_pair_median_abs_total_error": 0.014401029667499898,
+      "wrong_pair_median_abs_direct": 0.007147949907712947,
+      "wrong_pair_median_abs_later": 0.0060476890439487355,
+      "smoothing_small_vs_error_count": 10
+    },
+    {
+      "sample": "terminal",
+      "agent": "mg1",
+      "pairs": 57,
+      "meaningful": 36,
+      "wrong": 0,
+      "q_error_median": 0.0009612572988457746,
+      "target_det_wrong": 0,
+      "target_smooth_wrong": 0,
+      "matched_online_target_wrong": 0,
+      "direct_larger_than_later": 0
+    },
+    {
+      "sample": "terminal",
+      "agent": "mg2",
+      "pairs": 108,
+      "meaningful": 70,
+      "wrong": 37,
+      "q_error_median": 0.002567936221796227,
+      "target_det_wrong": 0,
+      "target_smooth_wrong": 0,
+      "matched_online_target_wrong": 0,
+      "direct_larger_than_later": 37,
+      "wrong_pair_component_median_abs": {
+        "component_fit": 0.007637402845362518,
+        "component_smoothing": 0.0,
+        "component_actor_lag": 0.0,
+        "component_critic_lag": 0.0,
+        "component_min": 0.0,
+        "component_future": 0.0
+      },
+      "wrong_pair_median_abs_total_error": 0.007637402845362518,
+      "wrong_pair_median_abs_direct": 0.007637402845362518,
+      "wrong_pair_median_abs_later": 0.0,
+      "smoothing_small_vs_error_count": 37
+    }
+  ],
+  "checks": {
+    "error_decomposition_identity_max": 4.336808689942018e-19,
+    "old_q_reproduction_max_error": 0.0,
+    "source_hashes_unchanged": true,
+    "learning_updates": 0
+  },
+  "state_contract": {
+    "peak_observed": true,
+    "ev_cohort_remaining_features": [
+      "mg3_ev_G1_remaining_energy",
+      "mg3_ev_G2_remaining_energy",
+      "mg3_ev_G3_remaining_energy",
+      "mg3_ev_connected_remaining"
+    ],
+    "ev_cohort_deadline_features": [
+      "mg3_ev_G1_hours_to_departure",
+      "mg3_ev_G2_hours_to_departure",
+      "mg3_ev_G3_hours_to_departure"
+    ]
+  },
+  "caveats": [
+    "All target residuals are reconstructed on audit states, not actual saved training replay losses.",
+    "No saved replay or optimizer trajectory exists; action coverage and optimization causes cannot be causally separated.",
+    "Smoothing is a one-step expected backup estimated using common random numbers; recurring future smoothed-policy returns are not yet measured.",
+    "Component decomposition is an algebraic attribution, not causal attribution to training hyperparameters.",
+    "Latest and old checkpoints encounter different states under their own policies on shared dates; rates are not paired causal effects."
+  ]
+}

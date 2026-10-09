@@ -1,0 +1,83 @@
+{
+  "days": 55,
+  "baseline_cost": 1201.2598812833705,
+  "reference_cost": 1049.377976095186,
+  "saved_gap": 151.8819051881842,
+  "opportunities": [
+    {
+      "module": "Storage",
+      "days": 55,
+      "milp_gain": 52.8265314356562,
+      "environment_replay_gain": 52.82652719636897,
+      "baseline_cost_reduction_pct": 4.397593561514062,
+      "max_power_error_kw": 0.0001443922519737,
+      "curve_mismatch_days": 0
+    },
+    {
+      "module": "HVAC",
+      "days": 55,
+      "milp_gain": 46.70935854323536,
+      "environment_replay_gain": 46.70935000343741,
+      "baseline_cost_reduction_pct": 3.888363436689095,
+      "max_power_error_kw": 0.0002730186039539,
+      "curve_mismatch_days": 0
+    },
+    {
+      "module": "EV",
+      "days": 55,
+      "milp_gain": 35.870767398650585,
+      "environment_replay_gain": 29.756515608578255,
+      "baseline_cost_reduction_pct": 2.4771089147493854,
+      "max_power_error_kw": 18.293170406520552,
+      "curve_mismatch_days": 20
+    },
+    {
+      "module": "Mill",
+      "days": 55,
+      "milp_gain": 24.668594196939715,
+      "environment_replay_gain": 24.66858763440094,
+      "baseline_cost_reduction_pct": 2.05355960177794,
+      "max_power_error_kw": 0.0002573000850976,
+      "curve_mismatch_days": 0
+    },
+    {
+      "module": "All DR jointly",
+      "days": 55,
+      "milp_gain": 98.2797840199504,
+      "environment_replay_gain": 88.72871563670375,
+      "baseline_cost_reduction_pct": 7.386304747138486,
+      "max_power_error_kw": 25.300581480779115,
+      "curve_mismatch_days": 24
+    }
+  ],
+  "fixed_control_allocation_gap_mean": 2.3893949632606977e-06,
+  "fixed_control_allocation_gap_max_abs": 0.00012766546990405914,
+  "solver_cost_bound_gap_max": 0.12322243841663294,
+  "solver_fixed_variable_error_max": 9.746562079193412e-06,
+  "environment_all_fixed_cost_error_max": 0.00012694140718849667,
+  "no_policy_retraining": true,
+  "source_hashes_unchanged": true,
+  "caveats": [
+    "The optimizer observes all future daily inputs; these are opportunities, not achievable learned-policy forecasts.",
+    "Single-module opportunities overlap; do not add the rows.",
+    "All DR jointly includes three devices, unlike the single-module rows.",
+    "Generalized cost includes noncash service, peak, carbon and curtailment penalties.",
+    "Diagnostic solves use bounded numerical tolerances; immutable formal results are untouched."
+  ],
+  "storage_timing": [
+    {
+      "mode": "all_fixed",
+      "grid_charging_weighted_price": 0.4565063485407988,
+      "discharge_time_weighted_tariff": 0.6656943108949414,
+      "daily_charge_kwh": 668.3582350972439,
+      "daily_discharge_kwh": 481.2467922427631
+    },
+    {
+      "mode": "ess_free",
+      "grid_charging_weighted_price": 0.40885531211153175,
+      "discharge_time_weighted_tariff": 0.6998239753446526,
+      "daily_charge_kwh": 751.1745520074169,
+      "daily_discharge_kwh": 544.8610429250531
+    }
+  ]
+}

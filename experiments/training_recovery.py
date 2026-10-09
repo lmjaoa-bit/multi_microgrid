@@ -5,6 +5,7 @@ import json
 import traceback
 from datetime import datetime
 from pathlib import Path
+from experiments.layout import artifact_directory, run_root
 from typing import Any, Mapping, cast
 
 from algorithms.base import RecoverableAlgorithmProtocol
@@ -47,7 +48,7 @@ def ensure_recoverable(algorithm: Any) -> RecoverableAlgorithmProtocol:
 def write_run_status(run_dir: str | Path, status: str, **details: Any) -> None:
     if status not in RUN_STATUSES:
         raise ValueError(f"Invalid run status: {status}")
-    path = Path(run_dir) / "run_status.json"
+    path = artifact_directory(run_dir) / "run_status.json"
     history: list[dict[str, Any]] = []
     if path.is_file():
         previous = json.loads(path.read_text(encoding="utf-8"))
@@ -70,7 +71,7 @@ def write_training_error(
     durable_recovery_point: str | None,
 ) -> None:
     _atomic_json(
-        Path(run_dir) / "training_error.json",
+        artifact_directory(run_dir) / "training_error.json",
         {
             "exception_type": type(error).__name__,
             "message": str(error),
@@ -86,7 +87,7 @@ def write_training_error(
 
 
 def validate_resume_directory(run_dir: str | Path, runs_root: str | Path) -> Path:
-    resolved = Path(run_dir).resolve()
+    resolved = run_root(run_dir)
     expected_root = Path(runs_root).resolve()
     if not resolved.is_dir():
         raise FileNotFoundError(f"Resume run directory not found: {resolved}")

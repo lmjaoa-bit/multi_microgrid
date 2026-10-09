@@ -1,0 +1,174 @@
+ M AGENTS.md
+ M README.md
+ M algorithms/README.md
+ D algorithms/matd3_dispatch_exploration/__init__.py
+ D algorithms/matd3_dispatch_exploration/algorithm.py
+ D algorithms/matd3_dispatch_exploration/plugin.py
+ D algorithms/matd3_forecast_context/__init__.py
+ D algorithms/matd3_forecast_context/actor.py
+ D algorithms/matd3_forecast_context/algorithm.py
+ D algorithms/matd3_forecast_context/plugin.py
+ D algorithms/matd3_hierarchical_transformer_q_guided/README.md
+ D algorithms/matd3_hierarchical_transformer_q_guided/__init__.py
+ D algorithms/matd3_hierarchical_transformer_q_guided/algorithm.py
+ D algorithms/matd3_hierarchical_transformer_q_guided/plugin.py
+ D algorithms/matd3_hierarchical_transformer_q_readout/README.md
+ D algorithms/matd3_hierarchical_transformer_q_readout/__init__.py
+ D algorithms/matd3_hierarchical_transformer_q_readout/actor.py
+ D algorithms/matd3_hierarchical_transformer_q_readout/algorithm.py
+ D algorithms/matd3_hierarchical_transformer_q_readout/plugin.py
+ M algorithms/matd3_mlp_dueling_critic_h24_q_guided/algorithm.py
+ M algorithms/matd3_mlp_dueling_critic_h24_q_guided/critic.py
+ D algorithms/matd3_mlp_transformer_critic_h24_q_guided/README.md
+ D algorithms/matd3_mlp_transformer_critic_h24_q_guided/__init__.py
+ D algorithms/matd3_mlp_transformer_critic_h24_q_guided/actor.py
+ D algorithms/matd3_mlp_transformer_critic_h24_q_guided/algorithm.py
+ D algorithms/matd3_mlp_transformer_critic_h24_q_guided/critic.py
+ D algorithms/matd3_mlp_transformer_critic_h24_q_guided/plugin.py
+ D algorithms/matd3_mlp_transformer_critic_q_guided/README.md
+ D algorithms/matd3_mlp_transformer_critic_q_guided/__init__.py
+ D algorithms/matd3_mlp_transformer_critic_q_guided/actor.py
+ D algorithms/matd3_mlp_transformer_critic_q_guided/algorithm.py
+ D algorithms/matd3_mlp_transformer_critic_q_guided/critic.py
+ D algorithms/matd3_mlp_transformer_critic_q_guided/plugin.py
+ D algorithms/matd3_plan_transformer/__init__.py
+ D algorithms/matd3_plan_transformer/actor.py
+ D algorithms/matd3_plan_transformer/algorithm.py
+ D algorithms/matd3_plan_transformer/diagnostics.py
+ D algorithms/matd3_plan_transformer/forecast_scenario.py
+ D algorithms/matd3_plan_transformer/plan_losses.py
+ D algorithms/matd3_plan_transformer/plan_teacher.py
+ D algorithms/matd3_plan_transformer/plugin.py
+ D algorithms/matd3_plan_transformer/replay_buffer.py
+ D analysis/build_crossgate_actor_gradient_diagnostic.py
+ D analysis/crossgate_actor_gradient_diagnostic.ipynb
+ M components/commercial_hvac.py
+ M components/hvac_viability.py
+ D configs/algorithms/matd3_dispatch_exploration.yaml
+ D configs/algorithms/matd3_forecast_context.yaml
+ D configs/algorithms/matd3_forecast_context/b_peer_h8.yaml
+ D configs/algorithms/matd3_forecast_context/c_local_h24.yaml
+ D configs/algorithms/matd3_forecast_context/d_peer_h24.yaml
+ D configs/algorithms/matd3_hierarchical_transformer_q_guided.yaml
+ D configs/algorithms/matd3_hierarchical_transformer_q_readout.yaml
+ D configs/algorithms/matd3_mlp_transformer_critic_h24_q_guided.yaml
+ D configs/algorithms/matd3_mlp_transformer_critic_q_guided.yaml
+ D configs/algorithms/matd3_plan_transformer.yaml
+ M configs/cooperative.yaml
+ D configs/smoke/matd3_hierarchical_transformer_q_readout.yaml
+ D configs/smoke/matd3_mlp_transformer_critic_h24_q_guided.yaml
+ D configs/smoke/matd3_mlp_transformer_critic_q_guided.yaml
+ D configs/smoke/matd3_plan_transformer.yaml
+ M core/config_validation.py
+ M core/renewable_first_dispatch.py
+ D diagnostics/capacity_confirmation.py
+ D diagnostics/capacity_data.py
+ D diagnostics/capacity_fit.py
+ D diagnostics/capacity_probe.py
+ D diagnostics/critic_probe.py
+ D diagnostics/dispatch_q_guided_findings.md
+ D diagnostics/dueling_study_report.py
+ D diagnostics/learning_chain_probe.py
+ D diagnostics/plan_transformer_probe.py
+ M docs/ALGORITHM_DEVELOPMENT.md
+ D docs/CAPACITY_DIAGNOSTIC.md
+ D docs/CRITIC_DIAGNOSTIC.md
+ D docs/CRITIC_TRANSFORMER_IMPLEMENTATION.md
+ D docs/LEARNING_CHAIN_DIAGNOSTIC.md
+ D docs/superpowers/plans/2026-09-29-reward-v2-peer-forecast.md
+ D docs/superpowers/plans/2026-10-03-dueling-critic-h24.md
+ D docs/superpowers/plans/2026-10-04-plan-transformer.md
+ D docs/superpowers/reports/2026-09-29-reward-v2-peer-forecast-implementation.md
+ D docs/superpowers/specs/2026-09-29-reward-v2-peer-forecast-design.md
+ D docs/superpowers/specs/2026-10-04-plan-transformer-design.md
+ D docs/superpowers/verification/2026-10-04-plan-transformer-verification.md
+ D docs/superpowers/verification/2026-10-04-plan-transformer/baseline.txt
+ D docs/superpowers/verification/2026-10-04-plan-transformer/full-suite-final.txt
+ D docs/superpowers/verification/2026-10-04-plan-transformer/progress.md
+ D docs/superpowers/verification/2026-10-04-plan-transformer/redraw-final.txt
+ D docs/superpowers/verification/2026-10-04-plan-transformer/smoke-final.txt
+ M evaluation/dr_reference.py
+ M evaluation/evaluate_matd3.py
+ M evaluation/paper_artifacts.py
+ M evaluation/plotting.py
+ M evaluation/service_reliability.py
+ M experiments/layout.py
+ M experiments/result_lifecycle.py
+ M experiments/training_pipeline.py
+ M experiments/training_recovery.py
+ M optimization/common_constraints.py
+ D reports/environment_architecture/current_environment_architecture.png
+ D reports/environment_architecture/make_environment_architecture.py
+ D reports/forecast_context/b_vs_matd3_20260929/metrics.json
+ D reports/forecast_context/fc_2x2_seed42_review_20260929/README.md
+ D reports/forecast_context/fc_2x2_seed42_review_20260929/factor_effects.csv
+ D reports/forecast_context/fc_2x2_seed42_review_20260929/paired_daily_deltas.csv
+ D reports/forecast_context/fc_2x2_seed42_review_20260929/run_summary.csv
+ D reports/forecast_context/fc_2x2_seed42_review_20260929/study_manifest.json
+ M scripts/audit_saved_service_metrics.py
+ M scripts/benchmark_training_runtime.py
+ M scripts/build_dr_reference.py
+ D scripts/diagnose_capacity.py
+ D scripts/diagnose_critic.py
+ D scripts/diagnose_learning_chain.py
+ D scripts/export_runs_to_tensorboard.py
+ M scripts/generate_results.py
+ D scripts/organize_results.py
+ D scripts/plot_pnn_matd3_convergence.py
+ M scripts/plot_results.py
+ D scripts/probe_plan_transformer.py
+ M scripts/recover_training_history.py
+ D scripts/run_dueling_h24_study.py
+ M scripts/run_reward_v2_calibration_bundle.py
+ D scripts/summarize_forecast_context.py
+ M tests/test_algorithm_registry_and_layout.py
+ M tests/test_audit_saved_service_metrics.py
+ D tests/test_capacity_fit.py
+ D tests/test_capacity_probe.py
+ D tests/test_critic_probe.py
+ D tests/test_dispatch_exploration_variant.py
+ D tests/test_dueling_h24_study.py
+ M tests/test_experiment_profiles.py
+ D tests/test_forecast_context_actor.py
+ D tests/test_forecast_context_checkpoint.py
+ D tests/test_forecast_context_equivalence.py
+ D tests/test_forecast_context_plugin.py
+ D tests/test_forecast_context_summary.py
+ D tests/test_hierarchical_transformer_q_guidance.py
+ D tests/test_learning_chain_probe.py
+ M tests/test_matd3_mlp_dueling_critic_h24_q_guided.py
+ D tests/test_mlp_transformer_critic_h24_q_guidance.py
+ D tests/test_mlp_transformer_critic_q_guidance.py
+ M tests/test_paper_artifacts.py
+ D tests/test_plan_teacher.py
+ D tests/test_plan_transformer_actor.py
+ D tests/test_plan_transformer_diagnostics.py
+ D tests/test_plan_transformer_pipeline.py
+ M tests/test_result_lifecycle.py
+ M tests/test_reward_v2_outputs.py
+ M tests/test_reward_v2_peer_forecast.py
+ D tests/test_transformer_q_readout.py
+?? algorithms/matd3_dr_counterfactual/
+?? components/hvac_thermal.py
+?? configs/algorithms/matd3_dr_counterfactual.yaml
+?? configs/algorithms/matd3_dr_counterfactual/
+?? configs/servers/
+?? diagnostics/oracle_action_replay.py
+?? docs/SERVER_WORKFLOW.md
+?? docs/SINGLE_TRAINING_SPEED.md
+?? docs/design/ess_intraday_plan_proposal_20261008.md
+?? docs/superpowers/plans/2026-10-08-ess-intraday-plan-transformer.md
+?? evaluation/dispatch_overview.py
+?? reports/critic_error_location_20261008/
+?? reports/dispatch_review_20261006/
+?? reports/dr_critic_audit_20261007/
+?? reports/dueling_scale_audit_20261008/
+?? reports/ess_plan_implementation_20261008/
+?? reports/hvac_audit_20261007/
+?? reports/milp_gap_audit_20261008/
+?? scripts/replay_oracle_actions.py
+?? tests/test_dr_counterfactual.py
+?? tests/test_hvac_thermal_discretization.py
+?? tests/test_oracle_action_replay.py
+?? tests/test_seasonal_dispatch.py
+?? tests/test_single_training_speed.py

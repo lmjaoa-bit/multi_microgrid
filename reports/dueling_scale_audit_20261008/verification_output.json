@@ -1,0 +1,15 @@
+{
+  "rows": {
+    "baseline": 3960,
+    "candidates": 1232
+  },
+  "independent_csv_recalculation": "passed",
+  "source_input_hashes_unchanged": true,
+  "decomposition_identity": "passed",
+  "script_compilation": "passed",
+  "canonical_diff_empty": true,
+  "candidate_v_spread_max": 5.7220458984375e-06,
+  "candidate_q_match_max": 7.62939453125e-06,
+  "candidate_dq_minus_dadv_max": 4.76837158203125e-06,
+  "action_gradient_q_minus_adv_max": 0.0
+}

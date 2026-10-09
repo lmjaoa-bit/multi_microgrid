@@ -1,0 +1,12 @@
+{
+  "source_hashes_verified": true,
+  "input_hashes": {
+    "reports\\critic_error_location_20261008\\latest_snapshot\\best_model.pt": "dbdcb3edcfc43745fd7869211209c5c54e90bce6aa86ade7573511d6df629cdc",
+    "outputs\\working_runs\\matd3_mlp_dueling_critic_h24_q_guided\\runs\\DUELINGCRITICT-QH24_2026-10-07_22-11-08_seed42\\artifacts\\checkpoints\\best_model.pt": "dbdcb3edcfc43745fd7869211209c5c54e90bce6aa86ade7573511d6df629cdc",
+    "outputs\\working_runs\\matd3_mlp_dueling_critic_h24_q_guided\\runs\\DUELINGCRITICT-QH24_2026-10-07_22-11-08_seed42\\artifacts\\test_daily_metrics.csv": "e049290f4cde55e029676222c0be26611e212a24a0fca7a99afacea9e2c955ce",
+    "reports\\critic_error_location_20261008\\latest\\pair_decomposition.csv": "f9bd48cd59de7f423d374e1c2cf3505d1fb6313d4bf0d80f8a73b7c091e4d9dd",
+    "reports\\milp_gap_audit_20261008\\environment_replay_results.csv": "5a508c83d6bf9f2f9866c9903ef8e5f2f5c39df8329982ecf480e24520fc4a02",
+    "reports\\day_value_verification_20261008\\verify.py": "606433a613704efc9e82fcda66b65e0a94a3cb8d8dfc2bd4ade9066c7a485333"
+  },
+  "unchanged_original_source_manifest": "C:\\daima\\multi_microgrid_rl_standalone\\reports\\milp_gap_audit_20261008\\source_manifest.json"
+}

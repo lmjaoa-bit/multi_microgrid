@@ -1,3 +1,0 @@
-from algorithms.matd3_hierarchical_transformer_q_readout.algorithm import Matd3HierarchicalTransformerQReadout
-
-__all__ = ["Matd3HierarchicalTransformerQReadout"]

@@ -1,0 +1,57 @@
+{
+  "settings": {
+    "enabled": true,
+    "lambda_plan": 0.1,
+    "capacity": 512,
+    "max_labels": 512,
+    "batch_size": 16,
+    "update_interval": 10,
+    "capture_start_episode": 50,
+    "capture_every_episodes": 10,
+    "capture_hours": [
+      0,
+      6,
+      12,
+      18
+    ],
+    "teacher_fraction": 0.15,
+    "solve_seconds": 1.0
+  },
+  "architecture": {
+    "architecture": "ess_plan_transformer_h24_v1",
+    "forecast_horizon": 24,
+    "ess_network": {
+      "embed_dim": 32,
+      "num_heads": 4,
+      "num_layers": 2,
+      "hidden_dim": 64,
+      "dropout": 0.0
+    },
+    "feature_semantics": "physical_power_balance_v1",
+    "hidden_dims_by_agent": {
+      "mg1": [
+        153,
+        153
+      ],
+      "mg2": [
+        152,
+        152
+      ],
+      "mg3": [
+        151,
+        151
+      ]
+    },
+    "include_peer_forecast": true,
+    "include_base_load_forecast": true,
+    "peer_forecast_features": [
+      "energy_balance"
+    ],
+    "parameter_budget_reference": "t_q_device_forecast_readout_h24_v1"
+  },
+  "metadata": {
+    "benchmark": true,
+    "seed": 42
+  },
+  "inference_uses_teacher": false
+}

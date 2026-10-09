@@ -117,6 +117,9 @@ class DuelingTemporalValue(nn.Module):
         if joint_action.shape != (state.shape[0], self.action_dim):
             raise ValueError(f"Expected effective joint action shape [batch, {self.action_dim}]")
         current_state, context = self._value_context(state)
+        return self._decompose_context(current_state, context, joint_action)
+
+    def _decompose_context(self, current_state, context, joint_action):
         value = self.head(context)
         features = [self.advantage_state_norm(current_state)]
         if self.use_value_context:
@@ -132,6 +135,20 @@ class DuelingTemporalValue(nn.Module):
         actual, reference = advantages.chunk(2, dim=0)
         centred = actual - reference
         return value, centred, value + centred
+
+    @torch.no_grad()
+    def q_candidates(self, state, joint_actions):
+        """Score several actions per state, encoding its H24 context once."""
+        if state.ndim != 2 or state.shape[-1] != self.state_dim:
+            raise ValueError(f"Expected state shape [batch, {self.state_dim}]")
+        if (joint_actions.ndim != 3 or joint_actions.shape[0] != len(state)
+                or joint_actions.shape[-1] != self.action_dim or joint_actions.shape[1] < 1):
+            raise ValueError(f"Expected candidate action shape [batch, candidates, {self.action_dim}]")
+        current, context = self._value_context(state)
+        count = joint_actions.shape[1]
+        current = current[:, None].expand(-1, count, -1).reshape(len(state) * count, -1)
+        context = context[:, None].expand(-1, count, -1).reshape(len(state) * count, -1)
+        return self._decompose_context(current, context, joint_actions.flatten(0, 1))[2].reshape(len(state), count)
 
     def forward(self, state, joint_action):
         return self.decompose(state, joint_action)[2]
@@ -150,6 +167,10 @@ class DuelingTwinCritic(nn.Module):
 
     def q1(self, state, joint_action):
         return self.q1_network(state, joint_action)
+
+    def q_candidates(self, state, joint_actions):
+        return (self.q1_network.q_candidates(state, joint_actions),
+                self.q2_network.q_candidates(state, joint_actions))
 
     def decompose(self, state, joint_action):
         v1, adv1, q1 = self.q1_network.decompose(state, joint_action)

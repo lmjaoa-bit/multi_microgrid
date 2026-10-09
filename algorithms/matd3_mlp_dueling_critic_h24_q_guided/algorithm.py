@@ -178,15 +178,18 @@ class Matd3MlpDuelingCriticH24QGuided(Matd3HierarchicalTransformer):
                 return zero, metrics
             selected_state, selected_raw = state[blocked], raw[blocked]
             effective, _ = self.project_actions(selected_state, selected_raw)
-            q1, q2 = self.critics[active](selected_state, effective.flatten(1))
             count, candidates = len(selected_state), self.dispatch_candidates.numel()
             probes = selected_raw[:, None].expand(-1, candidates, -1, -1).clone()
             probes[:, :, index, 0] = self.dispatch_candidates
             probe_state = selected_state[:, None].expand(-1, candidates, -1).reshape(count * candidates, -1)
             probe_effective, _ = self.project_actions(probe_state, probes.reshape(count * candidates, len(self.agent_ids), 2))
-            candidate_q1, candidate_q2 = self.critics[active](probe_state, probe_effective.flatten(1))
-            gains = torch.minimum(candidate_q1.reshape(count, candidates) - q1,
-                                  candidate_q2.reshape(count, candidates) - q2)
+            # Baseline and probes share the same state-only value context. Reuse
+            # it within this call; never cache across updates or different states.
+            actions = torch.cat([effective.flatten(1)[:, None],
+                                 probe_effective.reshape(count, candidates, -1)], dim=1)
+            scores1, scores2 = self.critics[active].q_candidates(selected_state, actions)
+            gains = torch.minimum(scores1[:, 1:] - scores1[:, :1],
+                                  scores2[:, 1:] - scores2[:, :1])
             gain, choice = gains.max(1)
             approved = gain > self.dispatch_q_guidance_margin
             if not approved.any():

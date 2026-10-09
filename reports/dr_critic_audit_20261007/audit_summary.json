@@ -1,0 +1,62 @@
+{
+  "checkpoint_sha256": "b2e53e4f846189ae482210325d3219243f9ac7b1a57901abae8b25677a8c4f11",
+  "best_episode": 1900,
+  "days": 55,
+  "action_noise_std": 0.0,
+  "forecast_noise": true,
+  "results": [
+    {
+      "agent": "mg1",
+      "sampled_states": 48,
+      "effective_candidate_rows": 304,
+      "controllable_hours": 1320,
+      "forced_hours": 0,
+      "local_comparisons": 50,
+      "meaningful_local_comparisons": 26,
+      "q1_wrong_sign": 6,
+      "q2_wrong_sign": 4,
+      "qmin_wrong_sign": 6,
+      "both_wrong_sign": 2,
+      "broad_meaningful_comparisons": 208,
+      "broad_q1_wrong_sign": 73,
+      "local_actual_median_abs_gain": 0.0013179647946543502,
+      "local_q1_median_abs_error": 0.0036396608102073503,
+      "safe_improvements_critic_rejects": 39,
+      "harmful_actions_critic_prefers": 30
+    },
+    {
+      "agent": "mg3",
+      "sampled_states": 48,
+      "effective_candidate_rows": 307,
+      "controllable_hours": 420,
+      "forced_hours": 900,
+      "local_comparisons": 48,
+      "meaningful_local_comparisons": 15,
+      "q1_wrong_sign": 8,
+      "q2_wrong_sign": 11,
+      "qmin_wrong_sign": 11,
+      "both_wrong_sign": 8,
+      "broad_meaningful_comparisons": 139,
+      "broad_q1_wrong_sign": 70,
+      "local_actual_median_abs_gain": 0.00026200172237354996,
+      "local_q1_median_abs_error": 0.004975759699950162,
+      "safe_improvements_critic_rejects": 52,
+      "harmful_actions_critic_prefers": 0
+    }
+  ],
+  "checks": {
+    "parent_reference_reward_max_error": 8.881784197001252e-16,
+    "counterfactual_reference_suffix_max_error": 7.105427357601002e-15,
+    "reward_cost_identity_max_error": 7.877379304410681e-15,
+    "source_hashes_unchanged": true,
+    "effective_actions_deduplicated": true
+  },
+  "caveats": [
+    "Same frozen intermediate episode-1900 model as HVAC audit; not the final trained policy.",
+    "48 controllable states per agent, four state categories per month, not a random population error-rate sample.",
+    "Only actual effective ±1 kW changes are counted as local comparisons; forced EV actions and clipped duplicates are excluded.",
+    "All returns use the common team reward and unchanged deterministic policy until day end; TD3 targets include smoothing noise.",
+    "Service checks compare each remaining hour's comfort, mill unserved material and inventory violations, unmet electricity, and each EV cohort's final departure deficit.",
+    "Mill terminal_mode=none: changing final inventory within bounds is permitted by the current objective."
+  ]
+}

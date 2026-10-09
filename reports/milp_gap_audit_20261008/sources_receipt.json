@@ -1,0 +1,351 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "cost-gap",
+      "title": "Electricity purchases and load peaks account for most of the MILP cost gap",
+      "queries": [
+        {
+          "id": "ledger-components",
+          "source": {
+            "label": "55-day formal-test and generalized-reference ledgers",
+            "files": [
+              {
+                "label": "test_hourly_trajectories/*.csv"
+              },
+              {
+                "label": "generalized_reference_trajectories/*.csv"
+              },
+              {
+                "label": "cost_decomposition.csv"
+              },
+              {
+                "label": "audit.py"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "Daily generalized cost gap",
+                "definition": "Mean policy-minus-reference cost across the same 55 dates, with all nine Reward V2 cost components reconciled."
+              }
+            ],
+            "filters": [
+              "Final best checkpoint selected at episode 4600",
+              "Same daily base loads and renewable profiles"
+            ],
+            "caveats": [
+              "Generalized cost includes noncash service, peak, carbon and curtailment penalties."
+            ]
+          },
+          "rows": [
+            {
+              "component": "cost_grid",
+              "policy": 759.3288354591517,
+              "reference": 648.2444060924361,
+              "gap": 111.08442936671578
+            },
+            {
+              "component": "cost_battery",
+              "policy": 11.4960503127452,
+              "reference": 12.410122720029245,
+              "gap": -0.9140724072840422
+            },
+            {
+              "component": "cost_curtail",
+              "policy": 66.99969617070103,
+              "reference": 62.090754426477005,
+              "gap": 4.908941744224038
+            },
+            {
+              "component": "cost_carbon",
+              "policy": 84.46465877747418,
+              "reference": 77.65394947786612,
+              "gap": 6.810709299608077
+            },
+            {
+              "component": "cost_peak",
+              "policy": 273.16041198534265,
+              "reference": 248.60320659263158,
+              "gap": 24.55720539271104
+            },
+            {
+              "component": "cost_mill",
+              "policy": 0.0,
+              "reference": 0.0,
+              "gap": 0.0
+            },
+            {
+              "component": "cost_comfort",
+              "policy": 5.81022857795048,
+              "reference": 0.37553678574620425,
+              "gap": 5.434691792204276
+            },
+            {
+              "component": "cost_ev",
+              "policy": 4.989502770223478e-12,
+              "reference": 0.0,
+              "gap": 4.989502770223478e-12
+            },
+            {
+              "component": "cost_unmet",
+              "policy": 0.0,
+              "reference": 0.0,
+              "gap": 0.0
+            }
+          ],
+          "columns": [
+            "component",
+            "policy",
+            "reference",
+            "gap"
+          ],
+          "preview": {
+            "kind": "aggregate",
+            "note": "Nine mutually exclusive cost components."
+          },
+          "evidenceFlow": [
+            {
+              "kind": "validation",
+              "title": "Reconciliation",
+              "text": "All 55 exogenous profiles match; daily cost-component gap sums reconcile within 1.9e-12. All source hashes remain unchanged."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "module-opportunities",
+      "title": "Storage scheduling has the largest individual-module opportunity in this run",
+      "queries": [
+        {
+          "id": "fixed-curve-release",
+          "source": {
+            "label": "Fixed-dispatch reoptimization and unchanged-environment replay",
+            "files": [
+              {
+                "label": "fixed_dispatch_results.csv"
+              },
+              {
+                "label": "environment_replay_results.csv"
+              },
+              {
+                "label": "audit.py"
+              },
+              {
+                "label": "replay.py"
+              },
+              {
+                "label": "summarize.py"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "Single-module opportunity",
+                "definition": "Hold all other executed power curves fixed, optimize one module over the full day, and replay the resulting controls through the unchanged environment."
+              }
+            ],
+            "filters": [
+              "55 identical test dates",
+              "385 diagnostic MILP solves",
+              "440 environment day replays"
+            ],
+            "caveats": [
+              "The optimizer observes all future daily inputs; these are opportunities, not achievable learned-policy forecasts.",
+              "Single-module opportunities overlap; do not add the rows.",
+              "All DR jointly includes three devices, unlike the single-module rows.",
+              "Generalized cost includes noncash service, peak, carbon and curtailment penalties.",
+              "Diagnostic solves use bounded numerical tolerances; immutable formal results are untouched."
+            ]
+          },
+          "rows": [
+            {
+              "module": "Storage",
+              "days": 55,
+              "milp_gain": 52.8265314356562,
+              "environment_replay_gain": 52.82652719636897,
+              "baseline_cost_reduction_pct": 4.397593561514062,
+              "max_power_error_kw": 0.0001443922519737,
+              "curve_mismatch_days": 0
+            },
+            {
+              "module": "HVAC",
+              "days": 55,
+              "milp_gain": 46.70935854323536,
+              "environment_replay_gain": 46.70935000343741,
+              "baseline_cost_reduction_pct": 3.888363436689095,
+              "max_power_error_kw": 0.0002730186039539,
+              "curve_mismatch_days": 0
+            },
+            {
+              "module": "EV",
+              "days": 55,
+              "milp_gain": 35.870767398650585,
+              "environment_replay_gain": 29.756515608578255,
+              "baseline_cost_reduction_pct": 2.4771089147493854,
+              "max_power_error_kw": 18.293170406520552,
+              "curve_mismatch_days": 20
+            },
+            {
+              "module": "Mill",
+              "days": 55,
+              "milp_gain": 24.668594196939715,
+              "environment_replay_gain": 24.66858763440094,
+              "baseline_cost_reduction_pct": 2.05355960177794,
+              "max_power_error_kw": 0.0002573000850976,
+              "curve_mismatch_days": 0
+            },
+            {
+              "module": "All DR jointly",
+              "days": 55,
+              "milp_gain": 98.2797840199504,
+              "environment_replay_gain": 88.72871563670375,
+              "baseline_cost_reduction_pct": 7.386304747138486,
+              "max_power_error_kw": 25.300581480779115,
+              "curve_mismatch_days": 24
+            }
+          ],
+          "columns": [
+            "module",
+            "days",
+            "milp_gain",
+            "environment_replay_gain",
+            "baseline_cost_reduction_pct",
+            "max_power_error_kw",
+            "curve_mismatch_days"
+          ],
+          "preview": {
+            "kind": "aggregate",
+            "note": "Four single-module comparisons and one joint three-device DR comparison."
+          },
+          "evidenceFlow": [
+            {
+              "kind": "validation",
+              "title": "Execution checks",
+              "text": "Baseline raw-action replays match formal daily costs within 1e-7. Maximum all-fixed replay cost error is 0.000127; fixed solver variables deviate by at most 0.00000975. All diagnostic models report kOptimal."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "interface-and-clearing",
+      "title": "Aggregate EV control limits exact replay, while allocation alone contributes little cost",
+      "queries": [
+        {
+          "id": "compatibility",
+          "source": {
+            "label": "Power-curve compatibility and fixed-control allocation comparison",
+            "files": [
+              {
+                "label": "environment_replay_results.csv"
+              },
+              {
+                "label": "fixed_dispatch_results.csv"
+              },
+              {
+                "label": "optimization/common_constraints.py"
+              },
+              {
+                "label": "components/ev_charging.py"
+              },
+              {
+                "label": "evaluation/evaluate_matd3.py"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "EV curve mismatch",
+                "definition": "MILP chooses cohort-specific charging; the environment maps one aggregate charging request using its urgency-based cohort allocation."
+              },
+              {
+                "label": "Allocation-only gap",
+                "definition": "Policy cost minus MILP cost with all executed ESS and DR power curves held fixed."
+              }
+            ],
+            "caveats": [
+              "The existing formal oracle_replay field compares policy and oracle trajectories; it does not replay the same oracle controls.",
+              "Different individual microgrid flows can coexist with nearly identical team generalized costs."
+            ]
+          },
+          "rows": [
+            {
+              "metric": "Maximum EV-only replay power mismatch (kW)",
+              "value": 18.293170406520552
+            },
+            {
+              "metric": "Maximum allocation-only cost gap magnitude",
+              "value": 0.00012766546990405914
+            }
+          ],
+          "columns": [
+            "metric",
+            "value"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "storage-timing",
+      "title": "Optimized storage charges at lower prices and discharges in higher-price hours",
+      "queries": [
+        {
+          "id": "price-exposure",
+          "source": {
+            "label": "Diagnostic storage schedules and tariffs",
+            "files": [
+              {
+                "label": "schedule_timing.csv"
+              },
+              {
+                "label": "storage_schedule_metrics.csv"
+              },
+              {
+                "label": "diagnostic_trajectories/*.csv"
+              },
+              {
+                "label": "hourly_comparison.csv"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "Grid-charging weighted price",
+                "definition": "Total tariff-weighted grid energy sent to batteries divided by total grid energy sent to batteries, across all 55 dates and three storage units."
+              },
+              {
+                "label": "Discharge-time weighted tariff",
+                "definition": "Discharged energy weights the contemporaneous purchase tariff; it is a time-exposure measure, not export revenue."
+              }
+            ],
+            "caveats": [
+              "All non-storage executed power curves are fixed.",
+              "The optimizer observes all future daily inputs; these are opportunities, not achievable learned-policy forecasts."
+            ]
+          },
+          "rows": [
+            {
+              "mode": "all_fixed",
+              "grid_charging_weighted_price": 0.4565063485407988,
+              "discharge_time_weighted_tariff": 0.6656943108949414,
+              "daily_charge_kwh": 668.3582350972439,
+              "daily_discharge_kwh": 481.2467922427631
+            },
+            {
+              "mode": "ess_free",
+              "grid_charging_weighted_price": 0.40885531211153175,
+              "discharge_time_weighted_tariff": 0.6998239753446526,
+              "daily_charge_kwh": 751.1745520074169,
+              "daily_discharge_kwh": 544.8610429250531
+            }
+          ],
+          "columns": [
+            "mode",
+            "grid_charging_weighted_price",
+            "discharge_time_weighted_tariff",
+            "daily_charge_kwh",
+            "daily_discharge_kwh"
+          ]
+        }
+      ]
+    }
+  ]
+}

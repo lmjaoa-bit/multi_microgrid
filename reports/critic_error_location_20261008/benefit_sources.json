@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "local-opportunities",
+      "title": "Observed gains from individual misranked DR actions",
+      "queries": [
+        {
+          "id": "local-gains",
+          "source": {
+            "label": "Final-checkpoint paired action audit",
+            "files": [
+              {
+                "label": "latest/pair_decomposition.csv"
+              },
+              {
+                "label": "estimate_benefit.py"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "Single-action generalized cost reduction",
+                "definition": "A first-step effective action changes by 1 kW; subsequent steps use the unchanged deterministic policy. Reward gain is converted with scale 100."
+              }
+            ],
+            "filters": [
+              "Episode 4600 best checkpoint",
+              "Stratified audit states",
+              "True gain > 0.001 and Q1 delta < 0"
+            ],
+            "caveats": [
+              "Single-action counterfactual gains overlap and must not be summed over a day.",
+              "Generalized cost contains noncash penalties and is not accounting profit.",
+              "No retrained policy has been evaluated."
+            ]
+          },
+          "rows": [
+            {
+              "device": "Mill",
+              "pairs": 50,
+              "missed_positive": 3,
+              "median_cost_reduction": 0.23636503112847151,
+              "min_cost_reduction": 0.14652132654626726,
+              "max_cost_reduction": 0.5335197545850434
+            },
+            {
+              "device": "HVAC",
+              "pairs": 94,
+              "missed_positive": 13,
+              "median_cost_reduction": 0.510470775664329,
+              "min_cost_reduction": 0.227562044281715,
+              "max_cost_reduction": 0.8969139147070537
+            },
+            {
+              "device": "EV",
+              "pairs": 48,
+              "missed_positive": 8,
+              "median_cost_reduction": 0.9992610996735041,
+              "min_cost_reduction": 0.21367698058583073,
+              "max_cost_reduction": 1.2942619740600847
+            }
+          ],
+          "columns": [
+            "device",
+            "pairs",
+            "missed_positive",
+            "median_cost_reduction",
+            "min_cost_reduction",
+            "max_cost_reduction"
+          ],
+          "preview": {
+            "kind": "aggregate",
+            "note": "Three device aggregates."
+          },
+          "evidenceFlow": [
+            {
+              "kind": "validation",
+              "title": "Cost identity",
+              "text": "All 326 pair rows reconcile reward gains to saved cost-component deltas within 1e-8."
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "recovery-scenarios",
+      "title": "Hypothetical recovery of part of the broader reference gap",
+      "queries": [
+        {
+          "id": "cost-gap",
+          "source": {
+            "label": "55-day formal test",
+            "files": [
+              {
+                "label": "test_daily_metrics.csv"
+              },
+              {
+                "label": "test_summary.json"
+              },
+              {
+                "label": "estimate_benefit.py"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "Baseline generalized daily cost",
+                "definition": "Mean generalized system cost across the 55 formal-test dates."
+              },
+              {
+                "label": "Recovery scenario",
+                "definition": "Assumed fraction of the mean algorithm-minus-reference cost gap recovered, divided by baseline mean cost."
+              }
+            ],
+            "caveats": [
+              "Scenarios are assumptions, not forecasts or confidence intervals.",
+              "Reference allocation differs from online clearing; the gap is not an achievable Critic-only bound.",
+              "Single-action counterfactual gains overlap and must not be summed over a day.",
+              "Generalized cost contains noncash penalties and is not accounting profit.",
+              "No retrained policy has been evaluated."
+            ]
+          },
+          "rows": [
+            {
+              "baseline": 1201.2598812833703,
+              "reference": 1049.377976095186,
+              "gap": 151.8819051881842,
+              "gap_recovery_fraction": 0.1,
+              "daily_cost_reduction": 15.18819051881842,
+              "cost_reduction_pct": 1.26435509546794
+            },
+            {
+              "baseline": 1201.2598812833703,
+              "reference": 1049.377976095186,
+              "gap": 151.8819051881842,
+              "gap_recovery_fraction": 0.25,
+              "daily_cost_reduction": 37.97047629704605,
+              "cost_reduction_pct": 3.16088773866985
+            },
+            {
+              "baseline": 1201.2598812833703,
+              "reference": 1049.377976095186,
+              "gap": 151.8819051881842,
+              "gap_recovery_fraction": 0.5,
+              "daily_cost_reduction": 75.9409525940921,
+              "cost_reduction_pct": 6.3217754773397
+            }
+          ],
+          "columns": [
+            "baseline",
+            "reference",
+            "gap",
+            "gap_recovery_fraction",
+            "daily_cost_reduction",
+            "cost_reduction_pct"
+          ],
+          "preview": {
+            "kind": "aggregate",
+            "note": "Illustrative scenarios based on observed baseline values."
+          },
+          "methods": [
+            {
+              "language": "calculation",
+              "code": "gap = mean(algorithm_generalized_system_cost) - mean(generalized_reference_cost)\nsaving = gap * assumed_recovery_fraction\npercent = 100 * saving / mean(algorithm_generalized_system_cost)"
+            }
+          ],
+          "evidenceFlow": [
+            {
+              "kind": "validation",
+              "title": "Baseline reconciliation",
+              "text": "55 unique dates; both recomputed means match the formal summary within 1e-9. All daily reward/cost identities match within 1e-8."
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

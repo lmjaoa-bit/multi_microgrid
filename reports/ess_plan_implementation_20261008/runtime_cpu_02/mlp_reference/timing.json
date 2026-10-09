@@ -1,0 +1,11 @@
+{
+  "slug": "matd3_mlp_dueling_critic_h24_q_guided",
+  "enabled": false,
+  "seed": 42,
+  "episodes": 12,
+  "seconds": 82.27133350004442,
+  "cold_warmup_seconds": 5.550086700008251,
+  "updates": 305,
+  "config_hash": "fb457bfbfe2f775b843bebac7aff93bc140990a36783dd575fae28f7b8d2f3d4",
+  "device": "cpu"
+}

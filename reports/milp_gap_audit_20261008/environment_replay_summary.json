@@ -1,0 +1,61 @@
+{
+  "rows": 440,
+  "modes": [
+    {
+      "mode": "all_fixed",
+      "days": 55,
+      "mean_cost": 1201.2598870604609,
+      "mean_gain": -5.777090340914025e-06,
+      "max_power_error_kw": 0.0001443922519737
+    },
+    {
+      "mode": "all_free",
+      "days": 55,
+      "mean_cost": 1057.8259413988549,
+      "mean_gain": 143.4339398845156,
+      "max_power_error_kw": 25.300581480779258
+    },
+    {
+      "mode": "dr_free",
+      "days": 55,
+      "mean_cost": 1112.5311656466668,
+      "mean_gain": 88.7287156367038,
+      "max_power_error_kw": 25.300581480779115
+    },
+    {
+      "mode": "ess_free",
+      "days": 55,
+      "mean_cost": 1148.4333540870014,
+      "mean_gain": 52.826527196369,
+      "max_power_error_kw": 0.0001443922519737
+    },
+    {
+      "mode": "ev_free",
+      "days": 55,
+      "mean_cost": 1171.5033656747921,
+      "mean_gain": 29.756515608578294,
+      "max_power_error_kw": 18.293170406520552
+    },
+    {
+      "mode": "hvac_free",
+      "days": 55,
+      "mean_cost": 1154.550531279933,
+      "mean_gain": 46.70935000343745,
+      "max_power_error_kw": 0.0002730186039539
+    },
+    {
+      "mode": "mill_free",
+      "days": 55,
+      "mean_cost": 1176.5912936489694,
+      "mean_gain": 24.66858763440099,
+      "max_power_error_kw": 0.0002573000850976
+    },
+    {
+      "mode": "policy",
+      "days": 55,
+      "mean_cost": 1201.2598812833703,
+      "mean_gain": 4.0307151555845684e-14,
+      "max_power_error_kw": 7.815970093361102e-14
+    }
+  ]
+}

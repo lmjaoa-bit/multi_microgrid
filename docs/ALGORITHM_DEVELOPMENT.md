@@ -2,15 +2,22 @@
 
 ## Current formal algorithms
 
-The shared formal environment is `configs/cooperative.yaml`. The two current
-algorithms are:
+The shared formal environment is `configs/cooperative.yaml`. The retained
+research algorithms are:
+
+- `matd3_dispatch_q_guided`: MATD3-Q, the main baseline for comparison.
+- `matd3_mlp_dueling_critic_h24_q_guided`: Dueling, the main comparison.
+- `matd3_dr_counterfactual`: the DR counterfactual experiment, including its
+  baseline, actor-only, critic-only, combined and smoke configurations.
+
+The required parent implementations remain available:
 
 - `matd3_dispatch` (CLI alias `matd3`), displayed as MATD3.
 - `matd3_hierarchical_transformer`, displayed as 普通 T in stored metadata.
   Plotting renders this as `Ordinary Transformer` when a CJK-capable font is
   unavailable; the run ID and metadata are not renamed.
 
-Both algorithms use the same `single_dispatch_dr` physical action contract,
+All retained algorithms use the same `single_dispatch_dr` physical action contract,
 `peer_energy_summary` observations, and the same Reward V2 environment.
 
 ## Reward V2 contract
@@ -124,8 +131,8 @@ incumbent is never presented as a lower bound.
 From the repository root:
 
 ```powershell
-python scripts/run_experiment.py --algorithm matd3 --config configs/cooperative.yaml --algorithm-config configs/smoke/matd3_dispatch.yaml --episodes 3 --test-episodes 2 --validation-interval 1 --validation-days 2 --no-learning-curve --no-dashboard --device cpu --seed 42
-python scripts/run_experiment.py --algorithm matd3_hierarchical_transformer --config configs/cooperative.yaml --algorithm-config configs/smoke/matd3_hierarchical_transformer.yaml --episodes 3 --test-episodes 2 --validation-interval 1 --validation-days 2 --no-learning-curve --no-dashboard --device cpu --seed 42
+python scripts/run_experiment.py --algorithm matd3 --config configs/cooperative.yaml --algorithm-config configs/smoke/matd3_dispatch.yaml --episodes 3 --test-episodes 2 --validation-interval 1 --validation-days 2 --no-dashboard --device cpu --seed 42
+python scripts/run_experiment.py --algorithm matd3_hierarchical_transformer --config configs/cooperative.yaml --algorithm-config configs/smoke/matd3_hierarchical_transformer.yaml --episodes 3 --test-episodes 2 --validation-interval 1 --validation-days 2 --no-dashboard --device cpu --seed 42
 ```
 
 Do not add `--no-milp` or `--no-validation` to formal acceptance smoke
@@ -145,7 +152,9 @@ figures without rerunning the environment, model, or MILP:
 python scripts/generate_results.py --run_dir <existing_run_directory>
 ```
 
-A formal run must produce exactly 15 PNG and 15 PDF files under `figures/`.
+A complete four-season formal run produces 6 PNG and 6 PDF files under `figures/`: 00 summary, 01 training convergence, and one dispatch overview per season. Short tests produce only their available seasons. Independent learning-curve evaluation and its 01b figure have been removed; validation still selects the formal-test checkpoint.
+
+Normal runs have two top-level directories: `figures/` for images and `artifacts/` for all checkpoints, configuration, histories, summaries and hourly CSVs. Saved-result readers accept both this structure and legacy flat runs. `artifacts/plot_manifest.json` records selected dates, source hashes and the generated figure list. Seasonal dates are selected using normalized 24-hour base load, available renewables, outdoor temperature and saved tariff profiles; rewards and actions never enter selection.
 Under Reward V2, the training plot labels the optimized quantity as
 `Generalized Return`; accounting profit is shown separately and is not
 relabeled as reward.
@@ -178,7 +187,7 @@ training environment. Inference and formal testing do not run the teacher.
 Version one supports inference checkpoints and explicitly rejects training
 resume: the teacher pool, cache, counters, and RNG are not recovery snapshots.
 Auxiliary evidence lives in each run's `auxiliary_plan/`; additional plots live
-in `figures/plan_diagnostics/`, alongside the unchanged 15 standard PNG/PDF pairs.
+in `figures/plan_diagnostics/`, when explicitly requested; standard training generates only the learning curves and seasonal overview set.
 These plots read saved files only. Missing supervision fails training acceptance.
 
 For the no-supervision ablation, copy this plugin's YAML to a temporary file and

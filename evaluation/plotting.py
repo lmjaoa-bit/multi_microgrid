@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
@@ -9,6 +10,8 @@ import pandas as pd
 import yaml
 
 from evaluation.paper_artifacts import generate_paper_artifacts
+from evaluation.dispatch_overview import dispatch_overview_figure, seasonal_selection, select_seasonal_days
+from experiments.layout import artifact_directory, figure_directory, run_root
 
 
 BLUE = "#2F6B9A"
@@ -128,84 +131,6 @@ def _no_data(ax: Any, title: str, message: str = "Required saved metrics are una
     ax.set_title(title)
     ax.text(0.5, 0.5, message, ha="center", va="center", transform=ax.transAxes, color=INK)
     ax.set_axis_off()
-
-
-def _bar_figure(
-    labels: Sequence[str],
-    means: Sequence[float],
-    stds: Sequence[float],
-    *,
-    title: str,
-    ylabel: str,
-    colors: Sequence[str] | None = None,
-    zero_line: bool = False,
-    percent: bool = False,
-) -> Any:
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(8.6, 5.2))
-    values = np.asarray(means, dtype=float)
-    if not np.isfinite(values).any():
-        _no_data(ax, title)
-        return fig
-    errors = np.nan_to_num(np.asarray(stds, dtype=float), nan=0.0)
-    bars = ax.bar(labels, values, yerr=errors, capsize=4, color=list(colors or PALETTE[:len(labels)]), edgecolor=INK, linewidth=0.6)
-    ax.set_title(title)
-    ax.set_ylabel(ylabel)
-    ax.grid(axis="y")
-    ax.set_axisbelow(True)
-    if zero_line:
-        ax.axhline(0.0, color=INK, linewidth=1.0)
-    elif np.nanmin(values - errors) >= 0.0:
-        upper = float(np.nanmax(values + errors))
-        ax.set_ylim(bottom=0.0, top=1.0 if upper <= 0.0 else upper * 1.15)
-    if percent and np.nanmin(values) >= 0.0:
-        ax.set_ylim(bottom=0.0, top=max(105.0, float(np.nanmax(values + errors)) * 1.15))
-    _label_bars(ax, bars, suffix="%" if percent else "")
-    fig.tight_layout()
-    return fig
-
-
-def _grouped_bars(
-    labels: Sequence[str],
-    series: Sequence[tuple[str, Sequence[float], Sequence[float], str]],
-    *,
-    title: str,
-    ylabel: str,
-    zero_line: bool = False,
-) -> Any:
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(9.5, 5.5))
-    finite = any(np.isfinite(np.asarray(values, dtype=float)).any() for _, values, _, _ in series)
-    if not finite:
-        _no_data(ax, title)
-        return fig
-    x = np.arange(len(labels), dtype=float)
-    width = 0.78 / max(1, len(series))
-    for index, (name, values, errors, color) in enumerate(series):
-        positions = x + (index - (len(series) - 1) / 2.0) * width
-        ax.bar(
-            positions,
-            values,
-            width,
-            yerr=np.nan_to_num(np.asarray(errors, dtype=float), nan=0.0),
-            capsize=3,
-            label=name,
-            color=color,
-            edgecolor=INK,
-            linewidth=0.5,
-        )
-    ax.set_xticks(x, labels)
-    ax.set_title(title)
-    ax.set_ylabel(ylabel)
-    ax.grid(axis="y")
-    ax.set_axisbelow(True)
-    if zero_line:
-        ax.axhline(0.0, color=INK, linewidth=1.0)
-    ax.legend(loc="best", ncols=2)
-    fig.tight_layout()
-    return fig
 
 
 def _warmup_episode_position(
@@ -362,76 +287,6 @@ def _training_convergence_figure(
     return fig
 
 
-def _evaluation_learning_curve_figure(
-    history: Sequence[Mapping[str, Any]],
-) -> Any:
-    """TD3-style single-seed evaluation curve: no training-reward smoothing or seed band."""
-    import matplotlib.pyplot as plt
-
-    fig, ax = plt.subplots(figsize=(9.3, 5.4))
-    if not history:
-        _no_data(
-            ax,
-            "Evaluation Learning Curve",
-            "learning_curve_history.json is unavailable",
-        )
-        return fig
-
-    steps = np.asarray(
-        [item.get("total_steps", np.nan) for item in history],
-        dtype=float,
-    )
-    returns = np.asarray(
-        [item.get("episode_return_mean", np.nan) for item in history],
-        dtype=float,
-    )
-    valid = np.isfinite(steps) & np.isfinite(returns)
-    if not valid.any():
-        _no_data(
-            ax,
-            "Evaluation Learning Curve",
-            "No finite evaluation-return points are available",
-        )
-        return fig
-
-    steps = steps[valid]
-    returns = returns[valid]
-    ax.plot(
-        steps,
-        returns,
-        color=BLUE,
-        linewidth=2.2,
-        marker="o",
-        markersize=2.8,
-        label="Mean Evaluation Return",
-    )
-    best_index = int(np.argmax(returns))
-    ax.scatter(
-        [steps[best_index]],
-        [returns[best_index]],
-        color=ORANGE,
-        s=28,
-        zorder=5,
-        label="Best Evaluation",
-    )
-
-    eval_count = history[0].get("eval_episode_count")
-    suffix = (
-        f" ({int(eval_count)} fixed validation episodes per point)"
-        if eval_count is not None else ""
-    )
-    ax.set_title(f"Evaluation Learning Curve — Single Seed{suffix}")
-    ax.set_xlabel("Environment Steps")
-    ax.set_ylabel("Average Episode Return")
-    ax.grid(axis="y")
-    ax.set_axisbelow(True)
-    if len(steps) > 1:
-        ax.set_xlim(left=0.0, right=float(np.max(steps)))
-    ax.legend(loc="best")
-    fig.tight_layout()
-    return fig
-
-
 def generate_figures(
     run_dir: str | Path,
     *,
@@ -441,7 +296,10 @@ def generate_figures(
     import matplotlib.pyplot as plt
 
     _apply_style()
-    root = Path(run_dir).resolve()
+    public_root = run_root(run_dir)
+    if (public_root / "release_manifest.json").exists():
+        raise ValueError("Retained releases are immutable; regenerate a working run instead")
+    root = artifact_directory(run_dir)
     daily_path = root / "test_daily_metrics.csv"
     summary_path = root / "test_summary.json"
     if not daily_path.exists() or not summary_path.exists():
@@ -454,7 +312,6 @@ def generate_figures(
     training_summary: Mapping[str, Any] = _read_json(root / "training_summary.json", {})
     training = _read_json(root / "training_history.json", []) or []
     validation = _read_json(root / "validation_history.json", []) or []
-    learning_curve = _read_json(root / "learning_curve_history.json", []) or []
     config_snapshot: Mapping[str, Any] = {}
     config_snapshot_path = root / "config_snapshot.yaml"
     if config_snapshot_path.exists():
@@ -476,16 +333,16 @@ def generate_figures(
         or metadata.get("algorithm")
         or "MATD3"
     )
-    joint_field = "algorithm_joint_profit" if "algorithm_joint_profit" in daily else "matd3_joint_profit"
-    surplus_field = (
-        "algorithm_cooperation_surplus"
-        if "algorithm_cooperation_surplus" in daily else "matd3_cooperation_surplus"
-    )
-    gain_field = (
-        "algorithm_cooperation_gain_pct"
-        if "algorithm_cooperation_gain_pct" in daily else "matd3_cooperation_gain_pct"
-    )
-    figure_dir = root / "figures"
+    trajectory_paths = sorted((root / "test_hourly_trajectories").glob("*.csv"))
+    if not trajectory_paths:
+        raise FileNotFoundError("Dispatch overviews require saved test_hourly_trajectories/*.csv")
+    hourly = pd.concat([pd.read_csv(path) for path in trajectory_paths], ignore_index=True)
+    if "date" in daily and set(daily.date.astype(str)) != set(hourly.date.astype(str)):
+        raise ValueError("Saved hourly trajectories and test metrics must contain identical dates")
+    selection = seasonal_selection(hourly)
+    figure_dir = figure_directory(run_dir)
+    if figure_dir.is_symlink():
+        raise ValueError("Generated figure directory must not be a symbolic link")
     figure_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
 
@@ -544,220 +401,45 @@ def generate_figures(
     fig.tight_layout()
     written += _save(fig, figure_dir, "01_training_convergence", formats)
 
-    # 01b: TD3-style single-seed evaluation return against environment steps.
-    # This intentionally does not use the training-return MA100 or a within-day
-    # standard-deviation band; multi-seed uncertainty can be added later.
-    if learning_curve:
-        fig = _evaluation_learning_curve_figure(learning_curve)
-        written += _save(fig, figure_dir, "01b_evaluation_learning_curve", formats)
+    environment = config_snapshot.get("environment", config_snapshot)
+    reference_paths = []
+    for season, date in selection["seasonal_days"].items():
+        day = hourly.loc[hourly["date"].astype(str) == date].sort_values("hour")
+        reference_path = root / "dr_reference_hourly_trajectories" / f"{date}.csv"
+        reference = pd.read_csv(reference_path) if reference_path.is_file() else None
+        if reference is not None:
+            reference_paths.append(reference_path)
+        fig = dispatch_overview_figure(day, environment, algorithm_label, date, season, reference)
+        written += _save(fig, figure_dir, f"02_dispatch_overview_{season}_{date}", formats)
 
-    labels = ["Idle", "Independent MILP", f"{algorithm_label} Joint", "Cooperative MILP"]
-    fields = ["idle_team_profit", "independent_total_profit", joint_field, "cooperative_milp_profit"]
-    mean_std = [_mean_std(daily, field) for field in fields]
-    written += _save(
-        _bar_figure(labels, [item[0] for item in mean_std], [item[1] for item in mean_std],
-                    title=(
-                        "Accounting Joint Team Profit"
-                        if reward_semantics_version == "generalized_system_cost_v2"
-                        else "Joint Team Profit"
-                    ),
-                    ylabel="Average Accounting Profit (Mean ± 1 Std)"
-                    if reward_semantics_version == "generalized_system_cost_v2"
-                    else "Average Team Profit (Mean ± 1 Std)"),
-        figure_dir, "02_joint_team_profit", formats,
-    )
-
-    labels = [algorithm_label, "Cooperative MILP"]
-    mean_std = [_mean_std(daily, field) for field in (surplus_field, "cooperative_milp_cooperation_surplus")]
-    written += _save(
-        _bar_figure(labels, [item[0] for item in mean_std], [item[1] for item in mean_std],
-                    title="Cooperation Surplus", ylabel="Average Cooperation Surplus (Mean ± 1 Std)", zero_line=True),
-        figure_dir, "03_cooperation_surplus", formats,
-    )
-
-    mean_std = [_mean_std(daily, field) for field in (gain_field, "cooperative_milp_cooperation_gain_pct")]
-    written += _save(
-        _bar_figure(labels, [item[0] for item in mean_std], [item[1] for item in mean_std],
-                    title="Cooperation Gain", ylabel="Cooperation Gain (%) (Mean ± 1 Std)", zero_line=True),
-        figure_dir, "04_cooperation_gain_pct", formats,
-    )
-
-    mg_labels = ["MG1", "MG2", "MG3"]
-    profit_series = []
-    for name, prefix, color in (
-        ("Independent Profit", "v_", GREY),
-        ("Joint Physical Profit", "physical_profit_", BLUE),
-        ("Equal Settled Profit", "equal_settled_profit_", GOLD),
-        ("Shapley Settled Profit", "shapley_settled_profit_", ORANGE),
-    ):
-        fields = [f"v_mg{index}" if prefix == "v_" else f"{prefix}mg{index}" for index in (1, 2, 3)]
-        values = [_mean_std(daily, field) for field in fields]
-        profit_series.append((name, [item[0] for item in values], [item[1] for item in values], color))
-    written += _save(
-        _grouped_bars(mg_labels, profit_series, title="Microgrid Profit and Settlement",
-                      ylabel="Average Profit (Mean ± 1 Std)", zero_line=True),
-        figure_dir, "05_microgrid_profit_settlement", formats,
-    )
-
-    res_fields = ["independent_renewable_utilization_pct", "res_utilization_pct", "cooperative_milp_res_utilization_pct"]
-    mean_std = [_mean_std(daily, field) for field in res_fields]
-    written += _save(
-        _bar_figure(["Independent", f"{algorithm_label} Joint", "Cooperative MILP"],
-                    [item[0] for item in mean_std], [item[1] for item in mean_std],
-                    title="Renewable Non-Curtailment", ylabel="Non-Curtailment Rate (%)", percent=True),
-        figure_dir, "06_res_utilization", formats,
-    )
-
-    curtail_fields = ["independent_curtailment_kwh", "renewable_curtailment_kwh", "cooperative_milp_curtailment_kwh"]
-    mean_std = [_mean_std(daily, field) for field in curtail_fields]
-    fig = _bar_figure(
-        ["Independent", f"{algorithm_label} Joint", "Cooperative MILP"],
-        [item[0] for item in mean_std], [item[1] for item in mean_std],
-        title="Renewable Curtailment Comparison",
-        ylabel="Average Renewable Curtailment (kWh/day)",
-    )
-    if fig.axes and np.isfinite(_mean_std(daily, "curtailment_reduction_kwh")[0]):
-        reduction = _mean_std(daily, "curtailment_reduction_kwh")[0]
-        reduction_pct = _mean_std(daily, "curtailment_reduction_pct")[0]
-        fig.axes[0].text(
-            0.98, 0.96,
-            f"{algorithm_label} reduction: {reduction:.1f} kWh/day\nReduction: {reduction_pct:.1f}%" if np.isfinite(reduction_pct) else f"{algorithm_label} reduction: {reduction:.1f} kWh/day",
-            transform=fig.axes[0].transAxes, ha="right", va="top", fontsize=9,
-            bbox={"facecolor": "white", "edgecolor": LIGHT_GREY, "pad": 5},
-        )
-    written += _save(fig, figure_dir, "07_curtailment_comparison", formats)
-
-    # 08: external-grid interaction and overall physical feasibility.
-    fig, axes = plt.subplots(1, 2, figsize=(10.3, 4.8), gridspec_kw={"width_ratios": [1.6, 1.0]})
-    grid_fields = ["grid_import_kwh", "grid_export_kwh"]
-    grid_stats = [_mean_std(daily, field) for field in grid_fields]
-    bars = axes[0].bar(
-        ["Grid Import", "Grid Export"],
-        [item[0] for item in grid_stats],
-        yerr=[item[1] for item in grid_stats], capsize=4,
-        color=[BLUE, ORANGE], edgecolor=INK, linewidth=0.6,
-    )
-    axes[0].set_ylabel("Average Grid Energy (kWh/day, Mean ± 1 Std)")
-    axes[0].grid(axis="y")
-    _label_bars(axes[0], bars)
-    axes[1].set_axis_off()
-    feasible = _rate(daily, "feasible_day")
-    axes[1].text(0.05, 0.58, "Feasible-Day Rate", color="#59636A", transform=axes[1].transAxes)
-    axes[1].text(0.05, 0.42, f"{feasible:.1f}%", color=INK, fontsize=24, fontweight="bold", transform=axes[1].transAxes)
-    fig.suptitle("External Grid Interaction", fontsize=14)
-    fig.tight_layout()
-    written += _save(fig, figure_dir, "08_grid_interaction", formats)
-
-    equal_rates = [_rate(daily, f"equal_ir_satisfied_mg{index}") for index in (1, 2, 3)] + [_rate(daily, "equal_all_ir_satisfied")]
-    shapley_rates = [_rate(daily, f"shapley_ir_satisfied_mg{index}") for index in (1, 2, 3)] + [_rate(daily, "shapley_all_ir_satisfied")]
-    fig = _grouped_bars(
-        ["MG1", "MG2", "MG3", "All-MG"],
-        [("Equal Sharing", equal_rates, [0.0] * 4, GOLD), ("Shapley", shapley_rates, [0.0] * 4, BLUE)],
-        title="Individual Rationality", ylabel="IR Satisfaction Rate (%)",
-    )
-    if fig.axes:
-        fig.axes[0].set_ylim(0.0, 105.0)
-    written += _save(fig, figure_dir, "09_individual_rationality", formats)
-
-    fig, ax = plt.subplots(figsize=(6.4, 5.5))
-    matrix = np.zeros((3, 3), dtype=float)
-    for seller in range(1, 4):
-        for buyer in range(1, 4):
-            if seller != buyer:
-                matrix[seller - 1, buyer - 1] = _mean_std(daily, f"p2p_energy_mg{seller}_to_mg{buyer}_kwh")[0]
-    image = ax.imshow(matrix, cmap="Blues", vmin=0.0)
-    ax.set_xticks(range(3), mg_labels)
-    ax.set_yticks(range(3), mg_labels)
-    ax.set_xlabel("Buyer (column)")
-    ax.set_ylabel("Seller (row)")
-    ax.set_title("P2P Trading Matrix")
-    for row_index in range(3):
-        for column_index in range(3):
-            label = "—" if row_index == column_index else f"{matrix[row_index, column_index]:.1f}"
-            text_color = "white" if matrix[row_index, column_index] > float(np.nanmax(matrix)) * 0.55 else INK
-            ax.text(column_index, row_index, label, ha="center", va="center", color=text_color)
-    colorbar = fig.colorbar(image, ax=ax)
-    colorbar.set_label("Average P2P Energy (kWh/day)")
-    fig.tight_layout()
-    written += _save(fig, figure_dir, "10_p2p_trading_matrix", formats)
-
-    ess_series = []
-    for name, prefix, color in (
-        ("Battery Charge", "battery_charge_", BLUE),
-        ("Battery Discharge", "battery_discharge_", ORANGE),
-        ("Battery Throughput", "battery_throughput_", GOLD),
-    ):
-        values = [_mean_std(daily, f"{prefix}mg{index}_kwh") for index in (1, 2, 3)]
-        ess_series.append((name, [item[0] for item in values], [item[1] for item in values], color))
-    written += _save(
-        _grouped_bars(mg_labels, ess_series, title="ESS Performance",
-                      ylabel="Average Energy (kWh/day, Mean ± 1 Std)"),
-        figure_dir, "11_ess_performance", formats,
-    )
-
-    constraint_labels = ["Feasible Day", "SOC Violation", "Power Balance Violation", "P2P Balance Violation"]
-    constraint_values = [
-        _rate(daily, "feasible_day"),
-        _rate(daily, "soc_violation_day"),
-        _rate(daily, "power_balance_violation_day"),
-        _rate(daily, "p2p_balance_violation_day"),
-    ]
-    fig, ax = plt.subplots(figsize=(9.2, 5.4))
-    positions = np.arange(len(constraint_labels))
-    bars = ax.barh(positions, constraint_values, color=[BLUE, ORANGE, OLIVE, PINK],
-                   edgecolor=INK, linewidth=0.6)
-    ax.set_yticks(positions, constraint_labels)
-    ax.invert_yaxis()
-    ax.set_xlim(0.0, 105.0)
-    ax.set_xlabel("Test-Day Rate (%)")
-    ax.set_title("Constraint and Feasibility")
-    ax.grid(axis="x")
-    ax.set_axisbelow(True)
-    for bar in bars:
-        width_value = float(bar.get_width())
-        ax.text(min(width_value + 1.0, 101.0), bar.get_y() + bar.get_height() / 2.0,
-                f"{width_value:.1f}%", va="center", ha="left" if width_value < 100 else "right", fontsize=8)
-    fig.tight_layout()
-    written += _save(fig, figure_dir, "12_constraint_feasibility", formats)
-
-    allocation_series = []
-    for name, prefix, color in (
-        ("Equal Allocated Surplus", "equal_allocated_surplus_", GOLD),
-        ("Shapley Allocated Surplus", "shapley_allocated_surplus_", BLUE),
-    ):
-        values = [_mean_std(daily, f"{prefix}mg{index}") for index in (1, 2, 3)]
-        allocation_series.append((name, [item[0] for item in values], [item[1] for item in values], color))
-    written += _save(
-        _grouped_bars(mg_labels, allocation_series, title="Equal vs Shapley Surplus Allocation",
-                      ylabel="Average Allocated Surplus (Mean ± 1 Std)", zero_line=True),
-        figure_dir, "13_equal_vs_shapley_surplus_allocation", formats,
-    )
-
-    transfer_series = []
-    for name, prefix, color in (
-        ("Equal Transfer Payment", "equal_transfer_", GOLD),
-        ("Shapley Transfer Payment", "shapley_transfer_payment_", BLUE),
-    ):
-        values = [_mean_std(daily, f"{prefix}mg{index}") for index in (1, 2, 3)]
-        transfer_series.append((name, [item[0] for item in values], [item[1] for item in values], color))
-    fig = _grouped_bars(mg_labels, transfer_series, title="Transfer Payments",
-                        ylabel="Average Transfer Payment (Mean ± 1 Std)", zero_line=True)
-    if fig.axes:
-        fig.axes[0].text(0.01, 0.02, "Positive = receives payment; negative = pays into coalition",
-                         transform=fig.axes[0].transAxes, fontsize=8, color="#59636A")
-    written += _save(fig, figure_dir, "14_transfer_payments", formats)
-    # Keep the canonical training-run figure set fixed at 00..14.
-    # Paper-specific representative-day figures remain available through
-    # generate_paper_artifacts(), but are generated explicitly so a normal run
-    # does not silently change its artifact contract.
-    written += generate_plan_diagnostic_figures(run_dir, formats=formats)
+    # Cleanup is limited to generated image formats inside this run's figures folder.
+    # CSVs, checkpoints, custom notes and immutable releases are never removed.
+    keep = {path.resolve() for path in written}
+    for old in figure_dir.iterdir():
+        if old.is_file() and old.suffix.lower() in {".png", ".pdf"} and old.resolve() not in keep:
+            old.unlink()
+    sources = [*trajectory_paths, *reference_paths]
+    for name in ("test_daily_metrics.csv", "test_summary.json", "config_snapshot.yaml",
+                 "training_history.json", "validation_history.json",
+                 "run_metadata.json", "training_summary.json"):
+        path = root / name
+        if path.is_file():
+            sources.append(path)
+    manifest = {
+        **selection, "test_day_count": int(hourly["date"].nunique()),
+        "figures": [path.name for path in written],
+        "source_sha256": {path.relative_to(root).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
+                          for path in sources},
+        "layout": "00 summary; 01 training; one dispatch overview per available season",
+    }
+    (root / "plot_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return written
 
 
 def generate_plan_diagnostic_figures(run_dir: str | Path, formats=('png','pdf')) -> list[Path]:
     """Render auxiliary evidence exclusively from saved observations/trajectories."""
     import matplotlib.pyplot as plt
-    root = Path(run_dir)
+    root = artifact_directory(run_dir)
     source = root/'auxiliary_plan/formal_test_plan_attention.jsonl'
     if not source.exists():
         return []

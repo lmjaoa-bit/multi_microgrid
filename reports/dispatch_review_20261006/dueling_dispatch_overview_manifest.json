@@ -1,0 +1,61 @@
+{
+  "run": "C:\\daima\\multi_microgrid_rl_standalone\\outputs\\working_runs\\matd3_dueling_feasible_actor\\runs\\DUELINGFEASIBLEACTOR_2026-10-05_11-07-08_seed42",
+  "checkpoint": "C:\\daima\\multi_microgrid_rl_standalone\\outputs\\working_runs\\matd3_dueling_feasible_actor\\runs\\DUELINGFEASIBLEACTOR_2026-10-05_11-07-08_seed42\\checkpoints\\best_model.pt",
+  "representative_day": "2018-04-27",
+  "source_sha256": {
+    "output\\pdf\\dispatch_review_20261006\\01_microgrid_dispatch.pdf": "8849537191412913b85ddf64b84d53de8c92f531b07b12302b03c5a2d524499f",
+    "output\\pdf\\dispatch_review_20261006\\02_ess_power_and_soc.pdf": "363f6b8db78e111737a277abe7e6443f85c520732e22900fa4b06bfd1e15eb61",
+    "output\\pdf\\dispatch_review_20261006\\03_flexible_loads_and_service.pdf": "b7f61d96e915cc6e8c77e392349d083f13f98c81b42ad6e0bbd9cfbab6a07f51",
+    "output\\pdf\\dispatch_review_20261006\\04_p2p_net_trading.pdf": "30aff4c50aeb15701b4270950d31a6e57f56b017752f06dec65f791dfe2394c0"
+  },
+  "source_files_unchanged": true,
+  "panels": [
+    {
+      "source": "01_microgrid_dispatch.pdf",
+      "rect": [
+        30.0,
+        74.0,
+        930.0,
+        766.3076923076924
+      ]
+    },
+    {
+      "source": "02_ess_power_and_soc.pdf",
+      "rect": [
+        30.0,
+        811.2049645107314,
+        930.0,
+        1479.776382183025
+      ]
+    },
+    {
+      "source": "03_flexible_loads_and_service.pdf",
+      "rect": [
+        956.0,
+        74.0,
+        1996.0,
+        965.4285714285713
+      ]
+    },
+    {
+      "source": "04_p2p_net_trading.pdf",
+      "rect": [
+        956.0,
+        991.4285714285713,
+        1996.0,
+        1479.776382183025
+      ]
+    }
+  ],
+  "pdf_pages": 1,
+  "png_dimensions": [
+    6078,
+    4542
+  ],
+  "outputs": [
+    "dueling_dispatch_overview.pdf",
+    "dueling_dispatch_overview.png",
+    "dueling_dispatch_overview_preview.png"
+  ],
+  "method": "Vector PDF composition; PNG rendered from the composed PDF"
+}

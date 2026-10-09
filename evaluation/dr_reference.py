@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from experiments.layout import artifact_directory
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -122,7 +123,7 @@ def save_dr_reference_results(
     daily: Sequence[Mapping[str, Any]],
     hourly_by_day: Mapping[str, Sequence[Mapping[str, Any]]],
 ) -> list[Path]:
-    root = Path(output_dir).resolve()
+    root = artifact_directory(output_dir)
     root.mkdir(parents=True, exist_ok=True)
     summary_path = root / "dr_reference_summary.json"
     daily_path = root / "dr_reference_daily_metrics.csv"

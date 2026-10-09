@@ -1,0 +1,154 @@
+{
+  "checkpoint_episode": 4600,
+  "summaries": [
+    {
+      "case_id": 0,
+      "agent": "mg1",
+      "date": "2018-01-29",
+      "hour": 5,
+      "mode": "target_det",
+      "draws": 1,
+      "gain_mean": 0.004369608684986481,
+      "gain_se": 0.0,
+      "monte_carlo_interval_95": [
+        0.004369608684986481,
+        0.004369608684986481
+      ],
+      "online_gain": 0.0053351975458504,
+      "dq1": -0.0053553581237792,
+      "candidate_kw": 27.49990613758564,
+      "reference_kw": 28.499905720353127
+    },
+    {
+      "case_id": 0,
+      "agent": "mg1",
+      "date": "2018-01-29",
+      "hour": 5,
+      "mode": "target_smoothed",
+      "draws": 64,
+      "gain_mean": 0.0005425935468350435,
+      "gain_se": 0.000635027969508155,
+      "monte_carlo_interval_95": [
+        -0.0007020612734009403,
+        0.0017872483670710272
+      ],
+      "online_gain": 0.0053351975458504,
+      "dq1": -0.0053553581237792,
+      "candidate_kw": 27.49990613758564,
+      "reference_kw": 28.499905720353127
+    },
+    {
+      "case_id": 1,
+      "agent": "mg2",
+      "date": "2018-11-26",
+      "hour": 8,
+      "mode": "target_det",
+      "draws": 1,
+      "gain_mean": 0.00735097760379233,
+      "gain_se": 0.0,
+      "monte_carlo_interval_95": [
+        0.00735097760379233,
+        0.00735097760379233
+      ],
+      "online_gain": 0.0072924418602049,
+      "dq1": -0.006988525390625,
+      "candidate_kw": 2.5231054052710533,
+      "reference_kw": 3.5231053456664085
+    },
+    {
+      "case_id": 1,
+      "agent": "mg2",
+      "date": "2018-11-26",
+      "hour": 8,
+      "mode": "target_smoothed",
+      "draws": 64,
+      "gain_mean": 0.0051438272195872825,
+      "gain_se": 0.0004600669968028446,
+      "monte_carlo_interval_95": [
+        0.0042420959058537076,
+        0.0060455585333208574
+      ],
+      "online_gain": 0.0072924418602049,
+      "dq1": -0.006988525390625,
+      "candidate_kw": 2.5231054052710533,
+      "reference_kw": 3.5231053456664085
+    },
+    {
+      "case_id": 2,
+      "agent": "mg3",
+      "date": "2018-01-30",
+      "hour": 9,
+      "mode": "target_det",
+      "draws": 1,
+      "gain_mean": 0.01298447097879496,
+      "gain_se": 0.0,
+      "monte_carlo_interval_95": [
+        0.01298447097879496,
+        0.01298447097879496
+      ],
+      "online_gain": 0.0129426197406008,
+      "dq1": -0.0090799331665039,
+      "candidate_kw": 20.599999952316285,
+      "reference_kw": 21.6
+    },
+    {
+      "case_id": 2,
+      "agent": "mg3",
+      "date": "2018-01-30",
+      "hour": 9,
+      "mode": "target_smoothed",
+      "draws": 64,
+      "gain_mean": 0.012121258396405599,
+      "gain_se": 0.0003497409518793112,
+      "monte_carlo_interval_95": [
+        0.011435766130722148,
+        0.012806750662089049
+      ],
+      "online_gain": 0.0129426197406008,
+      "dq1": -0.0090799331665039,
+      "candidate_kw": 20.599999952316285,
+      "reference_kw": 21.6
+    },
+    {
+      "case_id": 3,
+      "agent": "mg3",
+      "date": "2018-03-31",
+      "hour": 1,
+      "mode": "target_det",
+      "draws": 1,
+      "gain_mean": 0.06519787665964571,
+      "gain_se": 0.0,
+      "monte_carlo_interval_95": [
+        0.06519787665964571,
+        0.06519787665964571
+      ],
+      "online_gain": 0.0637413486522939,
+      "dq1": -0.05295991897583,
+      "candidate_kw": 54.0,
+      "reference_kw": 72.0
+    },
+    {
+      "case_id": 3,
+      "agent": "mg3",
+      "date": "2018-03-31",
+      "hour": 1,
+      "mode": "target_smoothed",
+      "draws": 64,
+      "gain_mean": 0.06679137669359705,
+      "gain_se": 0.0005563213594180201,
+      "monte_carlo_interval_95": [
+        0.06570098682913773,
+        0.06788176655805638
+      ],
+      "online_gain": 0.0637413486522939,
+      "dq1": -0.05295991897583,
+      "candidate_kw": 54.0,
+      "reference_kw": 72.0
+    }
+  ],
+  "caveats": [
+    "Four deliberately chosen examples, not a population estimate.",
+    "This tests physical returns of the frozen target policy with recurring smoothing; clipped-min bootstrap is not itself a physical policy.",
+    "Intervals quantify only Monte Carlo sampling error under this fixed environment scenario, not model or generalization uncertainty."
+  ]
+}

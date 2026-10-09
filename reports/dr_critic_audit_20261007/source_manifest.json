@@ -1,0 +1,18 @@
+{
+  "parent_audit": "C:\\daima\\multi_microgrid_rl_standalone\\reports\\hvac_audit_20261007",
+  "checkpoint_sha256": "b2e53e4f846189ae482210325d3219243f9ac7b1a57901abae8b25677a8c4f11",
+  "best_episode": 1900,
+  "source_run": "C:\\daima\\multi_microgrid_rl_standalone\\outputs\\working_runs\\matd3_mlp_dueling_critic_h24_q_guided\\runs\\DUELINGCRITICT-QH24_2026-10-07_22-11-08_seed42",
+  "additional_source_hashes": {
+    "components/industrial_mill.py": "1806f5d8b80297d85ce4a56e38ec0c3296efe97c280add3ef290468fb478e119",
+    "components/ev_charging.py": "023431143422de097b52e550737c64c9dd5fa03793432430f97b660593398603",
+    "components/ev_sessions.py": "70a7272aacbdbe8208ffdd430da3e18afa5e02e7515d963f6239fdeb2e41c26d"
+  },
+  "reference_replay_reward_max_error": 8.881784197001252e-16,
+  "split": "test",
+  "days": 55,
+  "seed": 42,
+  "action_noise_std": 0.0,
+  "forecast_noise": true,
+  "learning_updates": 0
+}

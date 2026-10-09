@@ -5,6 +5,7 @@ import hashlib
 import json
 import warnings
 from pathlib import Path
+from experiments.layout import artifact_directory
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -1033,7 +1034,7 @@ def evaluate(
         **joint_summary,
     }
     if output_dir is not None:
-        destination = Path(output_dir)
+        destination = artifact_directory(output_dir)
         destination.mkdir(parents=True, exist_ok=True)
         write_json(destination / "test_summary.json", result)
         write_json(destination / "test_evaluation.json", result)

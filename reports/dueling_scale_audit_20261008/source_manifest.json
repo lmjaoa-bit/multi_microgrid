@@ -1,0 +1,13 @@
+{
+  "parent_manifest": "C:\\daima\\multi_microgrid_rl_standalone\\reports\\hvac_audit_20261007\\source_manifest.json",
+  "checkpoint_sha256": "b2e53e4f846189ae482210325d3219243f9ac7b1a57901abae8b25677a8c4f11",
+  "training_history_sha256": "463f9e60934a3be0bb22c16eccb75ed2b7a5ae2c990adc637eb64c38e92178ef",
+  "training_history_last_episode": 5000,
+  "diagnostic_script_sha256": "ea33d048a4aa4f876d6e8c26ab392a1846bae6d8d82577a25480249a41110ed1",
+  "input_hashes": {
+    "reports\\hvac_audit_20261007\\counterfactual_probes.csv": "4b5055aae1a022295c193c48a4c869d9f1f55970fcaf59a73b1a2e62407c0a90",
+    "reports\\dr_critic_audit_20261007\\counterfactual_probes.csv": "f467b66415cd99a88132063fa1745386bcef9033edf4899d5226d4b6cafcbffe"
+  },
+  "learning_updates": 0,
+  "source_hashes_unchanged": true
+}

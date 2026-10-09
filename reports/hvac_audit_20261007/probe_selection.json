@@ -1,0 +1,242 @@
+[
+  {
+    "date": "2018-01-30",
+    "hour": 3,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-01-31",
+    "hour": 3,
+    "kind": "small"
+  },
+  {
+    "date": "2018-01-28",
+    "hour": 21,
+    "kind": "large"
+  },
+  {
+    "date": "2018-01-30",
+    "hour": 23,
+    "kind": "late"
+  },
+  {
+    "date": "2018-02-25",
+    "hour": 17,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-02-26",
+    "hour": 15,
+    "kind": "small"
+  },
+  {
+    "date": "2018-02-24",
+    "hour": 22,
+    "kind": "large"
+  },
+  {
+    "date": "2018-02-28",
+    "hour": 23,
+    "kind": "late"
+  },
+  {
+    "date": "2018-03-29",
+    "hour": 14,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-03-29",
+    "hour": 9,
+    "kind": "small"
+  },
+  {
+    "date": "2018-03-31",
+    "hour": 22,
+    "kind": "large"
+  },
+  {
+    "date": "2018-03-30",
+    "hour": 23,
+    "kind": "late"
+  },
+  {
+    "date": "2018-04-28",
+    "hour": 13,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-04-30",
+    "hour": 19,
+    "kind": "small"
+  },
+  {
+    "date": "2018-04-28",
+    "hour": 8,
+    "kind": "large"
+  },
+  {
+    "date": "2018-04-29",
+    "hour": 21,
+    "kind": "late"
+  },
+  {
+    "date": "2018-05-31",
+    "hour": 7,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-05-28",
+    "hour": 0,
+    "kind": "small"
+  },
+  {
+    "date": "2018-05-30",
+    "hour": 9,
+    "kind": "large"
+  },
+  {
+    "date": "2018-05-29",
+    "hour": 20,
+    "kind": "late"
+  },
+  {
+    "date": "2018-06-27",
+    "hour": 23,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-06-29",
+    "hour": 19,
+    "kind": "small"
+  },
+  {
+    "date": "2018-06-26",
+    "hour": 11,
+    "kind": "large"
+  },
+  {
+    "date": "2018-06-29",
+    "hour": 23,
+    "kind": "late"
+  },
+  {
+    "date": "2018-07-29",
+    "hour": 1,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-07-28",
+    "hour": 0,
+    "kind": "small"
+  },
+  {
+    "date": "2018-07-30",
+    "hour": 9,
+    "kind": "large"
+  },
+  {
+    "date": "2018-07-28",
+    "hour": 21,
+    "kind": "late"
+  },
+  {
+    "date": "2018-08-28",
+    "hour": 23,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-08-28",
+    "hour": 1,
+    "kind": "small"
+  },
+  {
+    "date": "2018-08-30",
+    "hour": 13,
+    "kind": "large"
+  },
+  {
+    "date": "2018-08-30",
+    "hour": 23,
+    "kind": "late"
+  },
+  {
+    "date": "2018-09-30",
+    "hour": 11,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-09-30",
+    "hour": 17,
+    "kind": "small"
+  },
+  {
+    "date": "2018-09-26",
+    "hour": 12,
+    "kind": "large"
+  },
+  {
+    "date": "2018-09-29",
+    "hour": 21,
+    "kind": "late"
+  },
+  {
+    "date": "2018-10-28",
+    "hour": 9,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-10-28",
+    "hour": 6,
+    "kind": "small"
+  },
+  {
+    "date": "2018-10-27",
+    "hour": 8,
+    "kind": "large"
+  },
+  {
+    "date": "2018-10-31",
+    "hour": 23,
+    "kind": "late"
+  },
+  {
+    "date": "2018-11-26",
+    "hour": 8,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-11-29",
+    "hour": 14,
+    "kind": "small"
+  },
+  {
+    "date": "2018-11-28",
+    "hour": 1,
+    "kind": "large"
+  },
+  {
+    "date": "2018-11-27",
+    "hour": 23,
+    "kind": "late"
+  },
+  {
+    "date": "2018-12-30",
+    "hour": 14,
+    "kind": "reversal"
+  },
+  {
+    "date": "2018-12-31",
+    "hour": 23,
+    "kind": "small"
+  },
+  {
+    "date": "2018-12-29",
+    "hour": 21,
+    "kind": "large"
+  },
+  {
+    "date": "2018-12-30",
+    "hour": 23,
+    "kind": "late"
+  }
+]

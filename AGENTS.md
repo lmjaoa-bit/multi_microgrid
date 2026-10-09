@@ -140,19 +140,21 @@ outputs/working_runs/<algorithm_slug>/
 ├── latest_run.json
 └── runs/
     └── <ALGORITHM>_<timestamp>_seed<seed>/
-        ├── checkpoints/
-        │   ├── best_model.pt
-        │   └── final_model.pt
-        ├── figures/
-        ├── test_hourly_trajectories/
-        ├── config_snapshot.yaml
-        ├── run_metadata.json
-        ├── training_history.json
-        ├── validation_history.json
-        ├── training_summary.json
-        ├── test_daily_metrics.csv
-        ├── test_summary.json
-        └── summary.json
+        ├── figures/                 # PNG/PDF images only
+        └── artifacts/               # all non-image research evidence
+            ├── checkpoints/
+            │   ├── best_model.pt
+            │   └── final_model.pt
+            ├── test_hourly_trajectories/
+            ├── config_snapshot.yaml
+            ├── run_metadata.json
+            ├── training_history.json
+            ├── validation_history.json
+            ├── training_summary.json
+            ├── test_daily_metrics.csv
+            ├── test_summary.json
+            ├── summary.json
+            └── plot_manifest.json
 ```
 
 Do not write new checkpoints, histories, summaries, or figures directly into `outputs/` or
@@ -208,9 +210,16 @@ Before reporting completion:
 3. Confirm the selected plugin and its own YAML were used.
 4. Confirm `best_model.pt` is the formal-test checkpoint.
 5. Confirm test, Equal/Shapley settlement, summary, and plotting completed.
-6. Confirm figures include 15 PNG files and 15 PDF files unless the user requested PNG-only.
+6. Confirm figures include 6 PNG and 6 PDF files for a four-season formal test: 00, 01 and four seasonal dispatch overviews. Independent learning-curve evaluation and its 01b figure are retired. Short smoke tests include only the available seasons. Never fabricate missing seasonal or learning-curve data. Seasonal selection uses saved exogenous 24-hour profiles only, with source hashes and selected dates in artifacts/plot_manifest.json.
 7. Confirm normal results were written under `outputs/working_runs/<slug>/runs/`.
 8. If testing promotion, confirm the source working run remains and the retained run contains a manifest, README, and registry entry.
 9. Confirm no canonical MATD3 file changed for an experimental algorithm.
 
 For detailed human-oriented guidance, see `docs/ALGORITHM_DEVELOPMENT.md`.
+
+## 9. Server work and handoff
+
+Before connecting to the training server, changing its code, starting a run, or downloading
+results, read `docs/SERVER_WORKFLOW.md` for connection details, verified environment,
+current task status, and synchronization conventions. Recheck live status before acting.
+Connection information is context, not blanket authorization to start training or publish code.

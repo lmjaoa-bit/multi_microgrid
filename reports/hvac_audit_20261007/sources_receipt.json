@@ -1,0 +1,284 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "deterministic-switching",
+      "title": "确定性策略仍出现冷热换向",
+      "queries": [
+        {
+          "id": "deterministic-switching-evidence",
+          "source": {
+            "label": "HVAC 固定模型诊断",
+            "files": [
+              {
+                "label": "hourly_forecast_true.csv"
+              },
+              {
+                "label": "hourly_forecast_false.csv"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "定义",
+                "definition": "相邻小时換向：同一日期相邻小时的有符号 HVAC 功率反号，且两小时绝对功率均超过 1 kW。"
+              }
+            ],
+            "filters": [
+              "Actor 动作噪声标准差为 0",
+              "分别开启与关闭预测噪声"
+            ],
+            "caveats": [
+              "固定第 1900 回合的中途最佳模型；不代表训练完成后的正式测试。",
+              "测试集为 2018 年全年分布的 55 个日期，每日 24 步。",
+              "切换计数不等于所有切换都浪费。"
+            ]
+          },
+          "columns": [
+            "预测噪声",
+            "天数",
+            "冷热同日天数",
+            "相邻小时换向"
+          ],
+          "rows": [
+            {
+              "预测噪声": false,
+              "天数": 55,
+              "冷热同日天数": 44,
+              "相邻小时换向": 109
+            },
+            {
+              "预测噪声": true,
+              "天数": 55,
+              "冷热同日天数": 44,
+              "相邻小时换向": 122
+            }
+          ],
+          "methods": [
+            {
+              "language": "python",
+              "code": "signs = np.where(power > 1, 1, np.where(power < -1, -1, 0))\nadjacent_reversals = int(np.sum(signs[1:] * signs[:-1] == -1))"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "critic-ranking",
+      "title": "Critic 对部分局部动作收益判断反向",
+      "queries": [
+        {
+          "id": "critic-ranking-evidence",
+          "source": {
+            "label": "HVAC 固定模型诊断",
+            "files": [
+              {
+                "label": "counterfactual_probes.csv"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "定义",
+                "definition": "错号：候选相对原动作的预测 Q 差与环境回放累计奖励差乘积为负。"
+              }
+            ],
+            "filters": [
+              "只取功率变化精确为 ±1 kW 的候选",
+              "累计奖励差绝对值超过 0.001"
+            ],
+            "caveats": [
+              "固定第 1900 回合的中途最佳模型；不代表训练完成后的正式测试。",
+              "测试集为 2018 年全年分布的 55 个日期，每日 24 步。",
+              "48 个状态按月份及动作特征分层选取，不能外推总体误判率。",
+              "后续使用同一固定参数的确定性在线策略，TD3 训练目标则包含平滑噪声。"
+            ]
+          },
+          "columns": [
+            "有意义比较",
+            "Q1错号",
+            "Q2错号",
+            "双Q同时错号"
+          ],
+          "rows": [
+            {
+              "有意义比较": 51,
+              "Q1错号": 16,
+              "Q2错号": 22,
+              "双Q同时错号": 7
+            }
+          ],
+          "methods": [
+            {
+              "language": "python",
+              "code": "local = probes[np.isclose(abs(probes.candidate_kw - probes.reference_kw), 1, atol=1e-6, rtol=0)]\nmeaningful = local[local.gain.abs() > .001]\nq1_wrong = int(sum(meaningful.dq1 * meaningful.gain < 0))"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "smoothing-sensitivity",
+      "title": "目标平滑噪声会跨越冷热分支",
+      "queries": [
+        {
+          "id": "smoothing-sensitivity-evidence",
+          "source": {
+            "label": "HVAC 固定模型诊断",
+            "files": [
+              {
+                "label": "counterfactual_probes.csv"
+              },
+              {
+                "label": "config_snapshot.yaml"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "定义",
+                "definition": "跨冷热比例：HVAC 单通道扰动后目标动作与扰动前目标动作反号的抽样比例。"
+              }
+            ],
+            "filters": [
+              "每状态 512 次扰动",
+              "近零目标动作绝对值低于 0.1"
+            ],
+            "caveats": [
+              "固定第 1900 回合的中途最佳模型；不代表训练完成后的正式测试。",
+              "测试集为 2018 年全年分布的 55 个日期，每日 24 步。",
+              "只测固定模型的敏感性；没有噪声参数重训练，不能据此认定策略切换由噪声造成。"
+            ]
+          },
+          "columns": [
+            "扰动标准差_kW",
+            "扰动截断_kW",
+            "近零状态数",
+            "跨冷热比例中位数"
+          ],
+          "rows": [
+            {
+              "扰动标准差_kW": 7.0,
+              "扰动截断_kW": 17.5,
+              "近零状态数": 18,
+              "跨冷热比例中位数": 0.427734375
+            }
+          ],
+          "methods": [
+            {
+              "language": "python",
+              "code": "state = probes.groupby(['date', 'hour']).first()\nnearzero = state[state.noise_hvac_only_target_raw.abs() < .1]\nmedian_cross_rate = nearzero.noise_hvac_only_sign_cross_rate.median()"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "deadband-intervention",
+      "title": "固定策略加死区减少换向但有舒适度代价",
+      "queries": [
+        {
+          "id": "deadband-intervention-evidence",
+          "source": {
+            "label": "HVAC 固定模型诊断",
+            "files": [
+              {
+                "label": "deadband_daily.csv"
+              },
+              {
+                "label": "daily_forecast_true.csv"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "定义",
+                "definition": "舒适度恶化天数：加死区后的日累计舒适度违约 °C·h 大于对应基线超过 1e-6 的日期数。"
+              }
+            ],
+            "filters": [
+              "相同日期与种子，预测噪声开启",
+              "仅将固定 Actor 输出中低于死区阈值的 HVAC 动作置零"
+            ],
+            "caveats": [
+              "固定第 1900 回合的中途最佳模型；不代表训练完成后的正式测试。",
+              "测试集为 2018 年全年分布的 55 个日期，每日 24 步。",
+              "这是固定策略外加过滤器的反事实实验，没有重新训练带死区策略。"
+            ]
+          },
+          "columns": [
+            "死区_kW",
+            "相邻换向",
+            "舒适度恶化天数"
+          ],
+          "rows": [
+            {
+              "死区_kW": 0,
+              "相邻换向": 122,
+              "舒适度恶化天数": 0
+            },
+            {
+              "死区_kW": 1.0,
+              "相邻换向": 122,
+              "舒适度恶化天数": 4
+            },
+            {
+              "死区_kW": 3.0,
+              "相邻换向": 54,
+              "舒适度恶化天数": 13
+            }
+          ],
+          "methods": [
+            {
+              "language": "python",
+              "code": "delta_comfort = filtered_daily.comfort_degree_hours - baseline_daily.comfort_degree_hours\nworsened_days = int(sum(delta_comfort > 1e-6))"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "small-action-signal",
+      "title": "局部微调收益常小于当前估计误差",
+      "queries": [
+        {
+          "id": "small-action-signal-evidence",
+          "source": {
+            "label": "HVAC 固定模型诊断",
+            "files": [
+              {
+                "label": "counterfactual_probes.csv"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "定义",
+                "definition": "真实收益差和 Q1 差值误差：精确 ±1 kW 候选相对原动作的累计奖励差，以及预测差与该真实差的绝对误差。"
+              }
+            ],
+            "filters": [
+              "95 条精确 ±1 kW 比较"
+            ],
+            "caveats": [
+              "固定第 1900 回合的中途最佳模型；不代表训练完成后的正式测试。",
+              "测试集为 2018 年全年分布的 55 个日期，每日 24 步。",
+              "不能单凭此结果把误差归因于团队奖励汇总。"
+            ]
+          },
+          "columns": [
+            "真实收益差绝对值中位数",
+            "Q1差值误差绝对值中位数"
+          ],
+          "rows": [
+            {
+              "真实收益差绝对值中位数": 0.0012369501821853,
+              "Q1差值误差绝对值中位数": 0.0033585033414332
+            }
+          ],
+          "methods": [
+            {
+              "language": "python",
+              "code": "median_gain = local.gain.abs().median()\nmedian_error = (local.dq1 - local.gain).abs().median()"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

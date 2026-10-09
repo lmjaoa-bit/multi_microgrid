@@ -1,0 +1,36 @@
+{
+  "status": "COMPLETED",
+  "timestamp": "2026-10-08T01:42:27.456041+08:00",
+  "completed_episode": 5000,
+  "total_steps": 120000,
+  "durable_recovery_point": null,
+  "history": [
+    {
+      "status": "RUNNING",
+      "timestamp": "2026-10-07T22:11:08.830639+08:00",
+      "completed_episode": 0,
+      "resumed": false
+    },
+    {
+      "status": "TRAINED",
+      "timestamp": "2026-10-08T01:39:50.767207+08:00",
+      "completed_episode": 5000,
+      "total_steps": 120000,
+      "durable_recovery_point": null
+    },
+    {
+      "status": "EVALUATING",
+      "timestamp": "2026-10-08T01:39:50.844503+08:00",
+      "completed_episode": 5000,
+      "total_steps": 120000,
+      "durable_recovery_point": null
+    },
+    {
+      "status": "COMPLETED",
+      "timestamp": "2026-10-08T01:42:27.456041+08:00",
+      "completed_episode": 5000,
+      "total_steps": 120000,
+      "durable_recovery_point": null
+    }
+  ]
+}

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from experiments.layout import artifact_directory, figure_directory, run_root
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -381,7 +382,7 @@ def calculate_paper_metrics(
 
 
 def load_saved_run(run_dir: str | Path) -> tuple[pd.DataFrame, pd.DataFrame, Mapping[str, Any]]:
-    root = Path(run_dir).resolve()
+    root = artifact_directory(run_dir)
     daily_path = root / "test_daily_metrics.csv"
     config_path = root / "config_snapshot.yaml"
     trajectory_dir = root / "test_hourly_trajectories"
@@ -402,7 +403,7 @@ def load_saved_run(run_dir: str | Path) -> tuple[pd.DataFrame, pd.DataFrame, Map
 def load_saved_dr_reference(run_dir: str | Path) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Load the persisted deterministic DR reference without rerunning the environment."""
 
-    root = Path(run_dir).resolve()
+    root = artifact_directory(run_dir)
     daily_path = root / "dr_reference_daily_metrics.csv"
     trajectory_dir = root / "dr_reference_hourly_trajectories"
     paths = sorted(trajectory_dir.glob("*.csv")) if trajectory_dir.is_dir() else []
@@ -472,7 +473,7 @@ def calculate_dr_shift_metrics(
 
 
 def write_run_paper_metrics(run_dir: str | Path) -> tuple[Path, Path]:
-    root = Path(run_dir).resolve()
+    root = artifact_directory(run_dir)
     hourly, daily, config = load_saved_run(root)
     metrics = calculate_paper_metrics(hourly, daily, config)
     csv_path = root / "paper_metrics.csv"
@@ -874,7 +875,7 @@ def generate_paper_artifacts(
     """Generate the paper figure group and metrics strictly from saved run files."""
 
     _configure_matplotlib()
-    root = Path(run_dir).resolve()
+    root = artifact_directory(run_dir)
     hourly, daily, config = load_saved_run(root)
     reference_hourly, reference_daily = load_saved_dr_reference(root)
     env = _environment_config(config)
@@ -891,7 +892,7 @@ def generate_paper_artifacts(
         raise ValueError(
             f"DR reference for representative day {representative} must contain exactly 24 rows"
         )
-    figure_dir = root / "figures"
+    figure_dir = figure_directory(root)
     figure_dir.mkdir(parents=True, exist_ok=True)
     label = _algorithm_label(root)
     figures = [
@@ -1051,8 +1052,8 @@ def write_comparison_tables(
     candidate_run: str | Path,
     output_dir: str | Path,
 ) -> list[Path]:
-    baseline_root = Path(baseline_run).resolve()
-    candidate_root = Path(candidate_run).resolve()
+    baseline_root = artifact_directory(baseline_run)
+    candidate_root = artifact_directory(candidate_run)
     output_root = Path(output_dir).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     baseline_hourly, baseline_daily, baseline_config = load_saved_run(baseline_root)

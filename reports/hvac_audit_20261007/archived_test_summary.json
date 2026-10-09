@@ -1,0 +1,2817 @@
+{
+  "split": "test",
+  "test_days_count": 55,
+  "test_seed": 42,
+  "experiment_contract": {
+    "schema_version": 2,
+    "service_metrics_schema_version": "service_metrics_v2",
+    "metrics_schema_version": "service_metrics_v2",
+    "dispatch_priority_mode": "renewable_load_first",
+    "dispatch_semantics": "renewable_load_first_v2_no_grid_export",
+    "reward_semantics_version": "generalized_system_cost_v2",
+    "reward_calibration_status": "locked",
+    "reward_calibration_report_sha256": "9d1461793ae112719dedccb2204b17814006f4b700ee1b67c009e2a68c7a562b",
+    "dr_projection_semantics": "instantaneous_physical_only_v2",
+    "hvac_control_semantics": "soft_comfort_penalty_v2",
+    "ev_control_semantics": "no_deadline_min_projection_v2",
+    "observation_semantics_version": "reward_v2_public_state_v1",
+    "reward_discount_semantics": "finite_day_undiscounted_v1",
+    "comfort_metric_semantics": "boundary_sampled_degree_hours",
+    "carbon_information_semantics": "current_observed_no_future_v1",
+    "settlement_value_semantics": "accounting_profit_v2",
+    "hvac_safety_mode": "soft_comfort",
+    "oracle_allocation_mode": "source_priority_free_allocation",
+    "full_information_oracle": true,
+    "action_semantics": "single_dispatch_dr_v4_instantaneous_physical",
+    "experiment_profile": null,
+    "algorithm_slug": "matd3_dueling_feasible_actor",
+    "policy": "unregistered",
+    "action_design": {
+      "id": "single_dispatch_dr",
+      "version": "single_dispatch_dr_v3",
+      "raw_actions": [
+        "signed_dispatch_intent",
+        "dr_intent"
+      ],
+      "description": "Renewable-load-first dispatch with executed ESS flow semantics plus one heterogeneous controllable-load intent per microgrid.",
+      "control_mode": "single_dispatch",
+      "raw_action_dim": 2
+    },
+    "observation_mode": "peer_energy_summary",
+    "offer_projection": "peer_demand_cap",
+    "environment_profile": "cooperative_standard",
+    "environment_config": "C:\\daima\\multi_microgrid_rl_standalone\\configs\\cooperative.yaml",
+    "environment_overrides": {
+      "ess_sharing": {
+        "observation_mode": "peer_energy_summary"
+      }
+    },
+    "resolved_environment_hash": "745ca262da0cebcdf5fc4f1f1b3bf3b7f60d5136161a4b2f858e813b6c988bf2",
+    "physical_config_hash": "4b2f9e06930351513c47ef1c2532aed47253308430bc44290e0b303d9233e55f",
+    "physical_settings": {
+      "env": {
+        "name": "MultiMicrogridEnv",
+        "seed": 42,
+        "mode": "cooperative"
+      },
+      "dispatch": {
+        "priority_mode": "renewable_load_first"
+      },
+      "p2p": {
+        "enabled": true,
+        "mode": "cooperative_energy_pool",
+        "loss_rate": 0.0,
+        "pair_capacity_kw": null,
+        "allow_ess_to_ess": false,
+        "allow_grid_resale": false
+      },
+      "terminal_soc": {
+        "mode": "none",
+        "tolerance": 0.03,
+        "penalty_per_kwh": 1.5
+      },
+      "cost": {
+        "unmet_load_cost_per_kwh": 20.0,
+        "renewable_curtailment_cost_per_kwh": 0.05,
+        "curtailment_price_per_kwh": 0.05,
+        "carbon_price_per_kg": 0.1,
+        "peak_price_per_kw": 1.0,
+        "mill_unserved_price_per_t": 100.0,
+        "comfort_price_per_degree_hour": 10.0,
+        "ev_shortfall_price_per_kwh": 3.0,
+        "reward_scale": 100.0
+      },
+      "time": {
+        "delta_t": 1.0,
+        "episode_length": 24,
+        "episode_sampling": "natural_day"
+      },
+      "data": {
+        "train_path": "data/spatial_market_2018_train.csv",
+        "val_path": "data/spatial_market_2018_val.csv",
+        "test_path": "data/spatial_market_2018_test.csv",
+        "timestamp_col": "timestamp",
+        "allow_temperature_fallback": true
+      },
+      "price": {
+        "sell_ratio": 0.5,
+        "override_buy_price_with_tou": false
+      },
+      "microgrids": [
+        {
+          "id": "mg1",
+          "type": "industrial_pv_raw_mill",
+          "load_profile": {
+            "target_mean_kw": 48.6,
+            "weekend_multiplier": 0.78,
+            "variability_clip": [
+              0.65,
+              1.45
+            ],
+            "hourly_shape": [
+              0.58,
+              0.56,
+              0.55,
+              0.54,
+              0.55,
+              0.62,
+              0.78,
+              0.92,
+              1.1,
+              1.22,
+              1.28,
+              1.3,
+              1.3,
+              1.28,
+              1.24,
+              1.2,
+              1.12,
+              0.98,
+              0.86,
+              0.78,
+              0.72,
+              0.66,
+              0.62,
+              0.6
+            ]
+          },
+          "renewables": {
+            "pv_capacity_kw": 520.0,
+            "wind_capacity_kw": 0.0,
+            "ghi_column": "mg1_ghi_w_per_m2",
+            "wind_speed_column": "mg1_wind_speed_mps"
+          },
+          "battery": {
+            "capacity_kwh": 210.0,
+            "max_charge_kw": 65.0,
+            "max_discharge_kw": 65.0,
+            "eta_charge": 0.95,
+            "eta_discharge": 0.95,
+            "soc_min": 0.1,
+            "soc_max": 0.9,
+            "initial_soc": 0.1,
+            "degradation_cost_per_kwh": 0.01
+          },
+          "grid": {
+            "import_limit_kw": null,
+            "export_limit_kw": 0.0
+          },
+          "dr": {
+            "type": "industrial_mill",
+            "terminal_mode": "none",
+            "rated_power_kw": 28.5,
+            "rated_production_tph": 1.186,
+            "downstream_consumption_tph": 0.975,
+            "silo_capacity_t": 17.55,
+            "silo_min_t": 3.51,
+            "silo_max_t": 15.8,
+            "silo_initial_t": 10.53,
+            "terminal_tolerance_t": 0.2
+          }
+        },
+        {
+          "id": "mg2",
+          "type": "commercial_wind_hvac",
+          "load_profile": {
+            "target_mean_kw": 71.87,
+            "weekend_multiplier": 0.57,
+            "variability_clip": [
+              0.65,
+              1.45
+            ],
+            "hourly_shape": [
+              0.9,
+              0.89,
+              0.88,
+              0.88,
+              0.9,
+              0.94,
+              0.98,
+              1.02,
+              1.06,
+              1.1,
+              1.12,
+              1.13,
+              1.13,
+              1.12,
+              1.1,
+              1.08,
+              1.06,
+              1.05,
+              1.05,
+              1.04,
+              1.02,
+              0.98,
+              0.95,
+              0.92
+            ]
+          },
+          "renewables": {
+            "pv_capacity_kw": 0.0,
+            "wind_capacity_kw": 900.0,
+            "ghi_column": "mg2_ghi_w_per_m2",
+            "wind_speed_column": "mg2_wind_speed_mps"
+          },
+          "battery": {
+            "capacity_kwh": 290.0,
+            "max_charge_kw": 80.0,
+            "max_discharge_kw": 80.0,
+            "eta_charge": 0.95,
+            "eta_discharge": 0.95,
+            "soc_min": 0.1,
+            "soc_max": 0.9,
+            "initial_soc": 0.1,
+            "degradation_cost_per_kwh": 0.01
+          },
+          "grid": {
+            "import_limit_kw": null,
+            "export_limit_kw": 0.0
+          },
+          "dr": {
+            "type": "commercial_hvac",
+            "terminal_mode": "none",
+            "forecast_viability": false,
+            "control_semantics": "soft_comfort",
+            "r_out_air_c_per_kw": 0.22,
+            "r_air_mass_c_per_kw": 0.08,
+            "c_air_kwh_per_c": 15.0,
+            "c_mass_kwh_per_c": 250.0,
+            "heating_max_kw": 35.0,
+            "cooling_max_kw": 35.0,
+            "cop_heat": 3.3,
+            "cop_cool": 3.2,
+            "temperature_column": "mg2_temperature_c",
+            "ghi_column": "mg2_ghi_w_per_m2",
+            "occupied_hours": [
+              7,
+              8,
+              9,
+              10,
+              11,
+              12,
+              13,
+              14,
+              15,
+              16,
+              17,
+              18
+            ],
+            "occupied_comfort_c": [
+              21.0,
+              25.0
+            ],
+            "unoccupied_comfort_c": [
+              16.0,
+              30.0
+            ],
+            "terminal_air_tolerance_c": 1.0,
+            "terminal_mass_tolerance_c": 0.3,
+            "solar_gain_kw_per_wm2": 0.025,
+            "solar_air_fraction": 0.2,
+            "internal_gain_occupied_fraction": 0.5,
+            "internal_gain_unoccupied_fraction": 0.2
+          }
+        },
+        {
+          "id": "mg3",
+          "type": "residential_pv_ev",
+          "load_profile": {
+            "target_mean_kw": 57.52,
+            "weekend_multiplier": 1.05,
+            "variability_clip": [
+              0.65,
+              1.45
+            ],
+            "hourly_shape": [
+              1.4,
+              1.57,
+              1.69,
+              1.77,
+              1.8,
+              1.77,
+              1.69,
+              1.57,
+              1.4,
+              1.21,
+              1.0,
+              0.79,
+              0.6,
+              0.43,
+              0.31,
+              0.23,
+              0.2,
+              0.23,
+              0.31,
+              0.43,
+              0.6,
+              0.79,
+              1.0,
+              1.21
+            ]
+          },
+          "renewables": {
+            "pv_capacity_kw": 100.0,
+            "wind_capacity_kw": 0.0,
+            "ghi_column": "mg3_ghi_w_per_m2",
+            "wind_speed_column": "mg3_wind_speed_mps"
+          },
+          "battery": {
+            "capacity_kwh": 95.0,
+            "max_charge_kw": 34.0,
+            "max_discharge_kw": 34.0,
+            "eta_charge": 0.95,
+            "eta_discharge": 0.95,
+            "soc_min": 0.1,
+            "soc_max": 0.9,
+            "initial_soc": 0.1,
+            "degradation_cost_per_kwh": 0.01
+          },
+          "grid": {
+            "import_limit_kw": null,
+            "export_limit_kw": 0.0
+          },
+          "dr": {
+            "type": "ev_charging",
+            "scenario_seed": 42,
+            "departure_penalty_per_kwh": 3.0,
+            "control_semantics": "no_deadline_minimum",
+            "fleet_capacity_kwh": 780.0,
+            "initial_soc": 0.5,
+            "target_soc": 0.8,
+            "max_soc": 0.8,
+            "max_charge_kw": 93.6,
+            "eta_charge": 0.93,
+            "available_start_hour": 0,
+            "departure_hour": 7,
+            "cohorts": [
+              {
+                "group_id": "G1",
+                "count": 6,
+                "capacity_per_vehicle_kwh": 60.0,
+                "max_charge_per_vehicle_kw": 7.2,
+                "arrival_hours": [
+                  0
+                ],
+                "arrival_probabilities": [
+                  1.0
+                ],
+                "departure_hours": [
+                  6,
+                  7,
+                  8
+                ],
+                "departure_probabilities": [
+                  0.2,
+                  0.6,
+                  0.2
+                ],
+                "need_per_vehicle_kwh": [
+                  14.0,
+                  22.0
+                ]
+              },
+              {
+                "group_id": "G2",
+                "count": 4,
+                "capacity_per_vehicle_kwh": 60.0,
+                "max_charge_per_vehicle_kw": 7.2,
+                "arrival_hours": [
+                  0
+                ],
+                "arrival_probabilities": [
+                  1.0
+                ],
+                "departure_hours": [
+                  9,
+                  10,
+                  11
+                ],
+                "departure_probabilities": [
+                  0.2,
+                  0.6,
+                  0.2
+                ],
+                "need_per_vehicle_kwh": [
+                  14.0,
+                  22.0
+                ]
+              },
+              {
+                "group_id": "G3",
+                "count": 3,
+                "capacity_per_vehicle_kwh": 60.0,
+                "max_charge_per_vehicle_kw": 7.2,
+                "arrival_hours": [
+                  9,
+                  10,
+                  11,
+                  12
+                ],
+                "arrival_probabilities": [
+                  0.2,
+                  0.4,
+                  0.3,
+                  0.1
+                ],
+                "dwell_hours": [
+                  4,
+                  5,
+                  6
+                ],
+                "dwell_probabilities": [
+                  0.25,
+                  0.5,
+                  0.25
+                ],
+                "need_per_vehicle_kwh": [
+                  14.0,
+                  22.0
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "ess_p2p_enabled": true
+  },
+  "algorithm_slug": "matd3_dueling_feasible_actor",
+  "algorithm_display_name": "Dueling Feasible Actor",
+  "reward_semantics_version": "generalized_system_cost_v2",
+  "reward_calibration_status": "locked",
+  "reward_calibration_report_sha256": "9d1461793ae112719dedccb2204b17814006f4b700ee1b67c009e2a68c7a562b",
+  "method_interface": {
+    "action_dim": 2,
+    "observation_dims": {
+      "mg1": 307,
+      "mg2": 337,
+      "mg3": 328
+    },
+    "global_state_dim": 295,
+    "ess_sharing_control_mode": "single_dispatch",
+    "ess_sharing_observation_mode": "peer_energy_summary",
+    "ess_p2p_enabled": true,
+    "ess_offer_projection": "peer_demand_cap",
+    "mpc_forecast_horizon": null,
+    "environment_overrides": {
+      "ess_sharing": {
+        "observation_mode": "peer_energy_summary"
+      }
+    }
+  },
+  "forecast_setup": {
+    "future_horizon_hours": 24,
+    "point_forecast_noise": true,
+    "evaluation_forecast_noise": true,
+    "temporal_correlation": 0.8,
+    "sigma_1h": {
+      "load": 0.03,
+      "ghi": 0.08,
+      "wind_speed": 0.1,
+      "price": 0.0,
+      "temperature": 0.0
+    },
+    "error_max": {
+      "load": 0.15,
+      "ghi": 0.3,
+      "wind_speed": 0.35,
+      "price": 0.0,
+      "temperature": 0.0
+    },
+    "mask_beyond_episode": true
+  },
+  "deterministic_policy": true,
+  "deterministic_environment": true,
+  "forecast_noise_enabled": true,
+  "common_random_numbers": {
+    "enabled": true,
+    "definition": "same dates, initial SOC configuration, and per-day environment seeds"
+  },
+  "checkpoint_used": "C:\\daima\\multi_microgrid_rl_standalone\\outputs\\working_runs\\matd3_dueling_feasible_actor\\runs\\DUELINGFEASIBLEACTOR_2026-10-05_11-07-08_seed42\\checkpoints\\best_model.pt",
+  "checkpoint_sha256": "f55440dfbbab82c1f81fc0adf45794f73eb13eb975a23f33a5f66ae9135c7cd0",
+  "environment_config_sha256": "d678547e95d7fea9142daadc9bb68cce95f00f55d1d569296c2d73af9de5e09c",
+  "algorithm_config_sha256": "f74c122dbd83afb1db532ea15e16162874ed2d2f4bd72dc92a82b706018a6b2c",
+  "checkpoint_episode": 5000,
+  "checkpoint_selection_metric": "team_reward_mean",
+  "coalition_milp_enabled": true,
+  "coalition_evaluation_granularity": "one complete 24-hour test day",
+  "generalized_reference_enabled": true,
+  "generalized_reference_solve_count": 55,
+  "generalized_reference_success_count": 55,
+  "generalized_reference_cost_mean": 1047.7057406303281,
+  "team_profit_statistics": {
+    "count": 55,
+    "mean": -827.9792487058972,
+    "std": 664.6823548797032,
+    "median": -667.4764666109867,
+    "min": -2864.087800896447,
+    "max": -80.60854398590685,
+    "p05": -2474.9885437182356,
+    "p25": -971.9046590602329,
+    "p75": -364.3125541555322,
+    "p95": -232.35621326627893
+  },
+  "team_reward_statistics": {
+    "count": 55,
+    "mean": -11.910681185171468,
+    "std": 7.519369325365995,
+    "median": -10.252327817228885,
+    "min": -34.21113430305243,
+    "max": -3.7327757372028687,
+    "p05": -30.569064517222653,
+    "p25": -13.633986395632565,
+    "p75": -6.480519363825273,
+    "p95": -4.866031515621105
+  },
+  "generalized_system_cost_mean": 1191.068118517147,
+  "profit_by_microgrid_mean": {
+    "mg1": -116.37839392156101,
+    "mg2": -128.2097205790311,
+    "mg3": -583.3911342053051
+  },
+  "renewable_utilization_rate": 0.8064560941312281,
+  "p2p_total_energy_kwh_mean": 1413.7179305654222,
+  "feasible_day_rate": 1.0,
+  "comparisons": {
+    "vs_idle": {
+      "formula": "Dueling Feasible Actor profit - Idle profit; positive means Dueling Feasible Actor is better",
+      "gain_mean_abs": 220.55488882690065,
+      "gain_mean_pct": 26.50928434144202,
+      "gain_std": 126.46388333125131,
+      "gain_median": 209.60025961217082,
+      "win_count": 55,
+      "tie_count": 0,
+      "loss_count": 0,
+      "win_rate": 1.0,
+      "tie_rate": 0.0,
+      "loss_rate": 0.0
+    },
+    "vs_dr_reference": {
+      "formula": "Dueling Feasible Actor profit - Deterministic rule-based DR reference profit; positive means Dueling Feasible Actor is better",
+      "gain_mean_abs": 231.86251290861858,
+      "gain_mean_pct": 26.07625426653201,
+      "gain_std": 129.32751828841285,
+      "gain_median": 224.11769384535592,
+      "win_count": 55,
+      "tie_count": 0,
+      "loss_count": 0,
+      "win_rate": 1.0,
+      "tie_rate": 0.0,
+      "loss_rate": 0.0
+    },
+    "vs_independent_milp": {
+      "formula": "Dueling Feasible Actor profit - Independent MILP profit; positive means Dueling Feasible Actor is better",
+      "gain_mean_abs": 443.85848015723474,
+      "gain_mean_pct": 40.07051782500468,
+      "gain_std": 353.9747101756835,
+      "gain_median": 466.3255125999757,
+      "win_count": 49,
+      "tie_count": 0,
+      "loss_count": 6,
+      "win_rate": 0.8909090909090909,
+      "tie_rate": 0.0,
+      "loss_rate": 0.10909090909090909
+    },
+    "vs_cooperative_milp": {
+      "formula": "Dueling Feasible Actor profit - Cooperative MILP profit; positive means Dueling Feasible Actor is better",
+      "gain_mean_abs": -138.51484208331706,
+      "gain_mean_pct": -144.55310764438423,
+      "gain_std": 70.47356689665153,
+      "gain_median": -139.3673185170769,
+      "win_count": 0,
+      "tie_count": 0,
+      "loss_count": 55,
+      "win_rate": 0.0,
+      "tie_rate": 0.0,
+      "loss_rate": 1.0
+    }
+  },
+  "comparison": {
+    "algorithm_slug": "matd3_dueling_feasible_actor",
+    "algorithm_profit_mean": -827.9792487058972,
+    "algorithm_vs_idle_gain_mean": 220.55488882690065,
+    "algorithm_vs_idle_win_rate": 1.0,
+    "cooperative_matd3_profit_mean": -827.9792487058972,
+    "idle_profit_mean": -1048.5341375327978,
+    "matd3_beats_idle": true,
+    "matd3_vs_idle_gain_mean": 220.55488882690065,
+    "matd3_vs_idle_win_rate": 1.0,
+    "independent_milp_profit_mean": -1271.8377288631323,
+    "cooperative_milp_profit_mean": -689.4644066225802,
+    "generalized_reference_cost_mean": 1047.7057406303281
+  },
+  "algorithm": {
+    "days_count": 55,
+    "team_profit_statistics": {
+      "count": 55,
+      "mean": -827.9792487058972,
+      "std": 664.6823548797032,
+      "median": -667.4764666109867,
+      "min": -2864.087800896447,
+      "max": -80.60854398590685,
+      "p05": -2474.9885437182356,
+      "p25": -971.9046590602329,
+      "p75": -364.3125541555322,
+      "p95": -232.35621326627893
+    },
+    "team_profit_mean": -827.9792487058972,
+    "team_profit_total": -45538.85867882435,
+    "team_reward_statistics": {
+      "count": 55,
+      "mean": -11.910681185171468,
+      "std": 7.519369325365995,
+      "median": -10.252327817228885,
+      "min": -34.21113430305243,
+      "max": -3.7327757372028687,
+      "p05": -30.569064517222653,
+      "p25": -13.633986395632565,
+      "p75": -6.480519363825273,
+      "p95": -4.866031515621105
+    },
+    "team_reward_mean": -11.910681185171468,
+    "team_reward_total": -655.0874651844307,
+    "profit_by_microgrid_mean": {
+      "mg1": -116.37839392156101,
+      "mg2": -128.2097205790311,
+      "mg3": -583.3911342053051
+    },
+    "renewable_utilization_rate": 0.8064560941312281,
+    "p2p_total_energy_kwh": 1413.7179305654222,
+    "feasible_rate": 1.0,
+    "generalized_system_cost_mean": 1191.068118517147,
+    "generalized_system_cost_total": 65508.746518443084,
+    "cost_battery_mean": 11.76275111847399,
+    "cost_carbon_mean": 83.86689981600374,
+    "cost_comfort_mean": 7.306875745978552,
+    "cost_curtail_mean": 67.09577813570213,
+    "cost_ev_mean": 0.00016347623501215125,
+    "cost_grid_mean": 749.120555975486,
+    "cost_mill_mean": 0.0,
+    "cost_peak_mean": 271.9150942492673,
+    "cost_unmet_mean": 0.0,
+    "physical_feasible_day_rate": 1.0,
+    "power_balance_residual_max_kw": 0.0,
+    "source_balance_residual_max_kw": 1.1368683772161603e-13,
+    "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+    "device_bound_violation_max": 0.0,
+    "grid_export_max_kw": 0.0,
+    "unmet_energy_mean_kwh": 0.0,
+    "dr_statistics_by_microgrid": {
+      "mg1": {
+        "flexible_load_energy_kwh_mean": 426.9124143737199,
+        "projection_rate_mean": 0.0
+      },
+      "mg2": {
+        "flexible_load_energy_kwh_mean": 259.71155341105026,
+        "projection_rate_mean": 0.0
+      },
+      "mg3": {
+        "flexible_load_energy_kwh_mean": 252.57420808399328,
+        "projection_rate_mean": 0.0
+      }
+    },
+    "physical_profit_mean_by_microgrid": {
+      "mg1": -116.37839392156101,
+      "mg2": -128.2097205790311,
+      "mg3": -583.3911342053051
+    },
+    "p2p": {
+      "total_energy_mean_kwh": 1413.7179305654222,
+      "pair_energy_mean_kwh": {
+        "mg1_to_mg2": 416.84979213909287,
+        "mg1_to_mg3": 136.06134158387266,
+        "mg2_to_mg1": 332.70085153882445,
+        "mg2_to_mg3": 492.2545436541925,
+        "mg3_to_mg1": 5.632125547502362,
+        "mg3_to_mg2": 30.219276101938068
+      },
+      "utilization": null,
+      "ess_offer": {
+        "offer_mean_kwh": {
+          "mg1": 31.986129064746862,
+          "mg2": 84.04210841511,
+          "mg3": 10.74456161260063
+        },
+        "accepted_mean_kwh": {
+          "mg1": 30.22068048370307,
+          "mg2": 79.87444366099838,
+          "mg3": 9.308623378777918
+        },
+        "unmatched_mean_kwh": {
+          "mg1": 1.765448581043787,
+          "mg2": 4.167664754111624,
+          "mg3": 1.435938233822713
+        },
+        "uncapped_offer_mean_kwh": {
+          "mg1": 129.5317556765872,
+          "mg2": 382.1192693286024,
+          "mg3": 86.25749546836613
+        },
+        "projection_reduction_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "energy_acceptance_rate_by_microgrid": {
+          "mg1": 0.9448058069962095,
+          "mg2": 0.9504098025060695,
+          "mg3": 0.866356740684634
+        },
+        "any_fill_rate_by_microgrid": {
+          "mg1": 1.0,
+          "mg2": 1.0,
+          "mg3": 1.0
+        },
+        "full_fill_rate_by_microgrid": {
+          "mg1": 0.7520661157024794,
+          "mg2": 0.7816091954022989,
+          "mg3": 0.5217391304347826
+        },
+        "energy_acceptance_rate": 0.9418719818310255
+      }
+    },
+    "ess": {
+      "throughput_mean_kwh": {
+        "mg1": 396.16708773371954,
+        "mg2": 582.7678046534692,
+        "mg3": 197.34021946021002
+      },
+      "terminal_soc_mean": {
+        "mg1": 0.28523122917181587,
+        "mg2": 0.34556527447762253,
+        "mg3": 0.2921614969249818
+      }
+    },
+    "grid": {
+      "import_mean_kwh": {
+        "mg1": 346.66086498119944,
+        "mg2": 491.54451922411243,
+        "mg3": 712.8825508043366
+      },
+      "export_mean_kwh": {
+        "mg1": 0.0,
+        "mg2": 0.0,
+        "mg3": 0.0
+      },
+      "net_cost_mean": {
+        "mg1": 168.88718391750749,
+        "mg2": 243.97681752103526,
+        "mg3": 336.2565545369434
+      }
+    },
+    "metrics_schema_version": "service_metrics_v2",
+    "service_metrics": {
+      "metrics_schema_version": "service_metrics_v2",
+      "days_count": 55,
+      "data_complete_day_count": 55,
+      "data_complete_day_rate": 1.0,
+      "missing_fields": [],
+      "strict_feasible_day_count": 31,
+      "strict_feasible_day_denominator": 55,
+      "strict_feasible_day_rate": 0.5636363636363636,
+      "unmet_energy_total_kwh": 0.0,
+      "unmet_energy_mean_kwh": 0.0,
+      "unmet_load_day_count": 0,
+      "unmet_load_day_rate": 0.0,
+      "dr_supply_infeasible_day_count": 0,
+      "dr_supply_infeasible_day_rate": 0.0,
+      "hvac_comfort_success_count": 445,
+      "hvac_comfort_opportunity_count": 480,
+      "hvac_comfort_rate": 0.9270833333333334,
+      "hvac_all_boundary_success_count": 1261,
+      "hvac_all_boundary_count": 1320,
+      "hvac_all_boundary_comfort_rate": 0.9553030303030303,
+      "hvac_comfort_violation_degree_hours": 40.18781660288204,
+      "hvac_terminal_joint_success_rate": null,
+      "mill_production_t": 977.1051505122017,
+      "mill_consumption_required_t": 1287.0000000000002,
+      "mill_actual_consumption_t": 1287.0000000000002,
+      "mill_downstream_unserved_t": 0.0,
+      "mill_production_coverage_ratio": 0.7592114611594417,
+      "mill_production_completion_rate": 0.7592114611594417,
+      "mill_downstream_service_completion_rate": 1.0,
+      "mill_terminal_success_rate": null,
+      "ev_departure_count": 165,
+      "ev_completed_group_count": 158,
+      "ev_departure_shortfall_total_kwh": 0.0029970643085561063,
+      "ev_departure_success_rate": 0.9575757575757575
+    },
+    "strict_feasible_day_rate": 0.5636363636363636,
+    "hvac_terminal_joint_success_rate": null,
+    "hvac_comfort_rate": 0.9270833333333334,
+    "mill_terminal_success_rate": null,
+    "mill_production_completion_rate": 0.7592114611594417,
+    "mill_production_coverage_ratio": 0.7592114611594417,
+    "mill_downstream_service_completion_rate": 1.0,
+    "mill_terminal_or_production_success_rate": 0.7592114611594417,
+    "ev_departure_success_rate": 0.9575757575757575,
+    "mg2_projection_rate": 0.0,
+    "mg3_projection_rate": 0.0,
+    "service_reliability": {
+      "metrics_schema_version": "service_metrics_v2",
+      "days_count": 55,
+      "data_complete_day_count": 55,
+      "data_complete_day_rate": 1.0,
+      "missing_fields": [],
+      "strict_feasible_day_count": 24,
+      "strict_feasible_day_denominator": 55,
+      "strict_feasible_day_rate": 0.43636363636363634,
+      "unmet_energy_total_kwh": 0.0,
+      "unmet_energy_mean_kwh": 0.0,
+      "unmet_load_day_count": 0,
+      "unmet_load_day_rate": 0.0,
+      "dr_supply_infeasible_day_count": 0,
+      "dr_supply_infeasible_day_rate": 0.0,
+      "hvac_comfort_success_count": 445,
+      "hvac_comfort_opportunity_count": 480,
+      "hvac_comfort_rate": 0.9270833333333334,
+      "hvac_all_boundary_success_count": 1261,
+      "hvac_all_boundary_count": 1320,
+      "hvac_all_boundary_comfort_rate": 0.9553030303030303,
+      "hvac_comfort_violation_degree_hours": 40.18781660288204,
+      "hvac_terminal_joint_success_rate": null,
+      "mill_production_t": 977.1051505122017,
+      "mill_consumption_required_t": 1287.0000000000002,
+      "mill_actual_consumption_t": 1287.0000000000002,
+      "mill_downstream_unserved_t": 0.0,
+      "mill_production_coverage_ratio": 0.7592114611594417,
+      "mill_production_completion_rate": 0.7592114611594417,
+      "mill_downstream_service_completion_rate": 1.0,
+      "mill_terminal_success_rate": null,
+      "ev_departure_count": 165,
+      "ev_completed_group_count": 158,
+      "ev_departure_shortfall_total_kwh": 0.0029970643085561063,
+      "ev_departure_success_rate": 0.9575757575757575,
+      "unmet_energy_distribution_kwh": {
+        "count": 55,
+        "mean": 0.0,
+        "std": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p05": 0.0,
+        "p25": 0.0,
+        "p75": 0.0,
+        "p95": 0.0
+      },
+      "by_microgrid": {
+        "mg1": {
+          "unmet_energy_total_kwh": 0.0,
+          "unmet_energy_mean_kwh": 0.0
+        },
+        "mg2": {
+          "unmet_energy_total_kwh": 0.0,
+          "unmet_energy_mean_kwh": 0.0
+        },
+        "mg3": {
+          "unmet_energy_total_kwh": 0.0,
+          "unmet_energy_mean_kwh": 0.0
+        }
+      },
+      "unmet_load_hour_rate_mean": 0.0,
+      "unmet_load_microgrid_hour_rate_mean": 0.0,
+      "dr_supply_infeasible_rate_mean": 0.0,
+      "dr_supply_infeasible_microgrid_hour_rate_mean": 0.0,
+      "definition": {
+        "feasible_day": "existing physical constraint feasibility; semantics unchanged",
+        "strict_feasible_day": "physical feasibility plus zero unmet/DR failures and applicable HVAC, mill, and EV service constraints under service_metrics_v2",
+        "unmet_load_hour_rate": "fraction of test-day hours where any microgrid has unmet load",
+        "unmet_load_microgrid_hour_rate": "fraction of microgrid-hours with unmet load across all microgrids",
+        "dr_supply_infeasible_rate": "fraction of test-day hours where any microgrid reports dr_supply_infeasible",
+        "dr_supply_infeasible_microgrid_hour_rate": "fraction of microgrid-hours reporting dr_supply_infeasible",
+        "unmet_tolerance_kw": 1e-07,
+        "delta_t_hours": 1.0
+      }
+    },
+    "strict_feasible_rate": 0.43636363636363634,
+    "unmet_energy_kwh_mean": 0.0,
+    "unmet_energy_kwh_total": 0.0,
+    "unmet_load_hour_rate_mean": 0.0,
+    "dr_supply_infeasible_rate_mean": 0.0
+  },
+  "matd3": {
+    "days_count": 55,
+    "team_profit_statistics": {
+      "count": 55,
+      "mean": -827.9792487058972,
+      "std": 664.6823548797032,
+      "median": -667.4764666109867,
+      "min": -2864.087800896447,
+      "max": -80.60854398590685,
+      "p05": -2474.9885437182356,
+      "p25": -971.9046590602329,
+      "p75": -364.3125541555322,
+      "p95": -232.35621326627893
+    },
+    "team_profit_mean": -827.9792487058972,
+    "team_profit_total": -45538.85867882435,
+    "team_reward_statistics": {
+      "count": 55,
+      "mean": -11.910681185171468,
+      "std": 7.519369325365995,
+      "median": -10.252327817228885,
+      "min": -34.21113430305243,
+      "max": -3.7327757372028687,
+      "p05": -30.569064517222653,
+      "p25": -13.633986395632565,
+      "p75": -6.480519363825273,
+      "p95": -4.866031515621105
+    },
+    "team_reward_mean": -11.910681185171468,
+    "team_reward_total": -655.0874651844307,
+    "profit_by_microgrid_mean": {
+      "mg1": -116.37839392156101,
+      "mg2": -128.2097205790311,
+      "mg3": -583.3911342053051
+    },
+    "renewable_utilization_rate": 0.8064560941312281,
+    "p2p_total_energy_kwh": 1413.7179305654222,
+    "feasible_rate": 1.0,
+    "generalized_system_cost_mean": 1191.068118517147,
+    "generalized_system_cost_total": 65508.746518443084,
+    "cost_battery_mean": 11.76275111847399,
+    "cost_carbon_mean": 83.86689981600374,
+    "cost_comfort_mean": 7.306875745978552,
+    "cost_curtail_mean": 67.09577813570213,
+    "cost_ev_mean": 0.00016347623501215125,
+    "cost_grid_mean": 749.120555975486,
+    "cost_mill_mean": 0.0,
+    "cost_peak_mean": 271.9150942492673,
+    "cost_unmet_mean": 0.0,
+    "physical_feasible_day_rate": 1.0,
+    "power_balance_residual_max_kw": 0.0,
+    "source_balance_residual_max_kw": 1.1368683772161603e-13,
+    "p2p_balance_residual_max_kw": 2.842170943040401e-14,
+    "device_bound_violation_max": 0.0,
+    "grid_export_max_kw": 0.0,
+    "unmet_energy_mean_kwh": 0.0,
+    "dr_statistics_by_microgrid": {
+      "mg1": {
+        "flexible_load_energy_kwh_mean": 426.9124143737199,
+        "projection_rate_mean": 0.0
+      },
+      "mg2": {
+        "flexible_load_energy_kwh_mean": 259.71155341105026,
+        "projection_rate_mean": 0.0
+      },
+      "mg3": {
+        "flexible_load_energy_kwh_mean": 252.57420808399328,
+        "projection_rate_mean": 0.0
+      }
+    },
+    "physical_profit_mean_by_microgrid": {
+      "mg1": -116.37839392156101,
+      "mg2": -128.2097205790311,
+      "mg3": -583.3911342053051
+    },
+    "p2p": {
+      "total_energy_mean_kwh": 1413.7179305654222,
+      "pair_energy_mean_kwh": {
+        "mg1_to_mg2": 416.84979213909287,
+        "mg1_to_mg3": 136.06134158387266,
+        "mg2_to_mg1": 332.70085153882445,
+        "mg2_to_mg3": 492.2545436541925,
+        "mg3_to_mg1": 5.632125547502362,
+        "mg3_to_mg2": 30.219276101938068
+      },
+      "utilization": null,
+      "ess_offer": {
+        "offer_mean_kwh": {
+          "mg1": 31.986129064746862,
+          "mg2": 84.04210841511,
+          "mg3": 10.74456161260063
+        },
+        "accepted_mean_kwh": {
+          "mg1": 30.22068048370307,
+          "mg2": 79.87444366099838,
+          "mg3": 9.308623378777918
+        },
+        "unmatched_mean_kwh": {
+          "mg1": 1.765448581043787,
+          "mg2": 4.167664754111624,
+          "mg3": 1.435938233822713
+        },
+        "uncapped_offer_mean_kwh": {
+          "mg1": 129.5317556765872,
+          "mg2": 382.1192693286024,
+          "mg3": 86.25749546836613
+        },
+        "projection_reduction_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "energy_acceptance_rate_by_microgrid": {
+          "mg1": 0.9448058069962095,
+          "mg2": 0.9504098025060695,
+          "mg3": 0.866356740684634
+        },
+        "any_fill_rate_by_microgrid": {
+          "mg1": 1.0,
+          "mg2": 1.0,
+          "mg3": 1.0
+        },
+        "full_fill_rate_by_microgrid": {
+          "mg1": 0.7520661157024794,
+          "mg2": 0.7816091954022989,
+          "mg3": 0.5217391304347826
+        },
+        "energy_acceptance_rate": 0.9418719818310255
+      }
+    },
+    "ess": {
+      "throughput_mean_kwh": {
+        "mg1": 396.16708773371954,
+        "mg2": 582.7678046534692,
+        "mg3": 197.34021946021002
+      },
+      "terminal_soc_mean": {
+        "mg1": 0.28523122917181587,
+        "mg2": 0.34556527447762253,
+        "mg3": 0.2921614969249818
+      }
+    },
+    "grid": {
+      "import_mean_kwh": {
+        "mg1": 346.66086498119944,
+        "mg2": 491.54451922411243,
+        "mg3": 712.8825508043366
+      },
+      "export_mean_kwh": {
+        "mg1": 0.0,
+        "mg2": 0.0,
+        "mg3": 0.0
+      },
+      "net_cost_mean": {
+        "mg1": 168.88718391750749,
+        "mg2": 243.97681752103526,
+        "mg3": 336.2565545369434
+      }
+    },
+    "metrics_schema_version": "service_metrics_v2",
+    "service_metrics": {
+      "metrics_schema_version": "service_metrics_v2",
+      "days_count": 55,
+      "data_complete_day_count": 55,
+      "data_complete_day_rate": 1.0,
+      "missing_fields": [],
+      "strict_feasible_day_count": 31,
+      "strict_feasible_day_denominator": 55,
+      "strict_feasible_day_rate": 0.5636363636363636,
+      "unmet_energy_total_kwh": 0.0,
+      "unmet_energy_mean_kwh": 0.0,
+      "unmet_load_day_count": 0,
+      "unmet_load_day_rate": 0.0,
+      "dr_supply_infeasible_day_count": 0,
+      "dr_supply_infeasible_day_rate": 0.0,
+      "hvac_comfort_success_count": 445,
+      "hvac_comfort_opportunity_count": 480,
+      "hvac_comfort_rate": 0.9270833333333334,
+      "hvac_all_boundary_success_count": 1261,
+      "hvac_all_boundary_count": 1320,
+      "hvac_all_boundary_comfort_rate": 0.9553030303030303,
+      "hvac_comfort_violation_degree_hours": 40.18781660288204,
+      "hvac_terminal_joint_success_rate": null,
+      "mill_production_t": 977.1051505122017,
+      "mill_consumption_required_t": 1287.0000000000002,
+      "mill_actual_consumption_t": 1287.0000000000002,
+      "mill_downstream_unserved_t": 0.0,
+      "mill_production_coverage_ratio": 0.7592114611594417,
+      "mill_production_completion_rate": 0.7592114611594417,
+      "mill_downstream_service_completion_rate": 1.0,
+      "mill_terminal_success_rate": null,
+      "ev_departure_count": 165,
+      "ev_completed_group_count": 158,
+      "ev_departure_shortfall_total_kwh": 0.0029970643085561063,
+      "ev_departure_success_rate": 0.9575757575757575
+    },
+    "strict_feasible_day_rate": 0.5636363636363636,
+    "hvac_terminal_joint_success_rate": null,
+    "hvac_comfort_rate": 0.9270833333333334,
+    "mill_terminal_success_rate": null,
+    "mill_production_completion_rate": 0.7592114611594417,
+    "mill_production_coverage_ratio": 0.7592114611594417,
+    "mill_downstream_service_completion_rate": 1.0,
+    "mill_terminal_or_production_success_rate": 0.7592114611594417,
+    "ev_departure_success_rate": 0.9575757575757575,
+    "mg2_projection_rate": 0.0,
+    "mg3_projection_rate": 0.0,
+    "service_reliability": {
+      "metrics_schema_version": "service_metrics_v2",
+      "days_count": 55,
+      "data_complete_day_count": 55,
+      "data_complete_day_rate": 1.0,
+      "missing_fields": [],
+      "strict_feasible_day_count": 24,
+      "strict_feasible_day_denominator": 55,
+      "strict_feasible_day_rate": 0.43636363636363634,
+      "unmet_energy_total_kwh": 0.0,
+      "unmet_energy_mean_kwh": 0.0,
+      "unmet_load_day_count": 0,
+      "unmet_load_day_rate": 0.0,
+      "dr_supply_infeasible_day_count": 0,
+      "dr_supply_infeasible_day_rate": 0.0,
+      "hvac_comfort_success_count": 445,
+      "hvac_comfort_opportunity_count": 480,
+      "hvac_comfort_rate": 0.9270833333333334,
+      "hvac_all_boundary_success_count": 1261,
+      "hvac_all_boundary_count": 1320,
+      "hvac_all_boundary_comfort_rate": 0.9553030303030303,
+      "hvac_comfort_violation_degree_hours": 40.18781660288204,
+      "hvac_terminal_joint_success_rate": null,
+      "mill_production_t": 977.1051505122017,
+      "mill_consumption_required_t": 1287.0000000000002,
+      "mill_actual_consumption_t": 1287.0000000000002,
+      "mill_downstream_unserved_t": 0.0,
+      "mill_production_coverage_ratio": 0.7592114611594417,
+      "mill_production_completion_rate": 0.7592114611594417,
+      "mill_downstream_service_completion_rate": 1.0,
+      "mill_terminal_success_rate": null,
+      "ev_departure_count": 165,
+      "ev_completed_group_count": 158,
+      "ev_departure_shortfall_total_kwh": 0.0029970643085561063,
+      "ev_departure_success_rate": 0.9575757575757575,
+      "unmet_energy_distribution_kwh": {
+        "count": 55,
+        "mean": 0.0,
+        "std": 0.0,
+        "median": 0.0,
+        "min": 0.0,
+        "max": 0.0,
+        "p05": 0.0,
+        "p25": 0.0,
+        "p75": 0.0,
+        "p95": 0.0
+      },
+      "by_microgrid": {
+        "mg1": {
+          "unmet_energy_total_kwh": 0.0,
+          "unmet_energy_mean_kwh": 0.0
+        },
+        "mg2": {
+          "unmet_energy_total_kwh": 0.0,
+          "unmet_energy_mean_kwh": 0.0
+        },
+        "mg3": {
+          "unmet_energy_total_kwh": 0.0,
+          "unmet_energy_mean_kwh": 0.0
+        }
+      },
+      "unmet_load_hour_rate_mean": 0.0,
+      "unmet_load_microgrid_hour_rate_mean": 0.0,
+      "dr_supply_infeasible_rate_mean": 0.0,
+      "dr_supply_infeasible_microgrid_hour_rate_mean": 0.0,
+      "definition": {
+        "feasible_day": "existing physical constraint feasibility; semantics unchanged",
+        "strict_feasible_day": "physical feasibility plus zero unmet/DR failures and applicable HVAC, mill, and EV service constraints under service_metrics_v2",
+        "unmet_load_hour_rate": "fraction of test-day hours where any microgrid has unmet load",
+        "unmet_load_microgrid_hour_rate": "fraction of microgrid-hours with unmet load across all microgrids",
+        "dr_supply_infeasible_rate": "fraction of test-day hours where any microgrid reports dr_supply_infeasible",
+        "dr_supply_infeasible_microgrid_hour_rate": "fraction of microgrid-hours reporting dr_supply_infeasible",
+        "unmet_tolerance_kw": 1e-07,
+        "delta_t_hours": 1.0
+      }
+    },
+    "strict_feasible_rate": 0.43636363636363634,
+    "unmet_energy_kwh_mean": 0.0,
+    "unmet_energy_kwh_total": 0.0,
+    "unmet_load_hour_rate_mean": 0.0,
+    "dr_supply_infeasible_rate_mean": 0.0
+  },
+  "idle": {
+    "days_count": 55,
+    "team_profit_statistics": {
+      "count": 55,
+      "mean": -1048.5341375327978,
+      "std": 658.8643027340523,
+      "median": -984.0140264140873,
+      "min": -2903.4087282147752,
+      "max": -235.75658829310095,
+      "p05": -2610.51769320821,
+      "p25": -1275.4324934599435,
+      "p75": -491.47804143882706,
+      "p95": -341.14375130594607
+    },
+    "team_profit_mean": -1048.5341375327978,
+    "team_profit_total": -57669.37756430388,
+    "team_reward_statistics": {
+      "count": 55,
+      "mean": -16.186402527227646,
+      "std": 7.291087595551589,
+      "median": -14.899349871393373,
+      "min": -34.63624514094222,
+      "max": -6.129010106128679,
+      "p05": -32.007657064993445,
+      "p25": -19.198268272321002,
+      "p75": -11.140221438284536,
+      "p95": -7.274958063798173
+    },
+    "team_reward_mean": -16.186402527227646,
+    "team_reward_total": -890.2521389975205,
+    "profit_by_microgrid_mean": {
+      "mg1": -308.942467548282,
+      "mg2": -105.71305418819763,
+      "mg3": -633.8786157963183
+    },
+    "renewable_utilization_rate": 0.6875778924191647,
+    "p2p_total_energy_kwh": 1069.3641270511164,
+    "feasible_rate": 1.0,
+    "generalized_system_cost_mean": 1618.6402527227642,
+    "generalized_system_cost_total": 89025.21389975204,
+    "cost_battery_mean": 0.0,
+    "cost_carbon_mean": 95.46626097440732,
+    "cost_comfort_mean": 223.54892224008807,
+    "cost_curtail_mean": 99.30141453992437,
+    "cost_ev_mean": 33.21478602017398,
+    "cost_grid_mean": 916.0179369726997,
+    "cost_mill_mean": 0.0,
+    "cost_peak_mean": 251.09093197547134,
+    "cost_unmet_mean": 0.0,
+    "physical_feasible_day_rate": 1.0,
+    "power_balance_residual_max_kw": 0.0,
+    "source_balance_residual_max_kw": 1.1368683772161603e-13,
+    "p2p_balance_residual_max_kw": 0.0,
+    "device_bound_violation_max": 2.530422848148505e-17,
+    "grid_export_max_kw": 0.0,
+    "unmet_energy_mean_kwh": 0.0,
+    "dr_statistics_by_microgrid": {
+      "mg1": {
+        "flexible_load_energy_kwh_mean": 393.61720067453615,
+        "projection_rate_mean": 0.25
+      },
+      "mg2": {
+        "flexible_load_energy_kwh_mean": 0.0,
+        "projection_rate_mean": 0.0
+      },
+      "mg3": {
+        "flexible_load_energy_kwh_mean": 240.6693254517572,
+        "projection_rate_mean": 0.0
+      }
+    },
+    "physical_profit_mean_by_microgrid": {
+      "mg1": -308.942467548282,
+      "mg2": -105.71305418819763,
+      "mg3": -633.8786157963183
+    },
+    "p2p": {
+      "total_energy_mean_kwh": 1069.3641270511164,
+      "pair_energy_mean_kwh": {
+        "mg1_to_mg2": 243.52400767904507,
+        "mg1_to_mg3": 72.15255586247012,
+        "mg2_to_mg1": 295.45104732505115,
+        "mg2_to_mg3": 443.109237014131,
+        "mg3_to_mg1": 0.09543284238269245,
+        "mg3_to_mg2": 15.031846328036236
+      },
+      "utilization": null,
+      "ess_offer": {
+        "offer_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "accepted_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "unmatched_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "uncapped_offer_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "projection_reduction_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "energy_acceptance_rate_by_microgrid": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "any_fill_rate_by_microgrid": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "full_fill_rate_by_microgrid": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "energy_acceptance_rate": 0.0
+      }
+    },
+    "ess": {
+      "throughput_mean_kwh": {
+        "mg1": 0.0,
+        "mg2": 0.0,
+        "mg3": 0.0
+      },
+      "terminal_soc_mean": {
+        "mg1": 0.1,
+        "mg2": 0.1,
+        "mg3": 0.1
+      }
+    },
+    "grid": {
+      "import_mean_kwh": {
+        "mg1": 473.22915151923564,
+        "mg2": 448.92226949865733,
+        "mg3": 779.656278127788
+      },
+      "export_mean_kwh": {
+        "mg1": 0.0,
+        "mg2": 0.0,
+        "mg3": 0.0
+      },
+      "net_cost_mean": {
+        "mg1": 267.0646555808516,
+        "mg2": 255.8479018752043,
+        "mg3": 393.10537951664367
+      }
+    },
+    "metrics_schema_version": "service_metrics_v2",
+    "service_metrics": {
+      "metrics_schema_version": "service_metrics_v2",
+      "days_count": 55,
+      "data_complete_day_count": 55,
+      "data_complete_day_rate": 1.0,
+      "missing_fields": [],
+      "strict_feasible_day_count": 0,
+      "strict_feasible_day_denominator": 55,
+      "strict_feasible_day_rate": 0.0,
+      "unmet_energy_total_kwh": 0.0,
+      "unmet_energy_mean_kwh": 0.0,
+      "unmet_load_day_count": 0,
+      "unmet_load_day_rate": 0.0,
+      "dr_supply_infeasible_day_count": 0,
+      "dr_supply_infeasible_day_rate": 0.0,
+      "hvac_comfort_success_count": 155,
+      "hvac_comfort_opportunity_count": 480,
+      "hvac_comfort_rate": 0.3229166666666667,
+      "hvac_all_boundary_success_count": 843,
+      "hvac_all_boundary_count": 1320,
+      "hvac_all_boundary_comfort_rate": 0.6386363636363637,
+      "hvac_comfort_violation_degree_hours": 1229.5190723204844,
+      "hvac_terminal_joint_success_rate": null,
+      "mill_production_t": 900.8999999999995,
+      "mill_consumption_required_t": 1287.0000000000002,
+      "mill_actual_consumption_t": 1287.0000000000002,
+      "mill_downstream_unserved_t": 0.0,
+      "mill_production_coverage_ratio": 0.6999999999999995,
+      "mill_production_completion_rate": 0.6999999999999995,
+      "mill_downstream_service_completion_rate": 1.0,
+      "mill_terminal_success_rate": null,
+      "ev_departure_count": 165,
+      "ev_completed_group_count": 67,
+      "ev_departure_shortfall_total_kwh": 608.9377437031897,
+      "ev_departure_success_rate": 0.40606060606060607
+    },
+    "strict_feasible_day_rate": 0.0,
+    "hvac_terminal_joint_success_rate": null,
+    "hvac_comfort_rate": 0.3229166666666667,
+    "mill_terminal_success_rate": null,
+    "mill_production_completion_rate": 0.6999999999999995,
+    "mill_production_coverage_ratio": 0.6999999999999995,
+    "mill_downstream_service_completion_rate": 1.0,
+    "mill_terminal_or_production_success_rate": 0.6999999999999995,
+    "ev_departure_success_rate": 0.40606060606060607,
+    "mg2_projection_rate": 0.0,
+    "mg3_projection_rate": 0.0
+  },
+  "dr_reference": {
+    "days_count": 55,
+    "team_profit_statistics": {
+      "count": 55,
+      "mean": -1059.8417616145157,
+      "std": 684.481855203204,
+      "median": -986.2561624877154,
+      "min": -3004.679837966318,
+      "max": -164.7079970596108,
+      "p05": -2680.0902330118724,
+      "p25": -1291.5169750201728,
+      "p75": -506.5246002502771,
+      "p95": -304.3706909376261
+    },
+    "team_profit_mean": -1059.8417616145157,
+    "team_profit_total": -58291.296888798366,
+    "team_reward_statistics": {
+      "count": 55,
+      "mean": -16.63571501742064,
+      "std": 7.510614922992716,
+      "median": -15.266234000256363,
+      "min": -35.78699110651056,
+      "max": -6.296125066570089,
+      "p05": -32.96132005714875,
+      "p25": -19.39310009319329,
+      "p75": -11.319414194480125,
+      "p95": -7.855689326725235
+    },
+    "team_reward_mean": -16.63571501742064,
+    "team_reward_total": -914.9643259581352,
+    "profit_by_microgrid_mean": {
+      "mg1": -359.1537307010691,
+      "mg2": -96.03801860715038,
+      "mg3": -604.6500123062964
+    },
+    "renewable_utilization_rate": 0.7034592451110103,
+    "p2p_total_energy_kwh": 1079.3942278668503,
+    "feasible_rate": 1.0,
+    "generalized_system_cost_mean": 1663.5715017420641,
+    "generalized_system_cost_total": 91496.43259581353,
+    "cost_battery_mean": 0.0,
+    "cost_carbon_mean": 100.55547592287292,
+    "cost_comfort_mean": 223.54892224008807,
+    "cost_curtail_mean": 95.04220458084156,
+    "cost_ev_mean": 0.0,
+    "cost_grid_mean": 964.7995570336743,
+    "cost_mill_mean": 0.0,
+    "cost_peak_mean": 279.6253419645872,
+    "cost_unmet_mean": 0.0,
+    "physical_feasible_day_rate": 1.0,
+    "power_balance_residual_max_kw": 0.0,
+    "source_balance_residual_max_kw": 1.1368683772161603e-13,
+    "p2p_balance_residual_max_kw": 0.0,
+    "device_bound_violation_max": 0.0,
+    "grid_export_max_kw": 0.0,
+    "unmet_energy_mean_kwh": 0.0,
+    "dr_statistics_by_microgrid": {
+      "mg1": {
+        "flexible_load_energy_kwh_mean": 562.3102937936783,
+        "projection_rate_mean": 0.0
+      },
+      "mg2": {
+        "flexible_load_energy_kwh_mean": 0.0,
+        "projection_rate_mean": 0.0
+      },
+      "mg3": {
+        "flexible_load_energy_kwh_mean": 252.57426667762596,
+        "projection_rate_mean": 0.0
+      }
+    },
+    "physical_profit_mean_by_microgrid": {
+      "mg1": -359.1537307010691,
+      "mg2": -96.03801860715038,
+      "mg3": -604.6500123062964
+    },
+    "p2p": {
+      "total_energy_mean_kwh": 1079.3942278668503,
+      "pair_energy_mean_kwh": {
+        "mg1_to_mg2": 232.7238995032769,
+        "mg1_to_mg3": 67.8235349937763,
+        "mg2_to_mg1": 323.71204588378987,
+        "mg2_to_mg3": 437.64716694154316,
+        "mg3_to_mg1": 0.26683389048251027,
+        "mg3_to_mg2": 17.22074665398168
+      },
+      "utilization": null,
+      "ess_offer": {
+        "offer_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "accepted_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "unmatched_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "uncapped_offer_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "projection_reduction_mean_kwh": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "energy_acceptance_rate_by_microgrid": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "any_fill_rate_by_microgrid": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "full_fill_rate_by_microgrid": {
+          "mg1": 0.0,
+          "mg2": 0.0,
+          "mg3": 0.0
+        },
+        "energy_acceptance_rate": 0.0
+      }
+    },
+    "ess": {
+      "throughput_mean_kwh": {
+        "mg1": 0.0,
+        "mg2": 0.0,
+        "mg3": 0.0
+      },
+      "terminal_soc_mean": {
+        "mg1": 0.1,
+        "mg2": 0.1,
+        "mg3": 0.1
+      }
+    },
+    "grid": {
+      "import_mean_kwh": {
+        "mg1": 535.4637458077156,
+        "mg2": 457.53347734848006,
+        "mg3": 804.2243111528401
+      },
+      "export_mean_kwh": {
+        "mg1": 0.0,
+        "mg2": 0.0,
+        "mg3": 0.0
+      },
+      "net_cost_mean": {
+        "mg1": 300.5199722129247,
+        "mg2": 261.3878430016395,
+        "mg3": 402.8917418191101
+      }
+    },
+    "metrics_schema_version": "service_metrics_v2",
+    "service_metrics": {
+      "metrics_schema_version": "service_metrics_v2",
+      "days_count": 55,
+      "data_complete_day_count": 55,
+      "data_complete_day_rate": 1.0,
+      "missing_fields": [],
+      "strict_feasible_day_count": 10,
+      "strict_feasible_day_denominator": 55,
+      "strict_feasible_day_rate": 0.18181818181818182,
+      "unmet_energy_total_kwh": 0.0,
+      "unmet_energy_mean_kwh": 0.0,
+      "unmet_load_day_count": 0,
+      "unmet_load_day_rate": 0.0,
+      "dr_supply_infeasible_day_count": 0,
+      "dr_supply_infeasible_day_rate": 0.0,
+      "hvac_comfort_success_count": 155,
+      "hvac_comfort_opportunity_count": 480,
+      "hvac_comfort_rate": 0.3229166666666667,
+      "hvac_all_boundary_success_count": 843,
+      "hvac_all_boundary_count": 1320,
+      "hvac_all_boundary_comfort_rate": 0.6386363636363637,
+      "hvac_comfort_violation_degree_hours": 1229.5190723204844,
+      "hvac_terminal_joint_success_rate": null,
+      "mill_production_t": 1287.0000162863728,
+      "mill_consumption_required_t": 1287.0000000000002,
+      "mill_actual_consumption_t": 1287.0000000000002,
+      "mill_downstream_unserved_t": 0.0,
+      "mill_production_coverage_ratio": 1.000000012654524,
+      "mill_production_completion_rate": 1.000000012654524,
+      "mill_downstream_service_completion_rate": 1.0,
+      "mill_terminal_success_rate": null,
+      "ev_departure_count": 165,
+      "ev_completed_group_count": 165,
+      "ev_departure_shortfall_total_kwh": 0.0,
+      "ev_departure_success_rate": 1.0
+    },
+    "strict_feasible_day_rate": 0.18181818181818182,
+    "hvac_terminal_joint_success_rate": null,
+    "hvac_comfort_rate": 0.3229166666666667,
+    "mill_terminal_success_rate": null,
+    "mill_production_completion_rate": 1.000000012654524,
+    "mill_production_coverage_ratio": 1.000000012654524,
+    "mill_downstream_service_completion_rate": 1.0,
+    "mill_terminal_or_production_success_rate": 1.000000012654524,
+    "ev_departure_success_rate": 1.0,
+    "mg2_projection_rate": 0.0,
+    "mg3_projection_rate": 0.0,
+    "policy_definition": {
+      "name": "deterministic_rule_based_dr_reference",
+      "ess": "neutral dispatch (raw action 0)",
+      "mg1": "constant mill duty balancing downstream consumption",
+      "mg2": "zero requested HVAC power with minimum comfort projection",
+      "mg3": "immediate charging until departure SOC target"
+    },
+    "deterministic_policy": true
+  },
+  "paired_daily": [
+    {
+      "day": "2018-01-28",
+      "matd3_profit": -316.90617696738116,
+      "idle_profit": -415.9352674553398,
+      "dr_reference_profit": -408.95686746253875,
+      "matd3_terminal_soc": {
+        "mg1": 0.7503031855507745,
+        "mg2": 0.8949433948857352,
+        "mg3": 0.5819807351217512
+      },
+      "independent_milp_profit": -814.3038016326333,
+      "cooperative_milp_profit": -231.76354077536536,
+      "matd3_cooperation_surplus": 497.3976246652521,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 483.38400699685263
+    },
+    {
+      "day": "2018-01-29",
+      "matd3_profit": -452.2141301716271,
+      "idle_profit": -727.5876794526271,
+      "dr_reference_profit": -724.8973761741341,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000030199734429,
+        "mg2": 0.10000000345634061,
+        "mg3": 0.10010602951944673
+      },
+      "independent_milp_profit": -823.5242795590646,
+      "cooperative_milp_profit": -270.83342800279974,
+      "matd3_cooperation_surplus": 371.31014938743743,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 728.9476091250023
+    },
+    {
+      "day": "2018-01-30",
+      "matd3_profit": -1591.9878820711892,
+      "idle_profit": -1675.0399280959623,
+      "dr_reference_profit": -1717.861643457446,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000034141397,
+        "mg2": 0.10000384266146811,
+        "mg3": 0.10000002601514535
+      },
+      "independent_milp_profit": -1569.7427245878764,
+      "cooperative_milp_profit": -1348.618674519879,
+      "matd3_cooperation_surplus": -22.245157483312823,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 2008.8152806614041
+    },
+    {
+      "day": "2018-01-31",
+      "matd3_profit": -1885.6552400264484,
+      "idle_profit": -1989.556224962344,
+      "dr_reference_profit": -2027.6888227985341,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000033462221,
+        "mg2": 0.10000484236574157,
+        "mg3": 0.10000003183705504
+      },
+      "independent_milp_profit": -1695.7155994886525,
+      "cooperative_milp_profit": -1669.7224680468412,
+      "matd3_cooperation_surplus": -189.93964053779587,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 2360.3167975927768
+    },
+    {
+      "day": "2018-02-24",
+      "matd3_profit": -366.29688363224375,
+      "idle_profit": -455.26542477210296,
+      "dr_reference_profit": -466.87154109779385,
+      "matd3_terminal_soc": {
+        "mg1": 0.5278403450089375,
+        "mg2": 0.8252737613786038,
+        "mg3": 0.4213897097007561
+      },
+      "independent_milp_profit": -1034.6113772661267,
+      "cooperative_milp_profit": -309.41730160949135,
+      "matd3_cooperation_surplus": 668.314493633883,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 577.5233900684132
+    },
+    {
+      "day": "2018-02-25",
+      "matd3_profit": -362.3282246788207,
+      "idle_profit": -744.2991799414468,
+      "dr_reference_profit": -702.9600794877862,
+      "matd3_terminal_soc": {
+        "mg1": 0.10007687173130496,
+        "mg2": 0.10000000000036037,
+        "mg3": 0.10000000010712769
+      },
+      "independent_milp_profit": -849.564313260507,
+      "cooperative_milp_profit": -210.63294195765027,
+      "matd3_cooperation_surplus": 487.2360885816863,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 484.80822874707275
+    },
+    {
+      "day": "2018-02-26",
+      "matd3_profit": -996.5139813233696,
+      "idle_profit": -1094.4078866043767,
+      "dr_reference_profit": -1123.1708396196477,
+      "matd3_terminal_soc": {
+        "mg1": 0.34900832729332193,
+        "mg2": 0.7793454271830068,
+        "mg3": 0.49915752815921655
+      },
+      "independent_milp_profit": -1568.1926753645303,
+      "cooperative_milp_profit": -809.3489434227063,
+      "matd3_cooperation_surplus": 571.6786940411606,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1279.7956743978527
+    },
+    {
+      "day": "2018-02-27",
+      "matd3_profit": -932.1820745866889,
+      "idle_profit": -1025.9832511029351,
+      "dr_reference_profit": -1048.2158592604287,
+      "matd3_terminal_soc": {
+        "mg1": 0.8240054427873622,
+        "mg2": 0.8999834614796588,
+        "mg3": 0.6970877143885313
+      },
+      "independent_milp_profit": -1407.7616848704947,
+      "cooperative_milp_profit": -702.1502487602909,
+      "matd3_cooperation_surplus": 475.5796102838058,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1129.6051003731766
+    },
+    {
+      "day": "2018-02-28",
+      "matd3_profit": -497.2235011267625,
+      "idle_profit": -820.9023679160266,
+      "dr_reference_profit": -853.5836077800982,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000631838135,
+        "mg2": 0.16410657610437476,
+        "mg3": 0.1003413171828058
+      },
+      "independent_milp_profit": -1911.2660387126107,
+      "cooperative_milp_profit": -377.54955296912385,
+      "matd3_cooperation_surplus": 1414.042537585848,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 768.6406590688263
+    },
+    {
+      "day": "2018-03-28",
+      "matd3_profit": -80.60854398590685,
+      "idle_profit": -357.738143783313,
+      "dr_reference_profit": -346.0183309798465,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000153024938242,
+        "mg2": 0.4720574684396669,
+        "mg3": 0.3868190361355588
+      },
+      "independent_milp_profit": -932.3409396314333,
+      "cooperative_milp_profit": -43.40804250400168,
+      "matd3_cooperation_surplus": 851.7323956455265,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 338.05194180301925
+    },
+    {
+      "day": "2018-03-29",
+      "matd3_profit": -569.618877183181,
+      "idle_profit": -781.8084335381982,
+      "dr_reference_profit": -758.308723151954,
+      "matd3_terminal_soc": {
+        "mg1": 0.1000010063515315,
+        "mg2": 0.2535491860784548,
+        "mg3": 0.1011292472671986
+      },
+      "independent_milp_profit": -1011.9088800883053,
+      "cooperative_milp_profit": -392.1235628251213,
+      "matd3_cooperation_surplus": 442.2900029051243,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 739.863315030449
+    },
+    {
+      "day": "2018-03-30",
+      "matd3_profit": -716.854640690024,
+      "idle_profit": -984.0140264140873,
+      "dr_reference_profit": -986.2561624877154,
+      "matd3_terminal_soc": {
+        "mg1": 0.10017305771415766,
+        "mg2": 0.10000000000557129,
+        "mg3": 0.1001069617514437
+      },
+      "independent_milp_profit": -864.7784815539754,
+      "cooperative_milp_profit": -627.9514517114715,
+      "matd3_cooperation_surplus": 147.92384086395145,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 995.3911212308395
+    },
+    {
+      "day": "2018-03-31",
+      "matd3_profit": -460.32348130397,
+      "idle_profit": -511.0084427520495,
+      "dr_reference_profit": -508.6481879768086,
+      "matd3_terminal_soc": {
+        "mg1": 0.8999913555828652,
+        "mg2": 0.899999864088688,
+        "mg3": 0.8999999984142328
+      },
+      "independent_milp_profit": -637.7870600401676,
+      "cooperative_milp_profit": -374.5354526493172,
+      "matd3_cooperation_surplus": 177.46357873619758,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 648.107379920734
+    },
+    {
+      "day": "2018-04-26",
+      "matd3_profit": -1096.610045519967,
+      "idle_profit": -1496.287361128428,
+      "dr_reference_profit": -1512.353054132885,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000029747740019,
+        "mg2": 0.10002144963569871,
+        "mg3": 0.10010230064726244
+      },
+      "independent_milp_profit": -1334.8865344210612,
+      "cooperative_milp_profit": -923.7232089399627,
+      "matd3_cooperation_surplus": 238.27648890109435,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1322.0794334624845
+    },
+    {
+      "day": "2018-04-27",
+      "matd3_profit": -795.8726653101912,
+      "idle_profit": -1107.275990205778,
+      "dr_reference_profit": -1116.353863049707,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000000502454,
+        "mg2": 0.10000001497239976,
+        "mg3": 0.10000020779579667
+      },
+      "independent_milp_profit": -972.60978399958,
+      "cooperative_milp_profit": -656.5053467931143,
+      "matd3_cooperation_surplus": 176.7371186893888,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1033.3390108491797
+    },
+    {
+      "day": "2018-04-28",
+      "matd3_profit": -512.951460066723,
+      "idle_profit": -560.8763346188247,
+      "dr_reference_profit": -568.490052353747,
+      "matd3_terminal_soc": {
+        "mg1": 0.8999999986228666,
+        "mg2": 0.8999999998393442,
+        "mg3": 0.899999999013095
+      },
+      "independent_milp_profit": -811.1249671908133,
+      "cooperative_milp_profit": -432.9232086133969,
+      "matd3_cooperation_surplus": 298.1735071240903,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 706.5486847860734
+    },
+    {
+      "day": "2018-04-29",
+      "matd3_profit": -236.81692356384085,
+      "idle_profit": -471.94764012560466,
+      "dr_reference_profit": -504.4010125237457,
+      "matd3_terminal_soc": {
+        "mg1": 0.10010344259514999,
+        "mg2": 0.10004776767778464,
+        "mg3": 0.10009549149992625
+      },
+      "independent_milp_profit": -601.2975554294926,
+      "cooperative_milp_profit": -91.24055809291178,
+      "matd3_cooperation_surplus": 364.48063186565173,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 315.3328832560246
+    },
+    {
+      "day": "2018-04-30",
+      "matd3_profit": -598.2091372170238,
+      "idle_profit": -908.17615964745,
+      "dr_reference_profit": -929.5767962434669,
+      "matd3_terminal_soc": {
+        "mg1": 0.10017344349232828,
+        "mg2": 0.10014659574686949,
+        "mg3": 0.1000000051183344
+      },
+      "independent_milp_profit": -1064.5346498169995,
+      "cooperative_milp_profit": -536.3282730854909,
+      "matd3_cooperation_surplus": 466.3255125999757,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 916.4581835736847
+    },
+    {
+      "day": "2018-05-28",
+      "matd3_profit": -727.4092783975245,
+      "idle_profit": -990.4228544280118,
+      "dr_reference_profit": -1021.3097881272063,
+      "matd3_terminal_soc": {
+        "mg1": 0.13571817914616413,
+        "mg2": 0.5643806437055152,
+        "mg3": 0.3248729801986194
+      },
+      "independent_milp_profit": -1237.0078051678338,
+      "cooperative_milp_profit": -636.9822479093186,
+      "matd3_cooperation_surplus": 509.59852677030926,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 941.6862022246803
+    },
+    {
+      "day": "2018-05-29",
+      "matd3_profit": -822.1112785422937,
+      "idle_profit": -991.2827753964547,
+      "dr_reference_profit": -1013.7940271766892,
+      "matd3_terminal_soc": {
+        "mg1": 0.10016089422943145,
+        "mg2": 0.10000000005242964,
+        "mg3": 0.10000000000404244
+      },
+      "independent_milp_profit": -1026.7803587907254,
+      "cooperative_milp_profit": -545.0215484527596,
+      "matd3_cooperation_surplus": 204.66908024843167,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 923.6922072125203
+    },
+    {
+      "day": "2018-05-30",
+      "matd3_profit": -769.2733056436402,
+      "idle_profit": -1138.05244147036,
+      "dr_reference_profit": -1146.260836759783,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000000568786,
+        "mg2": 0.10000002099119605,
+        "mg3": 0.10000000018905199
+      },
+      "independent_milp_profit": -1210.9738202494343,
+      "cooperative_milp_profit": -647.8007195094821,
+      "matd3_cooperation_surplus": 441.70051460579407,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1010.7973160932759
+    },
+    {
+      "day": "2018-05-31",
+      "matd3_profit": -1078.5581170559346,
+      "idle_profit": -1452.7070105233431,
+      "dr_reference_profit": -1452.210276010898,
+      "matd3_terminal_soc": {
+        "mg1": 0.1000000000067437,
+        "mg2": 0.10000000018900812,
+        "mg3": 0.10000000002115914
+      },
+      "independent_milp_profit": -1412.2296233094414,
+      "cooperative_milp_profit": -931.7127962496988,
+      "matd3_cooperation_surplus": 333.6715062535068,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1303.8559039974896
+    },
+    {
+      "day": "2018-06-26",
+      "matd3_profit": -238.34051007984993,
+      "idle_profit": -320.6870764353736,
+      "dr_reference_profit": -287.0403561129762,
+      "matd3_terminal_soc": {
+        "mg1": 0.7956791980733915,
+        "mg2": 0.8999999999977416,
+        "mg3": 0.805368181296473
+      },
+      "independent_milp_profit": -845.8578129284515,
+      "cooperative_milp_profit": -209.07549457473013,
+      "matd3_cooperation_surplus": 607.5173028486015,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 466.8340961220038
+    },
+    {
+      "day": "2018-06-27",
+      "matd3_profit": -250.29344005088274,
+      "idle_profit": -388.3827825072103,
+      "dr_reference_profit": -327.2096607022397,
+      "matd3_terminal_soc": {
+        "mg1": 0.898809578447152,
+        "mg2": 0.8977926862261518,
+        "mg3": 0.8999999945950709
+      },
+      "independent_milp_profit": -871.3596494485035,
+      "cooperative_milp_profit": -173.61747787064536,
+      "matd3_cooperation_surplus": 621.0662093976208,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 462.58234443793896
+    },
+    {
+      "day": "2018-06-28",
+      "matd3_profit": -955.894997776613,
+      "idle_profit": -1165.4952573887838,
+      "dr_reference_profit": -1159.3581574078207,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000014046265586,
+        "mg2": 0.10000000013682132,
+        "mg3": 0.10000002512436362
+      },
+      "independent_milp_profit": -1139.1656135742066,
+      "cooperative_milp_profit": -642.5736814627103,
+      "matd3_cooperation_surplus": 183.27061579759368,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1086.5865483005014
+    },
+    {
+      "day": "2018-06-29",
+      "matd3_profit": -667.4764666109867,
+      "idle_profit": -996.5857461906784,
+      "dr_reference_profit": -984.2038765000093,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000000557746,
+        "mg2": 0.10000007659982024,
+        "mg3": 0.10000000430511927
+      },
+      "independent_milp_profit": -1214.278869840071,
+      "cooperative_milp_profit": -576.8946047555073,
+      "matd3_cooperation_surplus": 546.8024032290842,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 926.8761850222584
+    },
+    {
+      "day": "2018-06-30",
+      "matd3_profit": -306.42860679037983,
+      "idle_profit": -393.0752284322069,
+      "dr_reference_profit": -382.25249150427385,
+      "matd3_terminal_soc": {
+        "mg1": 0.8995670114977777,
+        "mg2": 0.8666708112902298,
+        "mg3": 0.8999988376886761
+      },
+      "independent_milp_profit": -677.6678217585984,
+      "cooperative_milp_profit": -237.59937918963405,
+      "matd3_cooperation_surplus": 371.23921496821856,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 466.17410661703383
+    },
+    {
+      "day": "2018-07-28",
+      "matd3_profit": -761.653520259691,
+      "idle_profit": -1042.0670619143732,
+      "dr_reference_profit": -1079.6324327642133,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000001094059,
+        "mg2": 0.10000051108359807,
+        "mg3": 0.1000000304196751
+      },
+      "independent_milp_profit": -942.4224997769951,
+      "cooperative_milp_profit": -599.8909865827711,
+      "matd3_cooperation_surplus": 180.76897951730405,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 867.4578092923899
+    },
+    {
+      "day": "2018-07-29",
+      "matd3_profit": -473.26425630816834,
+      "idle_profit": -889.1518702821431,
+      "dr_reference_profit": -873.4074725705269,
+      "matd3_terminal_soc": {
+        "mg1": 0.10006120373331273,
+        "mg2": 0.10000006542834705,
+        "mg3": 0.10006886410587605
+      },
+      "independent_milp_profit": -726.2788878480053,
+      "cooperative_milp_profit": -350.41234909470717,
+      "matd3_cooperation_surplus": 253.01463153983696,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 592.0289015126599
+    },
+    {
+      "day": "2018-07-30",
+      "matd3_profit": -909.9969007070907,
+      "idle_profit": -1313.4903636732383,
+      "dr_reference_profit": -1322.1180620568418,
+      "matd3_terminal_soc": {
+        "mg1": 0.100119514426851,
+        "mg2": 0.10000000266631213,
+        "mg3": 0.10000000001286204
+      },
+      "independent_milp_profit": -1280.6797008207293,
+      "cooperative_milp_profit": -777.9059504885672,
+      "matd3_cooperation_surplus": 370.68280011363856,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1160.1911476793723
+    },
+    {
+      "day": "2018-07-31",
+      "matd3_profit": -845.8505315897143,
+      "idle_profit": -1239.2715777295946,
+      "dr_reference_profit": -1260.9158879835038,
+      "matd3_terminal_soc": {
+        "mg1": 0.10008462007672478,
+        "mg2": 0.10000000298467998,
+        "mg3": 0.10000000002853995
+      },
+      "independent_milp_profit": -1269.0539607335863,
+      "cooperative_milp_profit": -701.8645052964421,
+      "matd3_cooperation_surplus": 423.2034291438721,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1082.2970842905734
+    },
+    {
+      "day": "2018-08-28",
+      "matd3_profit": -337.83063533391254,
+      "idle_profit": -433.56929046143637,
+      "dr_reference_profit": -452.40359389248874,
+      "matd3_terminal_soc": {
+        "mg1": 0.8999999987763413,
+        "mg2": 0.8999999999990324,
+        "mg3": 0.8999999999620004
+      },
+      "independent_milp_profit": -962.2570323026405,
+      "cooperative_milp_profit": -240.53809111232763,
+      "matd3_cooperation_surplus": 624.4263969687279,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 534.8902948412738
+    },
+    {
+      "day": "2018-08-29",
+      "matd3_profit": -266.3600284333067,
+      "idle_profit": -408.1520771846167,
+      "dr_reference_profit": -420.4565389697076,
+      "matd3_terminal_soc": {
+        "mg1": 0.36258738875009155,
+        "mg2": 0.8670733068536707,
+        "mg3": 0.3460396751375535
+      },
+      "independent_milp_profit": -913.4721892337229,
+      "cooperative_milp_profit": -170.31982645003978,
+      "matd3_cooperation_surplus": 647.1121608004162,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 460.88270764487925
+    },
+    {
+      "day": "2018-08-30",
+      "matd3_profit": -395.04923545267206,
+      "idle_profit": -657.5218328092888,
+      "dr_reference_profit": -664.435344367483,
+      "matd3_terminal_soc": {
+        "mg1": 0.11439533559013454,
+        "mg2": 0.5215011902943854,
+        "mg3": 0.2248063858120039
+      },
+      "independent_milp_profit": -880.707996885521,
+      "cooperative_milp_profit": -309.0716739661699,
+      "matd3_cooperation_surplus": 485.6587614328489,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 607.219172347653
+    },
+    {
+      "day": "2018-08-31",
+      "matd3_profit": -899.4282874761932,
+      "idle_profit": -1011.7389547043667,
+      "dr_reference_profit": -1041.759943212086,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000012474696737,
+        "mg2": 0.10000000249574027,
+        "mg3": 0.10000000000813176
+      },
+      "independent_milp_profit": -1447.8807373683433,
+      "cooperative_milp_profit": -653.039606900016,
+      "matd3_cooperation_surplus": 548.4524498921501,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1017.2970459530356
+    },
+    {
+      "day": "2018-09-26",
+      "matd3_profit": -221.94788923863427,
+      "idle_profit": -345.23121075352554,
+      "dr_reference_profit": -250.32481063793574,
+      "matd3_terminal_soc": {
+        "mg1": 0.8999999985917664,
+        "mg2": 0.8999999975763776,
+        "mg3": 0.8999999994923575
+      },
+      "independent_milp_profit": -1120.5196092724802,
+      "cooperative_milp_profit": -182.19822006446174,
+      "matd3_cooperation_surplus": 898.571720033846,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 457.18985680772533
+    },
+    {
+      "day": "2018-09-27",
+      "matd3_profit": -586.191299530799,
+      "idle_profit": -1034.8304165553006,
+      "dr_reference_profit": -1067.4714371128282,
+      "matd3_terminal_soc": {
+        "mg1": 0.1000512829386662,
+        "mg2": 0.10000000017700961,
+        "mg3": 0.10006091833289571
+      },
+      "independent_milp_profit": -1098.128912150812,
+      "cooperative_milp_profit": -401.0018233935785,
+      "matd3_cooperation_surplus": 511.93761262001306,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 721.0969314240836
+    },
+    {
+      "day": "2018-09-28",
+      "matd3_profit": -2264.3877685189436,
+      "idle_profit": -2407.6670708679776,
+      "dr_reference_profit": -2446.681313662217,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000456255466,
+        "mg2": 0.10000262425879759,
+        "mg3": 0.10000000650698514
+      },
+      "independent_milp_profit": -2354.1456720211863,
+      "cooperative_milp_profit": -2032.8132690356388,
+      "matd3_cooperation_surplus": 89.7579035022427,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 2496.282388560541
+    },
+    {
+      "day": "2018-09-29",
+      "matd3_profit": -1092.8724981869636,
+      "idle_profit": -1572.999340306383,
+      "dr_reference_profit": -1576.4377768533345,
+      "matd3_terminal_soc": {
+        "mg1": 0.10002029584038254,
+        "mg2": 0.10000000148401972,
+        "mg3": 0.10000000000939063
+      },
+      "independent_milp_profit": -1198.4578817369852,
+      "cooperative_milp_profit": -895.885919289205,
+      "matd3_cooperation_surplus": 105.58538355002156,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1190.7804187352453
+    },
+    {
+      "day": "2018-09-30",
+      "matd3_profit": -393.66844595158796,
+      "idle_profit": -742.4315338987202,
+      "dr_reference_profit": -752.6990901053532,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000039213322,
+        "mg2": 0.20446111920329468,
+        "mg3": 0.10000159429686091
+      },
+      "independent_milp_profit": -923.7732719474449,
+      "cooperative_milp_profit": -293.21642333859745,
+      "matd3_cooperation_surplus": 530.1048259958569,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 502.4579792862784
+    },
+    {
+      "day": "2018-10-27",
+      "matd3_profit": -400.2722014984987,
+      "idle_profit": -824.54530751673,
+      "dr_reference_profit": -796.8768967505251,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000005256829904,
+        "mg2": 0.10000938884859766,
+        "mg3": 0.10000001690335558
+      },
+      "independent_milp_profit": -974.3622694240054,
+      "cooperative_milp_profit": -258.8155721736905,
+      "matd3_cooperation_surplus": 574.0900679255067,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 506.128091817952
+    },
+    {
+      "day": "2018-10-28",
+      "matd3_profit": -442.040530242622,
+      "idle_profit": -752.2945595506743,
+      "dr_reference_profit": -784.6433621802934,
+      "matd3_terminal_soc": {
+        "mg1": 0.10002396344265885,
+        "mg2": 0.10000852402381705,
+        "mg3": 0.10147528598924421
+      },
+      "independent_milp_profit": -1049.2929347290153,
+      "cooperative_milp_profit": -350.66990822652826,
+      "matd3_cooperation_surplus": 607.2524044863933,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 573.4859533933367
+    },
+    {
+      "day": "2018-10-29",
+      "matd3_profit": -949.3332030720895,
+      "idle_profit": -1200.9928043085279,
+      "dr_reference_profit": -1202.1766482137139,
+      "matd3_terminal_soc": {
+        "mg1": 0.10059480101650933,
+        "mg2": 0.2946931823929778,
+        "mg3": 0.2270097119182683
+      },
+      "independent_milp_profit": -1716.2091616271966,
+      "cooperative_milp_profit": -835.8426574814821,
+      "matd3_cooperation_surplus": 766.8759585551071,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1214.7447749214327
+    },
+    {
+      "day": "2018-10-30",
+      "matd3_profit": -987.9143203438529,
+      "idle_profit": -1311.5934091902923,
+      "dr_reference_profit": -1332.5581756991514,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000815635862334,
+        "mg2": 0.10000250465147437,
+        "mg3": 0.1388984528609264
+      },
+      "independent_milp_profit": -1802.2723436201463,
+      "cooperative_milp_profit": -834.2748966631312,
+      "matd3_cooperation_surplus": 814.3580232762935,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1208.4756021891415
+    },
+    {
+      "day": "2018-10-31",
+      "matd3_profit": -1015.8620620013684,
+      "idle_profit": -1416.357704251815,
+      "dr_reference_profit": -1469.5058846052227,
+      "matd3_terminal_soc": {
+        "mg1": 0.10009287483836295,
+        "mg2": 0.10000000675689254,
+        "mg3": 0.10000000096187822
+      },
+      "independent_milp_profit": -1554.5814927929137,
+      "cooperative_milp_profit": -866.4579705572085,
+      "matd3_cooperation_surplus": 538.7194307915453,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1251.1567610733462
+    },
+    {
+      "day": "2018-11-26",
+      "matd3_profit": -2864.087800896447,
+      "idle_profit": -2903.4087282147752,
+      "dr_reference_profit": -3004.679837966318,
+      "matd3_terminal_soc": {
+        "mg1": 0.10002136493196191,
+        "mg2": 0.10000000000028274,
+        "mg3": 0.10000001143458676
+      },
+      "independent_milp_profit": -2993.4628002195404,
+      "cooperative_milp_profit": -2635.4013761516558,
+      "matd3_cooperation_surplus": 129.37499932309356,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 3163.482091697361
+    },
+    {
+      "day": "2018-11-27",
+      "matd3_profit": -2682.6632426426836,
+      "idle_profit": -2879.799880600622,
+      "dr_reference_profit": -2949.1911317650593,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000001084827,
+        "mg2": 0.1000000002632469,
+        "mg3": 0.10000001182279954
+      },
+      "independent_milp_profit": -2597.996338686474,
+      "cooperative_milp_profit": -2492.4673057754935,
+      "matd3_cooperation_surplus": -84.66690395620981,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 3057.10976210456
+    },
+    {
+      "day": "2018-11-28",
+      "matd3_profit": -2524.875678281469,
+      "idle_profit": -2625.743493921983,
+      "dr_reference_profit": -2685.6066902877606,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000017899562,
+        "mg2": 0.1000000023892803,
+        "mg3": 0.10000001904768628
+      },
+      "independent_milp_profit": -2349.335222915892,
+      "cooperative_milp_profit": -2345.4307889915553,
+      "matd3_cooperation_surplus": -175.54045536557715,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 2906.473843887422
+    },
+    {
+      "day": "2018-11-29",
+      "matd3_profit": -2453.6083431911356,
+      "idle_profit": -2603.9923500451646,
+      "dr_reference_profit": -2677.7260370364916,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000000024620187,
+        "mg2": 0.10000000001967044,
+        "mg3": 0.10000000000306337
+      },
+      "independent_milp_profit": -2306.6370695015753,
+      "cooperative_milp_profit": -2295.0170091589243,
+      "matd3_cooperation_surplus": -146.97127368956035,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 2847.179343004333
+    },
+    {
+      "day": "2018-11-30",
+      "matd3_profit": -1626.0744399896864,
+      "idle_profit": -1746.7274623695478,
+      "dr_reference_profit": -1815.8759966440962,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000003462302454,
+        "mg2": 0.10000621697678855,
+        "mg3": 0.10000001331414016
+      },
+      "independent_milp_profit": -1527.2434771564212,
+      "cooperative_milp_profit": -1490.4483479285589,
+      "matd3_cooperation_surplus": -98.83096283326518,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1961.8164538321237
+    },
+    {
+      "day": "2018-12-27",
+      "matd3_profit": -345.4114619090392,
+      "idle_profit": -428.5454060744196,
+      "dr_reference_profit": -392.0643245238122,
+      "matd3_terminal_soc": {
+        "mg1": 0.8999999890199252,
+        "mg2": 0.8999999998822993,
+        "mg3": 0.8999999996853554
+      },
+      "independent_milp_profit": -1911.2619215731559,
+      "cooperative_milp_profit": -323.93773395033816,
+      "matd3_cooperation_surplus": 1565.8504596641167,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 593.0053116756362
+    },
+    {
+      "day": "2018-12-28",
+      "matd3_profit": -260.54589766744476,
+      "idle_profit": -365.00645107150547,
+      "dr_reference_profit": -311.79797729104735,
+      "matd3_terminal_soc": {
+        "mg1": 0.8820016364380854,
+        "mg2": 0.8999999999663567,
+        "mg3": 0.8644054880993719
+      },
+      "independent_milp_profit": -1464.0990685635918,
+      "cooperative_milp_profit": -244.00344275814774,
+      "matd3_cooperation_surplus": 1203.553170896147,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 514.9277475043677
+    },
+    {
+      "day": "2018-12-29",
+      "matd3_profit": -114.19279519397908,
+      "idle_profit": -235.75658829310095,
+      "dr_reference_profit": -164.7079970596108,
+      "matd3_terminal_soc": {
+        "mg1": 0.8459299073277196,
+        "mg2": 0.8999999888721624,
+        "mg3": 0.7475594816007867
+      },
+      "independent_milp_profit": -1013.5404032069152,
+      "cooperative_milp_profit": -97.95187356896874,
+      "matd3_cooperation_surplus": 899.3476080129361,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 313.9948814514917
+    },
+    {
+      "day": "2018-12-30",
+      "matd3_profit": -243.2028647616387,
+      "idle_profit": -331.60634592826045,
+      "dr_reference_profit": -380.78954672181925,
+      "matd3_terminal_soc": {
+        "mg1": 0.10011131154700832,
+        "mg2": 0.10000000004511425,
+        "mg3": 0.10000000000540739
+      },
+      "independent_milp_profit": -982.5008715186826,
+      "cooperative_milp_profit": -3.771164780379962,
+      "matd3_cooperation_surplus": 739.2980067570439,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 303.0152708348053
+    },
+    {
+      "day": "2018-12-31",
+      "matd3_profit": -895.3126697712523,
+      "idle_profit": -980.0835565361847,
+      "dr_reference_profit": -1036.1003875247493,
+      "matd3_terminal_soc": {
+        "mg1": 0.10000012813603233,
+        "mg2": 0.10000356148633305,
+        "mg3": 0.1000000000047354
+      },
+      "independent_milp_profit": -1049.2286378566891,
+      "cooperative_milp_profit": -627.8395158099017,
+      "matd3_cooperation_surplus": 153.91596808543682,
+      "shapley_allocation_valid": true,
+      "generalized_reference_cost": 1092.654495933456
+    }
+  ],
+  "oracle_replay": {
+    "day_count": 55,
+    "exact_replay_day_count": 0,
+    "exact_replay_day_rate": 0.0,
+    "allocation_replay_gap_max_abs_kw_mean": 130.43657389283163,
+    "profit_gap_mean": -138.5148420833171,
+    "interpretation": "source_priority_free_allocation may differ from the deterministic online proportional clearing; a nonzero gap is reported, not repaired"
+  },
+  "joint_team_profit_mean": -827.9792487058972,
+  "joint_team_profit_std": 664.6823548797032,
+  "cooperation_surplus_mean": 443.85848015723474,
+  "cooperation_surplus_std": 353.9747101756835,
+  "cooperation_surplus_median": 466.3255125999757,
+  "cooperation_gain_pct_mean": 40.07051782500468,
+  "cooperation_gain_pct_std": 26.997056664306996,
+  "matd3_cooperation_surplus_mean": 443.85848015723474,
+  "matd3_cooperation_surplus_std": 353.9747101756835,
+  "matd3_cooperation_surplus_median": 466.3255125999757,
+  "matd3_cooperation_gain_pct_mean": 40.07051782500468,
+  "matd3_cooperation_gain_pct_std": 26.997056664306996,
+  "positive_cooperation_surplus_rate": 0.8909090909090909,
+  "cooperative_value_capture_ratio": 0.7621545548302039,
+  "res_utilization_mean_pct": 80.64560941312284,
+  "res_utilization_std_pct": 16.315275821847173,
+  "independent_res_utilization_mean_pct": 64.54182997795786,
+  "cooperative_milp_res_utilization_mean_pct": 84.84517856242316,
+  "independent_curtailment_mean_kwh": 2176.4086229350382,
+  "joint_curtailment_mean_kwh": 1341.9155627140426,
+  "cooperative_milp_curtailment_mean_kwh": 1097.0155068873255,
+  "curtailment_reduction_mean_kwh": 834.493060220996,
+  "curtailment_reduction_mean_pct": 55.047482295902746,
+  "soc_violation_rate": 0.0,
+  "power_balance_violation_rate": 0.0,
+  "p2p_balance_violation_rate": 0.0,
+  "milp_failure_count": 0,
+  "shapley_invalid_day_count": 0,
+  "shapley_valid_day_count": 55,
+  "physical_profit_mean_by_microgrid": {
+    "mg1": -116.37839392156101,
+    "mg2": -128.2097205790311,
+    "mg3": -583.3911342053051
+  },
+  "physical_profit_std_by_microgrid": {
+    "mg1": 272.65990729333583,
+    "mg2": 608.9619039250995,
+    "mg3": 162.31931274694375
+  },
+  "independent_profit_mean_by_microgrid": {
+    "mg1": -284.88457018280144,
+    "mg2": -383.7408337625355,
+    "mg3": -603.2123249177951
+  },
+  "shapley_weight_mean_by_microgrid": {
+    "mg1": 0.3260630030760127,
+    "mg2": 0.4242668007195185,
+    "mg3": 0.249670196204469
+  },
+  "shapley_weight_std_by_microgrid": {
+    "mg1": 0.14955285208564867,
+    "mg2": 0.06641210060137898,
+    "mg3": 0.1174862934030955
+  },
+  "shapley_allocated_surplus_mean_by_microgrid": {
+    "mg1": 112.41745394993421,
+    "mg2": 204.9397214362117,
+    "mg3": 126.50130477108885
+  },
+  "shapley_settled_profit_mean_by_microgrid": {
+    "mg1": -172.46711623286723,
+    "mg2": -178.80111232632387,
+    "mg3": -476.7110201467061
+  },
+  "shapley_transfer_payment_mean_by_microgrid": {
+    "mg1": -56.08872231130622,
+    "mg2": -50.59139174729277,
+    "mg3": 106.680114058599
+  },
+  "shapley_transfer_payment_std_by_microgrid": {
+    "mg1": 190.62385458347734,
+    "mg2": 264.57300710307305,
+    "mg3": 99.38850064498796
+  },
+  "equal_settled_profit_mean_by_microgrid": {
+    "mg1": -136.9317434637232,
+    "mg2": -235.78800704345733,
+    "mg3": -455.2594981987167
+  },
+  "equal_transfer_payment_mean_by_microgrid": {
+    "mg1": -20.553349542162167,
+    "mg2": -107.57828646442617,
+    "mg3": 128.1316360065884
+  },
+  "equal_transfer_payment_std_by_microgrid": {
+    "mg1": 256.91141802405986,
+    "mg2": 305.8473628429409,
+    "mg3": 91.16346375836761
+  },
+  "shapley_ir_rate_by_microgrid": {
+    "mg1": 0.8909090909090909,
+    "mg2": 0.8909090909090909,
+    "mg3": 0.8909090909090909
+  },
+  "equal_ir_rate_by_microgrid": {
+    "mg1": 0.8909090909090909,
+    "mg2": 0.8909090909090909,
+    "mg3": 0.8909090909090909
+  },
+  "shapley_ir_rate_mg1": 0.8909090909090909,
+  "shapley_ir_rate_mg2": 0.8909090909090909,
+  "shapley_ir_rate_mg3": 0.8909090909090909,
+  "shapley_all_ir_satisfaction_rate": 0.8909090909090909,
+  "equal_all_ir_satisfaction_rate": 0.8909090909090909,
+  "shapley_budget_balance_max_error": 9.094947017729282e-13,
+  "cooperative_milp_profit_mean": -689.4644066225802,
+  "independent_milp_profit_mean": -1271.8377288631323,
+  "cooperative_milp_cooperation_surplus_mean": 582.3733222405518,
+  "cooperative_milp_cooperation_surplus_std": 320.87678326859543,
+  "cooperative_milp_cooperation_gain_pct_mean": 51.77772056806326,
+  "cooperative_milp_cooperation_gain_pct_std": 25.84326140916981,
+  "aggregation_method": "ratio_of_sums",
+  "monetary_tolerance": 1e-09,
+  "status": "ok",
+  "cooperative_value_capture_ratio_total": 0.7621545548302039,
+  "cooperative_value_capture_ratio_daily_mean": -0.582857224990189,
+  "cooperative_value_capture_ratio_daily_median": 0.7533549662171919,
+  "numerator_total": 24412.216408647902,
+  "denominator_total": 32030.532723230346,
+  "included_days": [
+    "2018-01-28",
+    "2018-01-29",
+    "2018-01-30",
+    "2018-01-31",
+    "2018-02-24",
+    "2018-02-25",
+    "2018-02-26",
+    "2018-02-27",
+    "2018-02-28",
+    "2018-03-28",
+    "2018-03-29",
+    "2018-03-30",
+    "2018-03-31",
+    "2018-04-26",
+    "2018-04-27",
+    "2018-04-28",
+    "2018-04-29",
+    "2018-04-30",
+    "2018-05-28",
+    "2018-05-29",
+    "2018-05-30",
+    "2018-05-31",
+    "2018-06-26",
+    "2018-06-27",
+    "2018-06-28",
+    "2018-06-29",
+    "2018-06-30",
+    "2018-07-28",
+    "2018-07-29",
+    "2018-07-30",
+    "2018-07-31",
+    "2018-08-28",
+    "2018-08-29",
+    "2018-08-30",
+    "2018-08-31",
+    "2018-09-26",
+    "2018-09-27",
+    "2018-09-28",
+    "2018-09-29",
+    "2018-09-30",
+    "2018-10-27",
+    "2018-10-28",
+    "2018-10-29",
+    "2018-10-30",
+    "2018-10-31",
+    "2018-11-26",
+    "2018-11-27",
+    "2018-11-28",
+    "2018-11-29",
+    "2018-11-30",
+    "2018-12-27",
+    "2018-12-28",
+    "2018-12-29",
+    "2018-12-30",
+    "2018-12-31"
+  ],
+  "excluded_days": [],
+  "daily_ratio_defined_days": [
+    "2018-01-28",
+    "2018-01-29",
+    "2018-01-30",
+    "2018-01-31",
+    "2018-02-24",
+    "2018-02-25",
+    "2018-02-26",
+    "2018-02-27",
+    "2018-02-28",
+    "2018-03-28",
+    "2018-03-29",
+    "2018-03-30",
+    "2018-03-31",
+    "2018-04-26",
+    "2018-04-27",
+    "2018-04-28",
+    "2018-04-29",
+    "2018-04-30",
+    "2018-05-28",
+    "2018-05-29",
+    "2018-05-30",
+    "2018-05-31",
+    "2018-06-26",
+    "2018-06-27",
+    "2018-06-28",
+    "2018-06-29",
+    "2018-06-30",
+    "2018-07-28",
+    "2018-07-29",
+    "2018-07-30",
+    "2018-07-31",
+    "2018-08-28",
+    "2018-08-29",
+    "2018-08-30",
+    "2018-08-31",
+    "2018-09-26",
+    "2018-09-27",
+    "2018-09-28",
+    "2018-09-29",
+    "2018-09-30",
+    "2018-10-27",
+    "2018-10-28",
+    "2018-10-29",
+    "2018-10-30",
+    "2018-10-31",
+    "2018-11-26",
+    "2018-11-27",
+    "2018-11-28",
+    "2018-11-29",
+    "2018-11-30",
+    "2018-12-27",
+    "2018-12-28",
+    "2018-12-29",
+    "2018-12-30",
+    "2018-12-31"
+  ],
+  "daily_ratio_defined_count": 55,
+  "coalition_value_ordering_error_days": [],
+  "coverage_rate": 1.0,
+  "service_reliability": {
+    "metrics_schema_version": "service_metrics_v2",
+    "days_count": 55,
+    "data_complete_day_count": 55,
+    "data_complete_day_rate": 1.0,
+    "missing_fields": [],
+    "strict_feasible_day_count": 24,
+    "strict_feasible_day_denominator": 55,
+    "strict_feasible_day_rate": 0.43636363636363634,
+    "unmet_energy_total_kwh": 0.0,
+    "unmet_energy_mean_kwh": 0.0,
+    "unmet_load_day_count": 0,
+    "unmet_load_day_rate": 0.0,
+    "dr_supply_infeasible_day_count": 0,
+    "dr_supply_infeasible_day_rate": 0.0,
+    "hvac_comfort_success_count": 445,
+    "hvac_comfort_opportunity_count": 480,
+    "hvac_comfort_rate": 0.9270833333333334,
+    "hvac_all_boundary_success_count": 1261,
+    "hvac_all_boundary_count": 1320,
+    "hvac_all_boundary_comfort_rate": 0.9553030303030303,
+    "hvac_comfort_violation_degree_hours": 40.18781660288204,
+    "hvac_terminal_joint_success_rate": null,
+    "mill_production_t": 977.1051505122017,
+    "mill_consumption_required_t": 1287.0000000000002,
+    "mill_actual_consumption_t": 1287.0000000000002,
+    "mill_downstream_unserved_t": 0.0,
+    "mill_production_coverage_ratio": 0.7592114611594417,
+    "mill_production_completion_rate": 0.7592114611594417,
+    "mill_downstream_service_completion_rate": 1.0,
+    "mill_terminal_success_rate": null,
+    "ev_departure_count": 165,
+    "ev_completed_group_count": 158,
+    "ev_departure_shortfall_total_kwh": 0.0029970643085561063,
+    "ev_departure_success_rate": 0.9575757575757575,
+    "unmet_energy_distribution_kwh": {
+      "count": 55,
+      "mean": 0.0,
+      "std": 0.0,
+      "median": 0.0,
+      "min": 0.0,
+      "max": 0.0,
+      "p05": 0.0,
+      "p25": 0.0,
+      "p75": 0.0,
+      "p95": 0.0
+    },
+    "by_microgrid": {
+      "mg1": {
+        "unmet_energy_total_kwh": 0.0,
+        "unmet_energy_mean_kwh": 0.0
+      },
+      "mg2": {
+        "unmet_energy_total_kwh": 0.0,
+        "unmet_energy_mean_kwh": 0.0
+      },
+      "mg3": {
+        "unmet_energy_total_kwh": 0.0,
+        "unmet_energy_mean_kwh": 0.0
+      }
+    },
+    "unmet_load_hour_rate_mean": 0.0,
+    "unmet_load_microgrid_hour_rate_mean": 0.0,
+    "dr_supply_infeasible_rate_mean": 0.0,
+    "dr_supply_infeasible_microgrid_hour_rate_mean": 0.0,
+    "definition": {
+      "feasible_day": "existing physical constraint feasibility; semantics unchanged",
+      "strict_feasible_day": "physical feasibility plus zero unmet/DR failures and applicable HVAC, mill, and EV service constraints under service_metrics_v2",
+      "unmet_load_hour_rate": "fraction of test-day hours where any microgrid has unmet load",
+      "unmet_load_microgrid_hour_rate": "fraction of microgrid-hours with unmet load across all microgrids",
+      "dr_supply_infeasible_rate": "fraction of test-day hours where any microgrid reports dr_supply_infeasible",
+      "dr_supply_infeasible_microgrid_hour_rate": "fraction of microgrid-hours reporting dr_supply_infeasible",
+      "unmet_tolerance_kw": 1e-07,
+      "delta_t_hours": 1.0
+    }
+  },
+  "strict_feasible_day_rate": 0.43636363636363634,
+  "unmet_energy_total_kwh": 0.0,
+  "unmet_energy_mean_kwh": 0.0,
+  "unmet_load_day_rate": 0.0,
+  "unmet_load_hour_rate_mean": 0.0,
+  "unmet_load_microgrid_hour_rate_mean": 0.0,
+  "dr_supply_infeasible_day_rate": 0.0,
+  "dr_supply_infeasible_rate_mean": 0.0,
+  "dr_supply_infeasible_microgrid_hour_rate_mean": 0.0
+}

@@ -1,0 +1,26 @@
+{
+  "old": {
+    "pairs": 329,
+    "trajectory_rows": 4402,
+    "algebraic_identity_max": 3.000800562896755e-16,
+    "temporal_and_return_identity": "passed",
+    "reward_cost_identity": "passed",
+    "source_hashes": "unchanged"
+  },
+  "latest": {
+    "pairs": 326,
+    "trajectory_rows": 4421,
+    "algebraic_identity_max": 3.0054084221298183e-16,
+    "temporal_and_return_identity": "passed",
+    "reward_cost_identity": "passed",
+    "source_hashes": "unchanged"
+  },
+  "followups": {
+    "training_dates": 60,
+    "objective_cases": 4,
+    "independent_csv_recalculation": "passed",
+    "latest_checkpoint_sha256": "dbdcb3edcfc43745fd7869211209c5c54e90bce6aa86ade7573511d6df629cdc",
+    "script_compilation": "passed",
+    "canonical_diff_empty": true
+  }
+}

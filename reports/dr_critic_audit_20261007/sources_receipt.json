@@ -1,0 +1,118 @@
+{
+  "schemaVersion": 1,
+  "items": [
+    {
+      "id": "other-dr-ranking",
+      "title": "工业磨机与 EV 都存在局部动作价值差误判",
+      "queries": [
+        {
+          "id": "effective-one-kw",
+          "source": {
+            "label": "同一 Dueling 第 1900 回合模型的固定回放",
+            "files": [
+              {
+                "label": "counterfactual_probes.csv"
+              },
+              {
+                "label": "audit_summary.json"
+              }
+            ],
+            "metricDefinitions": [
+              {
+                "label": "反向判断",
+                "definition": "候选动作相对原动作的预测 Q 差与确定性闭环累计奖励差异号。"
+              }
+            ],
+            "filters": [
+              "实际执行功率变化为 ±1 kW，容差 1e-5 kW",
+              "累计奖励差绝对值超过 0.001",
+              "每设备每月四类可控状态，共 48 个状态"
+            ],
+            "caveats": [
+              "这是中途模型的分层诊断样本，不能外推总体误判率或最终训练效果。",
+              "反事实后续动作由固定参数的确定性在线策略重新决策；TD3 训练目标含目标平滑。",
+              "无可控范围的 EV 状态和同有效功率的重复候选已剔除。"
+            ]
+          },
+          "rows": [
+            {
+              "设备": "工业磨机",
+              "可控抽样状态": 48,
+              "有明确收益差比较": 26,
+              "Q1反向判断": 6,
+              "双Q同时反向判断": 2
+            },
+            {
+              "设备": "电动车",
+              "可控抽样状态": 48,
+              "有明确收益差比较": 15,
+              "Q1反向判断": 8,
+              "双Q同时反向判断": 8
+            }
+          ],
+          "columns": [
+            "设备",
+            "可控抽样状态",
+            "有明确收益差比较",
+            "Q1反向判断",
+            "双Q同时反向判断"
+          ],
+          "methods": [
+            {
+              "language": "python",
+              "code": "local = group[np.isclose(abs(group.power_delta_kw), 1, atol=1e-5, rtol=0)]\nmeaningful = local[local.gain.abs() > .001]\nq1_wrong = int(sum(meaningful.dq1 * meaningful.gain < 0))\nboth_wrong = int(sum((meaningful.dq1 * meaningful.gain < 0) & (meaningful.dq2 * meaningful.gain < 0)))"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "ev-shifting-example",
+      "title": "EV 候选减少当前充电仍满足离站需求，却被双 Q 评为更差",
+      "queries": [
+        {
+          "id": "ev-march-example",
+          "source": {
+            "label": "EV 独立环境分支回放",
+            "files": [
+              {
+                "label": "counterfactual_probes.csv"
+              }
+            ],
+            "filters": [
+              "设备：mg3",
+              "日期：2018-03-31",
+              "小时：01:00",
+              "候选功率：54 kW"
+            ],
+            "caveats": [
+              "原动作当前功率 72 kW；仅改变当前小时动作，后续仍由原策略闭环运行。",
+              "各车群离站缺电为浮点舍入量级；服务指标采用 1e-6 容差检查。",
+              "这是单个实例，不能把所有上限充电认定为不合理。"
+            ]
+          },
+          "rows": [
+            {
+              "原功率_kW": 72,
+              "候选功率_kW": 54,
+              "真实累计奖励差": 0.1214326007847192,
+              "Q1预测差": -0.0661907196044921,
+              "Q2预测差": -0.021453857421875,
+              "峰值成本变化": -12.235550595295337,
+              "服务不恶化": true
+            }
+          ],
+          "columns": [
+            "原功率_kW",
+            "候选功率_kW",
+            "真实累计奖励差",
+            "Q1预测差",
+            "Q2预测差",
+            "峰值成本变化",
+            "服务不恶化"
+          ]
+        }
+      ]
+    }
+  ]
+}

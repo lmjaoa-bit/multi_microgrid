@@ -1,0 +1,80 @@
+[
+  {
+    "forecast_noise": false,
+    "threshold_kw": 0.1,
+    "days": 55,
+    "both_modes_days": 45,
+    "adjacent_reversals": 170,
+    "reversals_ignoring_off": 176,
+    "raw_sign_flips": 179,
+    "micro_hours": 13,
+    "off_hours": 0,
+    "mean_daily_cost": 1249.022052707251,
+    "mean_comfort_degree_hours": 1.7087386540290546
+  },
+  {
+    "forecast_noise": false,
+    "threshold_kw": 1.0,
+    "days": 55,
+    "both_modes_days": 44,
+    "adjacent_reversals": 109,
+    "reversals_ignoring_off": 143,
+    "raw_sign_flips": 179,
+    "micro_hours": 93,
+    "off_hours": 0,
+    "mean_daily_cost": 1249.022052707251,
+    "mean_comfort_degree_hours": 1.7087386540290546
+  },
+  {
+    "forecast_noise": false,
+    "threshold_kw": 3.0,
+    "days": 55,
+    "both_modes_days": 39,
+    "adjacent_reversals": 40,
+    "reversals_ignoring_off": 87,
+    "raw_sign_flips": 179,
+    "micro_hours": 256,
+    "off_hours": 0,
+    "mean_daily_cost": 1249.022052707251,
+    "mean_comfort_degree_hours": 1.7087386540290546
+  },
+  {
+    "forecast_noise": true,
+    "threshold_kw": 0.1,
+    "days": 55,
+    "both_modes_days": 49,
+    "adjacent_reversals": 193,
+    "reversals_ignoring_off": 196,
+    "raw_sign_flips": 197,
+    "micro_hours": 9,
+    "off_hours": 0,
+    "mean_daily_cost": 1252.2458545211073,
+    "mean_comfort_degree_hours": 1.7026613683625407
+  },
+  {
+    "forecast_noise": true,
+    "threshold_kw": 1.0,
+    "days": 55,
+    "both_modes_days": 44,
+    "adjacent_reversals": 122,
+    "reversals_ignoring_off": 157,
+    "raw_sign_flips": 197,
+    "micro_hours": 103,
+    "off_hours": 0,
+    "mean_daily_cost": 1252.2458545211073,
+    "mean_comfort_degree_hours": 1.7026613683625407
+  },
+  {
+    "forecast_noise": true,
+    "threshold_kw": 3.0,
+    "days": 55,
+    "both_modes_days": 42,
+    "adjacent_reversals": 55,
+    "reversals_ignoring_off": 109,
+    "raw_sign_flips": 197,
+    "micro_hours": 243,
+    "off_hours": 0,
+    "mean_daily_cost": 1252.2458545211073,
+    "mean_comfort_degree_hours": 1.7026613683625407
+  }
+]
